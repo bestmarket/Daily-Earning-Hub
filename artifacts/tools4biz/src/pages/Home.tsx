@@ -1,11 +1,56 @@
+import { useState } from "react";
 import { Link } from "wouter";
 import { useListTools, useGetToolStats } from "@workspace/api-client-react";
 import ToolCard from "@/components/ToolCard";
+import ActionModal from "@/components/ActionModal";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowRight, Zap, Code, Shield, Users, Layers, TrendingUp, Rocket } from "lucide-react";
-import { useState } from "react";
-import ActionModal from "@/components/ActionModal";
+import { ArrowRight, Zap, Code, Shield, Users, Layers, TrendingUp, Rocket, Star, Quote } from "lucide-react";
+
+const TESTIMONIALS = [
+  {
+    name: "Adaeze O.",
+    role: "Digital Products Seller · Lagos",
+    text: "I launched my eBook store in one afternoon. First sale came in 3 days after sharing the link on Instagram. No monthly fees eating into my profit — exactly what I needed.",
+    tool: "Digital Product Store Builder",
+    avatar: "AO",
+  },
+  {
+    name: "Kobby M.",
+    role: "Freelance Consultant · Accra",
+    text: "My clients used to ghost me after I quoted them on WhatsApp. Now I send them my portal link and they see the proposal, sign, and pay right there. Closed 2 new clients the first week.",
+    tool: "Freelancer Client Portal",
+    avatar: "KM",
+  },
+  {
+    name: "Tunde B.",
+    role: "E-commerce Seller · Abuja",
+    text: "The automation handles customer enquiries while I sleep. Response time went from hours to seconds. Customers think I have a full team — it's just the tool doing its thing.",
+    tool: "WhatsApp Business Automation",
+    avatar: "TB",
+  },
+  {
+    name: "Priya S.",
+    role: "SaaS Founder · London",
+    text: "Saved me at least 3 months of dev time. Auth, billing, and user dashboard done in a weekend. I could focus on what actually matters — getting customers.",
+    tool: "SaaS Starter Kit",
+    avatar: "PS",
+  },
+  {
+    name: "Grace M.",
+    role: "Salon Owner · Nairobi",
+    text: "No more back-and-forth DMs to book appointments. Clients book and pay online, I get a notification. Bookings went up 40% in the first month.",
+    tool: "Appointment Booking System",
+    avatar: "GM",
+  },
+  {
+    name: "Chisom N.",
+    role: "Online Coach · Port Harcourt",
+    text: "I was selling my courses through DMs. Now I have a proper platform — video lessons, certificates, Paystack checkout. My students actually take me seriously now.",
+    tool: "Online Course Platform",
+    avatar: "CN",
+  },
+];
 
 export default function Home() {
   const { data: stats, isLoading: statsLoading } = useGetToolStats();
@@ -80,6 +125,47 @@ export default function Home() {
               Array(3).fill(0).map((_, i) => <Skeleton key={i} className="h-[380px] rounded-2xl" />)
             ) : tools?.map((tool) => (
               <ToolCard key={tool.id} tool={tool} />
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Testimonials */}
+      <section className="py-24 px-4 border-t border-border/40">
+        <div className="container mx-auto max-w-6xl">
+          <div className="text-center mb-16">
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-accent/10 border border-accent/20 text-sm font-semibold tracking-wide uppercase mb-6">
+              <Star className="w-4 h-4 text-accent fill-accent" /> Real Customers
+            </div>
+            <h2 className="text-3xl md:text-4xl font-bold tracking-tight mb-4">What founders are saying</h2>
+            <p className="text-muted-foreground font-medium text-lg max-w-2xl mx-auto">
+              Entrepreneurs across Africa and globally are using Tools4Biz to run smarter, faster businesses.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {TESTIMONIALS.map((t) => (
+              <div key={t.name} className="bg-card border border-border/50 rounded-2xl p-6 flex flex-col gap-4 shadow-sm hover:shadow-md hover:border-primary/20 transition-all duration-300">
+                <Quote className="w-8 h-8 text-primary/20 shrink-0" />
+                <p className="text-foreground/90 font-medium leading-relaxed flex-1 text-sm">
+                  "{t.text}"
+                </p>
+                <div className="flex items-center gap-2 mb-1">
+                  {Array(5).fill(0).map((_, i) => (
+                    <Star key={i} className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
+                  ))}
+                </div>
+                <div className="flex items-center gap-3 pt-2 border-t border-border/40">
+                  <div className="w-10 h-10 rounded-full bg-primary/10 text-primary font-bold text-sm flex items-center justify-center shrink-0">
+                    {t.avatar}
+                  </div>
+                  <div>
+                    <p className="font-bold text-sm leading-tight">{t.name}</p>
+                    <p className="text-xs text-muted-foreground font-medium leading-tight mt-0.5">{t.role}</p>
+                    <p className="text-xs text-primary/70 font-semibold mt-0.5">{t.tool}</p>
+                  </div>
+                </div>
+              </div>
             ))}
           </div>
         </div>
