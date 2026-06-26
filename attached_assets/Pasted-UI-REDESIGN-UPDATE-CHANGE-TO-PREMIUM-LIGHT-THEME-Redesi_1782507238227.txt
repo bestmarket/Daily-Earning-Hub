@@ -1,0 +1,127 @@
+UI REDESIGN UPDATE – CHANGE TO PREMIUM LIGHT THEME
+Redesign the entire website from the current dark theme to a premium light SaaS theme while keeping the existing functionality intact.
+The objective is to increase trust and conversions among business owners, entrepreneurs, startups, restaurants, schools, churches, agencies, and professionals.
+Design Direction
+The website should feel like a premium SaaS product similar in quality to Canva, Notion, ClickUp, Linear (light mode), and Stripe.
+The design must look expensive, modern, and trustworthy.
+Avoid generic templates.
+Do not use a plain white website. Use subtle gradients, shadows, and premium spacing.
+Color Palette
+Primary Background:
+#FFFFFF
+Secondary Background:
+#F8FAFC
+Section Background:
+#F3F4F6
+Primary Brand Color:
+#7C3AED
+Secondary Accent:
+#6366F1
+Highlight Color:
+#8B5CF6
+Text:
+#111827
+Secondary Text:
+#6B7280
+Borders:
+#E5E7EB
+Cards:
+White with soft shadows
+Success:
+#10B981
+Warning:
+#F59E0B
+Error:
+#EF4444
+Hero Section
+Completely redesign the hero.
+Create a large premium hero with:
+Large headline
+Supporting text
+Animated dashboard illustration
+Floating cards
+Subtle moving background shapes
+Professional gradients
+Beautiful CTA buttons
+Everything should immediately communicate a premium software company.
+Typography
+Use modern typography.
+Large headings.
+Comfortable spacing.
+Readable paragraphs.
+Premium font weights.
+Cards
+Every service card should have
+Rounded corners
+Soft shadows
+Hover animation
+Small floating effect
+Beautiful icon
+Gradient accent
+Professional spacing
+Smooth transition
+Buttons
+Create premium buttons.
+Primary buttons should use a purple gradient.
+Buttons should have
+Hover lift
+Glow effect
+Shadow
+Smooth animation
+Animations
+Add tasteful animations only.
+Fade in
+Slide up
+Hover lift
+Floating objects
+Animated counters
+Smooth page transitions
+No distracting effects.
+Homepage Sections
+Redesign every section to feel premium.
+Hero
+Services
+Pricing
+Statistics
+Testimonials
+FAQ
+Contact
+Footer
+Each section should have alternating light backgrounds for visual separation.
+Graphics
+Replace simple icons with premium illustrations.
+Add abstract background graphics.
+Use soft blurred circles.
+Gradient meshes.
+Floating UI elements.
+Trust
+Add trust badges
+Secure
+Fast Delivery
+Custom Built
+Mobile Friendly
+AI Powered
+Mobile
+Optimize every section for mobile.
+Large buttons.
+Readable fonts.
+Comfortable spacing.
+No horizontal scrolling.
+Perfect responsiveness.
+Conversion
+The website should immediately answer
+What do you build?
+Who is it for?
+Why should someone trust you?
+How can they start?
+Every section should guide visitors toward requesting a project.
+Performance
+Keep animations lightweight.
+Optimize images.
+Lazy load media.
+Maintain excellent loading speed.
+Final Goal
+The final design should feel like a $100,000 software company website, not a generic freelancer portfolio.
+Visitors should immediately think:
+"This company builds premium business software, and I want them to build mine."
+Maintain brand consistency with Selovox's purple identity while creating a clean, premium, high-converting light theme that inspires trust and encourages visitors to become paying clients.

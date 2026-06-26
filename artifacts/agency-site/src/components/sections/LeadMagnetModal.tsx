@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { CheckCircle2, Loader2, Sparkles, ArrowRight } from "lucide-react";
+import { CheckCircle2, Loader2, Sparkles, ArrowRight, AlertCircle } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 const industries = [
@@ -18,22 +18,25 @@ const budgets = [
   "Under $500", "$500 – $1,000", "$1,000 – $3,000", "$3,000 – $10,000", "$10,000+",
 ];
 
-const recommendations: Record<string, { tool: string; features: string[]; timeline: string; benefits: string[]; tech: string[]; investment: string }> = {
-  default: {
-    tool: "Custom Business Management Platform",
-    features: ["Online booking & scheduling", "Customer portal & self-service", "Automated notifications", "Admin dashboard & analytics", "Payment integration", "Mobile-optimized interface"],
-    timeline: "2–3 weeks",
-    benefits: ["30–50% more bookings", "Reduced admin time by 60%", "24/7 customer self-service", "Automated follow-ups"],
-    tech: ["React", "Node.js", "PostgreSQL", "Stripe"],
-    investment: "$299 – $599",
-  },
+type Rec = {
+  tool: string;
+  features: string[];
+  timeline: string;
+  benefits: string[];
+  tech: string[];
+  investment: string;
+  reasoning?: string;
 };
 
-type Step = 1 | 2 | 3 | 4 | "loading" | "result";
+type Step = 1 | 2 | 3 | 4 | "loading" | "result" | "error";
+
+const API_BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 export default function LeadMagnetModal() {
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState<Step>(1);
+  const [rec, setRec] = useState<Rec | null>(null);
+  const [errorMsg, setErrorMsg] = useState("");
   const [form, setForm] = useState({
     businessName: "",
     industry: "",
@@ -50,6 +53,8 @@ export default function LeadMagnetModal() {
     const handler = () => {
       setOpen(true);
       setStep(1);
+      setRec(null);
+      setErrorMsg("");
     };
     window.addEventListener("open-lead-magnet", handler);
     return () => window.removeEventListener("open-lead-magnet", handler);
@@ -61,12 +66,32 @@ export default function LeadMagnetModal() {
   const setSelect = (field: string) => (value: string) =>
     setForm((prev) => ({ ...prev, [field]: value }));
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     setStep("loading");
-    setTimeout(() => setStep("result"), 2500);
+    setErrorMsg("");
+    try {
+      const res = await fetch(`${API_BASE}/api/ai/recommend`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          businessName: form.businessName,
+          industry: form.industry,
+          description: form.description,
+          challenges: form.challenges,
+          goal: form.goal,
+          budget: form.budget,
+        }),
+      });
+      if (!res.ok) throw new Error("Request failed");
+      const data: Rec = await res.json();
+      setRec(data);
+      setStep("result");
+    } catch {
+      setErrorMsg("Something went wrong generating your recommendation. Please try again.");
+      setStep("error");
+    }
   };
 
-  const rec = recommendations.default;
   const progress = step === 1 ? 25 : step === 2 ? 50 : step === 3 ? 75 : step === 4 ? 100 : 100;
 
   return (
@@ -78,10 +103,10 @@ export default function LeadMagnetModal() {
         <div className="p-6 pb-0">
           <div className="flex items-center gap-2 mb-2">
             <Sparkles className="w-5 h-5 text-primary" />
-            <span className="text-sm font-semibold text-primary">Free Business Tool Recommendation</span>
+            <span className="text-sm font-semibold text-primary">AI-Powered Business Tool Recommendation</span>
           </div>
           <h2 className="text-xl font-bold mb-1">Get Your Free Custom Software Idea</h2>
-          <p className="text-sm text-muted-foreground">Tell us about your business and we'll recommend the perfect software solution.</p>
+          <p className="text-sm text-muted-foreground">Tell us about your business and our AI will recommend the perfect software solution.</p>
         </div>
 
         {/* Progress bar */}
@@ -107,9 +132,9 @@ export default function LeadMagnetModal() {
             {step === 1 && (
               <motion.div key="step1" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
                 <h3 className="font-semibold">Business Info</h3>
-                <Input placeholder="Business name *" value={form.businessName} onChange={set("businessName")} data-testid="input-business-name" />
+                <Input placeholder="Business name *" value={form.businessName} onChange={set("businessName")} />
                 <Select onValueChange={setSelect("industry")} value={form.industry}>
-                  <SelectTrigger data-testid="select-industry">
+                  <SelectTrigger>
                     <SelectValue placeholder="Select your industry *" />
                   </SelectTrigger>
                   <SelectContent>
@@ -118,8 +143,8 @@ export default function LeadMagnetModal() {
                     ))}
                   </SelectContent>
                 </Select>
-                <Input placeholder="Website URL (optional)" value={form.website} onChange={set("website")} data-testid="input-website" />
-                <Button className="w-full" disabled={!form.businessName || !form.industry} onClick={() => setStep(2)} data-testid="button-step1-next">
+                <Input placeholder="Website URL (optional)" value={form.website} onChange={set("website")} />
+                <Button className="w-full" disabled={!form.businessName || !form.industry} onClick={() => setStep(2)}>
                   Continue <ArrowRight className="ml-2 w-4 h-4" />
                 </Button>
               </motion.div>
@@ -128,11 +153,11 @@ export default function LeadMagnetModal() {
             {step === 2 && (
               <motion.div key="step2" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
                 <h3 className="font-semibold">About Your Business</h3>
-                <Textarea placeholder="Describe your business and what you do *" value={form.description} onChange={set("description")} rows={3} data-testid="textarea-description" />
-                <Textarea placeholder="What are your biggest business challenges? *" value={form.challenges} onChange={set("challenges")} rows={3} data-testid="textarea-challenges" />
+                <Textarea placeholder="Describe your business and what you do *" value={form.description} onChange={set("description")} rows={3} />
+                <Textarea placeholder="What are your biggest business challenges? *" value={form.challenges} onChange={set("challenges")} rows={3} />
                 <div className="flex gap-3">
                   <Button variant="outline" onClick={() => setStep(1)} className="flex-1">Back</Button>
-                  <Button className="flex-1" disabled={!form.description || !form.challenges} onClick={() => setStep(3)} data-testid="button-step2-next">
+                  <Button className="flex-1" disabled={!form.description || !form.challenges} onClick={() => setStep(3)}>
                     Continue <ArrowRight className="ml-2 w-4 h-4" />
                   </Button>
                 </div>
@@ -142,9 +167,9 @@ export default function LeadMagnetModal() {
             {step === 3 && (
               <motion.div key="step3" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
                 <h3 className="font-semibold">Goals & Budget</h3>
-                <Textarea placeholder="What is your main business goal? (e.g. get more customers, automate bookings, reduce admin work) *" value={form.goal} onChange={set("goal")} rows={3} data-testid="textarea-goal" />
+                <Textarea placeholder="What is your main business goal? *" value={form.goal} onChange={set("goal")} rows={3} />
                 <Select onValueChange={setSelect("budget")} value={form.budget}>
-                  <SelectTrigger data-testid="select-budget">
+                  <SelectTrigger>
                     <SelectValue placeholder="Estimated budget *" />
                   </SelectTrigger>
                   <SelectContent>
@@ -155,7 +180,7 @@ export default function LeadMagnetModal() {
                 </Select>
                 <div className="flex gap-3">
                   <Button variant="outline" onClick={() => setStep(2)} className="flex-1">Back</Button>
-                  <Button className="flex-1" disabled={!form.goal || !form.budget} onClick={() => setStep(4)} data-testid="button-step3-next">
+                  <Button className="flex-1" disabled={!form.goal || !form.budget} onClick={() => setStep(4)}>
                     Continue <ArrowRight className="ml-2 w-4 h-4" />
                   </Button>
                 </div>
@@ -166,11 +191,11 @@ export default function LeadMagnetModal() {
               <motion.div key="step4" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
                 <h3 className="font-semibold">Contact Details</h3>
                 <p className="text-sm text-muted-foreground">We'll send your recommendation here and be ready to answer any questions.</p>
-                <Input placeholder="WhatsApp number (with country code) *" value={form.whatsapp} onChange={set("whatsapp")} data-testid="input-whatsapp" />
-                <Input type="email" placeholder="Email address *" value={form.email} onChange={set("email")} data-testid="input-email" />
+                <Input placeholder="WhatsApp number (with country code) *" value={form.whatsapp} onChange={set("whatsapp")} />
+                <Input type="email" placeholder="Email address *" value={form.email} onChange={set("email")} />
                 <div className="flex gap-3">
                   <Button variant="outline" onClick={() => setStep(3)} className="flex-1">Back</Button>
-                  <Button className="flex-1" disabled={!form.whatsapp || !form.email} onClick={handleSubmit} data-testid="button-submit">
+                  <Button className="flex-1" disabled={!form.whatsapp || !form.email} onClick={handleSubmit}>
                     Get My Free Recommendation
                   </Button>
                 </div>
@@ -186,23 +211,35 @@ export default function LeadMagnetModal() {
                   <div className="absolute inset-0 rounded-full bg-primary/20 animate-ping" />
                 </div>
                 <div>
-                  <h3 className="font-semibold text-base mb-1">Analyzing Your Business...</h3>
-                  <p className="text-sm text-muted-foreground">Generating your custom software recommendation</p>
+                  <h3 className="font-semibold text-base mb-1">AI is Analyzing Your Business...</h3>
+                  <p className="text-sm text-muted-foreground">Generating your personalized software recommendation</p>
                 </div>
               </motion.div>
             )}
 
-            {step === "result" && (
+            {step === "error" && (
+              <motion.div key="error" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="py-10 flex flex-col items-center gap-4 text-center">
+                <AlertCircle className="w-10 h-10 text-destructive" />
+                <div>
+                  <h3 className="font-semibold mb-1">Something went wrong</h3>
+                  <p className="text-sm text-muted-foreground mb-4">{errorMsg}</p>
+                  <Button onClick={() => setStep(4)}>Try Again</Button>
+                </div>
+              </motion.div>
+            )}
+
+            {step === "result" && rec && (
               <motion.div key="result" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
                 <div className="flex items-center gap-2 text-green-400">
                   <CheckCircle2 className="w-5 h-5" />
-                  <span className="font-semibold">Your Recommendation is Ready!</span>
+                  <span className="font-semibold">Your AI Recommendation is Ready!</span>
                 </div>
 
                 <div className="rounded-xl border border-primary/30 bg-primary/5 p-5 space-y-4">
                   <div>
                     <div className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Best Software For You</div>
                     <h3 className="font-bold text-base">{rec.tool}</h3>
+                    {rec.reasoning && <p className="text-sm text-muted-foreground mt-1">{rec.reasoning}</p>}
                   </div>
                   <div>
                     <div className="text-xs text-muted-foreground uppercase tracking-wide mb-2">Recommended Features</div>
@@ -250,7 +287,7 @@ export default function LeadMagnetModal() {
                   <p className="text-xs text-muted-foreground mb-3">
                     For just $1, get a complete project blueprint including UI layouts, feature specs, development roadmap, cost breakdown, and growth strategy.
                   </p>
-                  <Button size="sm" className="w-full bg-accent hover:bg-accent/90 shadow-lg shadow-accent/20" data-testid="button-blueprint">
+                  <Button size="sm" className="w-full bg-accent hover:bg-accent/90 shadow-lg shadow-accent/20">
                     Get Full Blueprint for $1 <ArrowRight className="ml-2 w-3.5 h-3.5" />
                   </Button>
                 </div>
@@ -262,7 +299,6 @@ export default function LeadMagnetModal() {
                     const el = document.getElementById("faq");
                     el?.scrollIntoView({ behavior: "smooth" });
                   }}
-                  data-testid="button-result-start-project"
                 >
                   Start My Full Project
                 </Button>
