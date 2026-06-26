@@ -60,3 +60,27 @@ id = "GHbd1NERHN0bkngte-WwK"
 uri = "file://artifacts/tools4biz/src/assets/tools/invoice-tracker.png"
 type = "image"
 title = "invoice payment tracker"
+
+[[generated]]
+id = "dYTEeHVpFlSO7LVePbViJ"
+uri = "file://artifacts/agency-site/public/showcase-restaurant.png"
+type = "image"
+title = "Restaurant UI Mockup"
+
+[[generated]]
+id = "Y9ekBmmndulHfOTzM9iDa"
+uri = "file://artifacts/agency-site/public/showcase-realestate.png"
+type = "image"
+title = "Real Estate UI Mockup"
+
+[[generated]]
+id = "_Kc_4pmADkDpfaFjd1OcG"
+uri = "file://artifacts/agency-site/public/showcase-fitness.png"
+type = "image"
+title = "Fitness App UI Mockup"
+
+[[generated]]
+id = "lrr9aUkcVt0xn5xh-cjvG"
+uri = "file://artifacts/agency-site/public/showcase-dental.png"
+type = "image"
+title = "Dental UI Mockup"
