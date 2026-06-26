@@ -18,7 +18,7 @@ export default function Tools() {
     t.description.toLowerCase().includes(search.toLowerCase())
   );
 
-  const categories = ["all", "Marketing", "Sales", "Development", "Productivity", "Design", "Data"];
+  const categories = ["all", "Make Money Online", "Grow on Social Media", "Start a SaaS", "Lead Generation", "Sell Digital Products", "Business Growth"];
 
   return (
     <div className="flex-1 w-full bg-background animate-in fade-in duration-500">

@@ -41,6 +41,17 @@ export const ListToolsResponse = zod.array(ListToolsResponseItem)
 
 
 /**
+ * @summary Marketplace stats
+ */
+export const GetToolStatsResponse = zod.object({
+  "totalTools": zod.number(),
+  "totalCustomers": zod.number(),
+  "totalCategories": zod.number(),
+  "upcomingTools": zod.number()
+})
+
+
+/**
  * @summary Get a single tool
  */
 export const GetToolParams = zod.object({
@@ -63,18 +74,7 @@ export const GetToolResponse = zod.object({
 
 
 /**
- * @summary Get marketplace stats (total tools, customers, categories)
- */
-export const GetToolStatsResponse = zod.object({
-  "totalTools": zod.number(),
-  "totalCustomers": zod.number(),
-  "totalCategories": zod.number(),
-  "upcomingTools": zod.number()
-})
-
-
-/**
- * @summary Join the waitlist or express interest in a tool
+ * @summary Join the waitlist or express interest
  */
 export const JoinWaitlistBody = zod.object({
   "email": zod.string().email(),
@@ -93,10 +93,203 @@ export const JoinWaitlistResponse = zod.object({
 
 
 /**
- * @summary Get total waitlist signups count
+ * @summary Total waitlist signups
  */
 export const GetWaitlistCountResponse = zod.object({
   "count": zod.number()
+})
+
+
+/**
+ * @summary Submit a custom tool build request
+ */
+export const SubmitCustomRequestBody = zod.object({
+  "name": zod.string().nullish(),
+  "email": zod.string().email(),
+  "businessType": zod.string().nullish(),
+  "description": zod.string(),
+  "budget": zod.string().nullish(),
+  "whatsapp": zod.string().nullish()
+})
+
+export const SubmitCustomRequestResponse = zod.object({
+  "id": zod.number(),
+  "name": zod.string().nullish(),
+  "email": zod.string(),
+  "businessType": zod.string().nullish(),
+  "description": zod.string(),
+  "budget": zod.string().nullish(),
+  "whatsapp": zod.string().nullish(),
+  "status": zod.string(),
+  "createdAt": zod.string()
+})
+
+
+/**
+ * @summary Admin dashboard summary
+ */
+export const GetAdminSummaryResponse = zod.object({
+  "totalTools": zod.number(),
+  "totalWaitlist": zod.number(),
+  "totalCustomRequests": zod.number(),
+  "newCustomRequests": zod.number(),
+  "paidRequests": zod.number(),
+  "totalRevenue": zod.number()
+})
+
+
+/**
+ * @summary All waitlist entries
+ */
+export const GetAdminWaitlistResponseItem = zod.object({
+  "id": zod.number(),
+  "email": zod.string(),
+  "name": zod.string().nullish(),
+  "toolId": zod.number().nullish(),
+  "toolName": zod.string().nullish(),
+  "message": zod.string().nullish(),
+  "createdAt": zod.string()
+})
+export const GetAdminWaitlistResponse = zod.array(GetAdminWaitlistResponseItem)
+
+
+/**
+ * @summary All custom build requests
+ */
+export const GetAdminCustomRequestsResponseItem = zod.object({
+  "id": zod.number(),
+  "name": zod.string().nullish(),
+  "email": zod.string(),
+  "businessType": zod.string().nullish(),
+  "description": zod.string(),
+  "budget": zod.string().nullish(),
+  "whatsapp": zod.string().nullish(),
+  "status": zod.string(),
+  "paymentMethod": zod.string().nullish(),
+  "paymentAmount": zod.number().nullish(),
+  "notes": zod.string().nullish(),
+  "createdAt": zod.string()
+})
+export const GetAdminCustomRequestsResponse = zod.array(GetAdminCustomRequestsResponseItem)
+
+
+/**
+ * @summary Update a custom request status or payment
+ */
+export const UpdateCustomRequestParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateCustomRequestBody = zod.object({
+  "status": zod.enum(['new', 'contacted', 'quoted', 'paid', 'delivered', 'cancelled']).optional(),
+  "paymentMethod": zod.string().nullish(),
+  "paymentAmount": zod.number().nullish(),
+  "notes": zod.string().nullish()
+})
+
+export const UpdateCustomRequestResponse = zod.object({
+  "id": zod.number(),
+  "name": zod.string().nullish(),
+  "email": zod.string(),
+  "businessType": zod.string().nullish(),
+  "description": zod.string(),
+  "budget": zod.string().nullish(),
+  "whatsapp": zod.string().nullish(),
+  "status": zod.string(),
+  "paymentMethod": zod.string().nullish(),
+  "paymentAmount": zod.number().nullish(),
+  "notes": zod.string().nullish(),
+  "createdAt": zod.string()
+})
+
+
+/**
+ * @summary Add a new tool listing
+ */
+export const CreateToolBody = zod.object({
+  "name": zod.string(),
+  "description": zod.string(),
+  "category": zod.string(),
+  "price": zod.number(),
+  "currency": zod.string().optional(),
+  "status": zod.enum(['available', 'coming_soon', 'beta']).optional(),
+  "featured": zod.boolean().optional(),
+  "emoji": zod.string().optional(),
+  "tagline": zod.string().optional(),
+  "features": zod.array(zod.string()).optional()
+})
+
+export const CreateToolResponse = zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "description": zod.string(),
+  "category": zod.string(),
+  "price": zod.number(),
+  "currency": zod.string(),
+  "status": zod.enum(['available', 'coming_soon', 'beta']),
+  "featured": zod.boolean(),
+  "emoji": zod.string().nullish(),
+  "tagline": zod.string().nullish(),
+  "features": zod.array(zod.string()).optional()
+})
+
+
+/**
+ * @summary Update a tool listing
+ */
+export const UpdateToolParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateToolBody = zod.object({
+  "name": zod.string().optional(),
+  "description": zod.string().optional(),
+  "category": zod.string().optional(),
+  "price": zod.number().optional(),
+  "currency": zod.string().optional(),
+  "status": zod.enum(['available', 'coming_soon', 'beta']).optional(),
+  "featured": zod.boolean().optional(),
+  "emoji": zod.string().optional(),
+  "tagline": zod.string().optional(),
+  "features": zod.array(zod.string()).optional()
+})
+
+export const UpdateToolResponse = zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "description": zod.string(),
+  "category": zod.string(),
+  "price": zod.number(),
+  "currency": zod.string(),
+  "status": zod.enum(['available', 'coming_soon', 'beta']),
+  "featured": zod.boolean(),
+  "emoji": zod.string().nullish(),
+  "tagline": zod.string().nullish(),
+  "features": zod.array(zod.string()).optional()
+})
+
+
+/**
+ * @summary Delete a tool listing
+ */
+export const DeleteToolParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeleteToolResponse = zod.object({
+  "success": zod.boolean()
+})
+
+
+/**
+ * @summary Verify admin password and return token
+ */
+export const AdminLoginBody = zod.object({
+  "password": zod.string()
+})
+
+export const AdminLoginResponse = zod.object({
+  "token": zod.string()
 })
 
 

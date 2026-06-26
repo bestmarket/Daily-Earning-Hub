@@ -3,7 +3,7 @@ import { useListTools, useGetToolStats } from "@workspace/api-client-react";
 import ToolCard from "@/components/ToolCard";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowRight, Zap, Code, Shield, Users, Layers, TrendingUp } from "lucide-react";
+import { ArrowRight, Zap, Code, Shield, Users, Layers, TrendingUp, Rocket } from "lucide-react";
 import { useState } from "react";
 import ActionModal from "@/components/ActionModal";
 
@@ -85,8 +85,27 @@ export default function Home() {
         </div>
       </section>
 
+      {/* Custom Request Section */}
+      <section className="py-24 px-4 border-t border-border/40 bg-primary text-primary-foreground relative overflow-hidden">
+        <div className="absolute inset-0 opacity-10 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-white via-transparent to-transparent pointer-events-none"></div>
+        <div className="container mx-auto max-w-5xl text-center relative z-10">
+          <div className="w-20 h-20 bg-white/10 rounded-3xl mx-auto flex items-center justify-center mb-8 backdrop-blur-sm border border-white/20">
+            <Rocket className="w-10 h-10 text-white" />
+          </div>
+          <h2 className="text-4xl md:text-5xl font-extrabold tracking-tight mb-6">Need a custom tool?</h2>
+          <p className="text-xl md:text-2xl font-medium max-w-3xl mx-auto leading-relaxed mb-12 text-primary-foreground/90">
+            We build ANY business tool for you. Describe what you need, get a quote in 24 hours. No hidden fees, just fast delivery and premium quality.
+          </p>
+          <Link href="/custom-request">
+            <Button size="lg" className="bg-white text-primary hover:bg-white/90 h-14 px-10 rounded-full text-lg font-bold shadow-xl hover:-translate-y-1 transition-all">
+              Request a Custom Build
+            </Button>
+          </Link>
+        </div>
+      </section>
+
       {/* Trust section */}
-      <section className="py-24 px-4 border-t border-border/40">
+      <section className="py-24 px-4">
         <div className="container mx-auto max-w-5xl text-center">
           <Shield className="w-16 h-16 text-primary mx-auto mb-6" />
           <h2 className="text-3xl md:text-4xl font-bold tracking-tight mb-6">Built different.</h2>

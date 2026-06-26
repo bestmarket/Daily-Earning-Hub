@@ -9,11 +9,10 @@ servers:
     description: Base API path
 tags:
   - name: health
-    description: Health operations
   - name: tools
-    description: Tool marketplace operations
   - name: waitlist
-    description: Waitlist/early access operations
+  - name: custom-requests
+  - name: admin
 paths:
   /healthz:
     get:
@@ -52,6 +51,19 @@ paths:
                 items:
                   $ref: "#/components/schemas/Tool"
 
+  /tools/stats:
+    get:
+      operationId: getToolStats
+      tags: [tools]
+      summary: Marketplace stats
+      responses:
+        "200":
+          description: Stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MarketplaceStats"
+
   /tools/{id}:
     get:
       operationId: getTool
@@ -73,24 +85,11 @@ paths:
         "404":
           description: Not found
 
-  /tools/stats:
-    get:
-      operationId: getToolStats
-      tags: [tools]
-      summary: Get marketplace stats (total tools, customers, categories)
-      responses:
-        "200":
-          description: Marketplace stats
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MarketplaceStats"
-
   /waitlist:
     post:
       operationId: joinWaitlist
       tags: [waitlist]
-      summary: Join the waitlist or express interest in a tool
+      summary: Join the waitlist or express interest
       requestBody:
         required: true
         content:
@@ -99,7 +98,7 @@ paths:
               $ref: "#/components/schemas/WaitlistInput"
       responses:
         "201":
-          description: Successfully joined
+          description: Joined
           content:
             application/json:
               schema:
@@ -109,24 +108,224 @@ paths:
     get:
       operationId: getWaitlistCount
       tags: [waitlist]
-      summary: Get total waitlist signups count
+      summary: Total waitlist signups
       responses:
         "200":
-          description: Waitlist count
+          description: Count
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/WaitlistCount"
 
+  /custom-requests:
+    post:
+      operationId: submitCustomRequest
+      tags: [custom-requests]
+      summary: Submit a custom tool build request
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomRequestInput"
+      responses:
+        "201":
+          description: Request submitted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomRequest"
+
+  /admin/summary:
+    get:
+      operationId: getAdminSummary
+      tags: [admin]
+      summary: Admin dashboard summary
+      security:
+        - AdminToken: []
+      responses:
+        "200":
+          description: Summary stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminSummary"
+        "401":
+          description: Unauthorized
+
+  /admin/waitlist:
+    get:
+      operationId: getAdminWaitlist
+      tags: [admin]
+      summary: All waitlist entries
+      security:
+        - AdminToken: []
+      responses:
+        "200":
+          description: Waitlist entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AdminWaitlistEntry"
+        "401":
+          description: Unauthorized
+
+  /admin/custom-requests:
+    get:
+      operationId: getAdminCustomRequests
+      tags: [admin]
+      summary: All custom build requests
+      security:
+        - AdminToken: []
+      responses:
+        "200":
+          description: Custom requests
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AdminCustomRequest"
+        "401":
+          description: Unauthorized
+
+  /admin/custom-requests/{id}:
+    patch:
+      operationId: updateCustomRequest
+      tags: [admin]
+      summary: Update a custom request status or payment
+      security:
+        - AdminToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomRequestUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminCustomRequest"
+        "401":
+          description: Unauthorized
+
+  /admin/tools:
+    post:
+      operationId: createTool
+      tags: [admin]
+      summary: Add a new tool listing
+      security:
+        - AdminToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ToolInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tool"
+        "401":
+          description: Unauthorized
+
+  /admin/tools/{id}:
+    patch:
+      operationId: updateTool
+      tags: [admin]
+      summary: Update a tool listing
+      security:
+        - AdminToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ToolUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tool"
+        "401":
+          description: Unauthorized
+    delete:
+      operationId: deleteTool
+      tags: [admin]
+      summary: Delete a tool listing
+      security:
+        - AdminToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeleteResult"
+        "401":
+          description: Unauthorized
+
+  /admin/login:
+    post:
+      operationId: adminLogin
+      tags: [admin]
+      summary: Verify admin password and return token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminLoginInput"
+      responses:
+        "200":
+          description: Login success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminLoginResult"
+        "401":
+          description: Wrong password
+
 components:
+  securitySchemes:
+    AdminToken:
+      type: http
+      scheme: bearer
   schemas:
     HealthStatus:
       type: object
+      required: [status]
       properties:
         status:
           type: string
-      required:
-        - status
 
     Tool:
       type: object
@@ -153,6 +352,61 @@ components:
           type: ["string", "null"]
         tagline:
           type: ["string", "null"]
+        features:
+          type: array
+          items:
+            type: string
+
+    ToolInput:
+      type: object
+      required: [name, description, category, price]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+        price:
+          type: number
+        currency:
+          type: string
+        status:
+          type: string
+          enum: [available, coming_soon, beta]
+        featured:
+          type: boolean
+        emoji:
+          type: string
+        tagline:
+          type: string
+        features:
+          type: array
+          items:
+            type: string
+
+    ToolUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+        price:
+          type: number
+        currency:
+          type: string
+        status:
+          type: string
+          enum: [available, coming_soon, beta]
+        featured:
+          type: boolean
+        emoji:
+          type: string
+        tagline:
+          type: string
         features:
           type: array
           items:
@@ -206,3 +460,143 @@ components:
       properties:
         count:
           type: integer
+
+    CustomRequestInput:
+      type: object
+      required: [email, description]
+      properties:
+        name:
+          type: ["string", "null"]
+        email:
+          type: string
+          format: email
+        businessType:
+          type: ["string", "null"]
+        description:
+          type: string
+        budget:
+          type: ["string", "null"]
+        whatsapp:
+          type: ["string", "null"]
+
+    CustomRequest:
+      type: object
+      required: [id, email, description, status, createdAt]
+      properties:
+        id:
+          type: integer
+        name:
+          type: ["string", "null"]
+        email:
+          type: string
+        businessType:
+          type: ["string", "null"]
+        description:
+          type: string
+        budget:
+          type: ["string", "null"]
+        whatsapp:
+          type: ["string", "null"]
+        status:
+          type: string
+        createdAt:
+          type: string
+
+    CustomRequestUpdate:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [new, contacted, quoted, paid, delivered, cancelled]
+        paymentMethod:
+          type: ["string", "null"]
+        paymentAmount:
+          type: ["number", "null"]
+        notes:
+          type: ["string", "null"]
+
+    AdminSummary:
+      type: object
+      required: [totalTools, totalWaitlist, totalCustomRequests, newCustomRequests, paidRequests, totalRevenue]
+      properties:
+        totalTools:
+          type: integer
+        totalWaitlist:
+          type: integer
+        totalCustomRequests:
+          type: integer
+        newCustomRequests:
+          type: integer
+        paidRequests:
+          type: integer
+        totalRevenue:
+          type: number
+
+    AdminWaitlistEntry:
+      type: object
+      required: [id, email, createdAt]
+      properties:
+        id:
+          type: integer
+        email:
+          type: string
+        name:
+          type: ["string", "null"]
+        toolId:
+          type: ["integer", "null"]
+        toolName:
+          type: ["string", "null"]
+        message:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+
+    AdminCustomRequest:
+      type: object
+      required: [id, email, description, status, createdAt]
+      properties:
+        id:
+          type: integer
+        name:
+          type: ["string", "null"]
+        email:
+          type: string
+        businessType:
+          type: ["string", "null"]
+        description:
+          type: string
+        budget:
+          type: ["string", "null"]
+        whatsapp:
+          type: ["string", "null"]
+        status:
+          type: string
+        paymentMethod:
+          type: ["string", "null"]
+        paymentAmount:
+          type: ["number", "null"]
+        notes:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+
+    AdminLoginInput:
+      type: object
+      required: [password]
+      properties:
+        password:
+          type: string
+
+    AdminLoginResult:
+      type: object
+      required: [token]
+      properties:
+        token:
+          type: string
+
+    DeleteResult:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean

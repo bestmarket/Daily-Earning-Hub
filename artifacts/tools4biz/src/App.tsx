@@ -8,6 +8,8 @@ import Home from "@/pages/Home";
 import Tools from "@/pages/Tools";
 import ToolDetail from "@/pages/ToolDetail";
 import About from "@/pages/About";
+import CustomRequest from "@/pages/CustomRequest";
+import Admin from "@/pages/Admin";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -26,6 +28,8 @@ function Router() {
         <Route path="/tools" component={Tools} />
         <Route path="/tools/:id" component={ToolDetail} />
         <Route path="/about" component={About} />
+        <Route path="/custom-request" component={CustomRequest} />
+        <Route path="/admin" component={Admin} />
         <Route component={NotFound} />
       </Switch>
     </Layout>

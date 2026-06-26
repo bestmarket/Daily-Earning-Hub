@@ -1,10 +1,15 @@
 import { ReactNode } from "react";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { useGetWaitlistCount } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 
 export default function Layout({ children }: { children: ReactNode }) {
   const { data: waitlistData } = useGetWaitlistCount();
+  const [location] = useLocation();
+
+  if (location.startsWith('/admin')) {
+    return <div className="min-h-screen flex flex-col font-sans selection:bg-primary selection:text-white">{children}</div>;
+  }
 
   return (
     <div className="min-h-screen flex flex-col font-sans selection:bg-primary selection:text-white">

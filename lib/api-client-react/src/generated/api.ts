@@ -20,10 +20,21 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  AdminCustomRequest,
+  AdminLoginInput,
+  AdminLoginResult,
+  AdminSummary,
+  AdminWaitlistEntry,
+  CustomRequest,
+  CustomRequestInput,
+  CustomRequestUpdate,
+  DeleteResult,
   HealthStatus,
   ListToolsParams,
   MarketplaceStats,
   Tool,
+  ToolInput,
+  ToolUpdate,
   WaitlistCount,
   WaitlistEntry,
   WaitlistInput
@@ -217,6 +228,83 @@ export function useListTools<TData = Awaited<ReturnType<typeof listTools>>, TErr
 
 
 
+export const getGetToolStatsUrl = () => {
+
+
+
+
+  return `/api/tools/stats`
+}
+
+/**
+ * @summary Marketplace stats
+ */
+export const getToolStats = async ( options?: RequestInit): Promise<MarketplaceStats> => {
+
+  return customFetch<MarketplaceStats>(getGetToolStatsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetToolStatsQueryKey = () => {
+    return [
+    `/api/tools/stats`
+    ] as const;
+    }
+
+
+export const getGetToolStatsQueryOptions = <TData = Awaited<ReturnType<typeof getToolStats>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getToolStats>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetToolStatsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getToolStats>>> = ({ signal }) => getToolStats({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getToolStats>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetToolStatsQueryResult = NonNullable<Awaited<ReturnType<typeof getToolStats>>>
+export type GetToolStatsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Marketplace stats
+ */
+
+export function useGetToolStats<TData = Awaited<ReturnType<typeof getToolStats>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getToolStats>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetToolStatsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
 export const getGetToolUrl = (id: number,) => {
 
 
@@ -294,83 +382,6 @@ export function useGetTool<TData = Awaited<ReturnType<typeof getTool>>, TError =
 
 
 
-export const getGetToolStatsUrl = () => {
-
-
-
-
-  return `/api/tools/stats`
-}
-
-/**
- * @summary Get marketplace stats (total tools, customers, categories)
- */
-export const getToolStats = async ( options?: RequestInit): Promise<MarketplaceStats> => {
-
-  return customFetch<MarketplaceStats>(getGetToolStatsUrl(),
-  {
-    ...options,
-    method: 'GET'
-
-
-  }
-);}
-
-
-
-
-
-export const getGetToolStatsQueryKey = () => {
-    return [
-    `/api/tools/stats`
-    ] as const;
-    }
-
-
-export const getGetToolStatsQueryOptions = <TData = Awaited<ReturnType<typeof getToolStats>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getToolStats>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
-) => {
-
-const {query: queryOptions, request: requestOptions} = options ?? {};
-
-  const queryKey =  queryOptions?.queryKey ?? getGetToolStatsQueryKey();
-
-
-
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getToolStats>>> = ({ signal }) => getToolStats({ signal, ...requestOptions });
-
-
-
-
-
-   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getToolStats>>, TError, TData> & { queryKey: QueryKey }
-}
-
-export type GetToolStatsQueryResult = NonNullable<Awaited<ReturnType<typeof getToolStats>>>
-export type GetToolStatsQueryError = ErrorType<unknown>
-
-
-/**
- * @summary Get marketplace stats (total tools, customers, categories)
- */
-
-export function useGetToolStats<TData = Awaited<ReturnType<typeof getToolStats>>, TError = ErrorType<unknown>>(
-  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getToolStats>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
-
- ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
-
-  const queryOptions = getGetToolStatsQueryOptions(options)
-
-  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
-
-  return withQueryKey(query, queryOptions.queryKey);
-}
-
-
-
-
-
-
-
 export const getJoinWaitlistUrl = () => {
 
 
@@ -380,7 +391,7 @@ export const getJoinWaitlistUrl = () => {
 }
 
 /**
- * @summary Join the waitlist or express interest in a tool
+ * @summary Join the waitlist or express interest
  */
 export const joinWaitlist = async (waitlistInput: WaitlistInput, options?: RequestInit): Promise<WaitlistEntry> => {
 
@@ -428,7 +439,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type JoinWaitlistMutationError = ErrorType<unknown>
 
     /**
- * @summary Join the waitlist or express interest in a tool
+ * @summary Join the waitlist or express interest
  */
 export const useJoinWaitlist = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof joinWaitlist>>, TError,{data: BodyType<WaitlistInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
@@ -450,7 +461,7 @@ export const getGetWaitlistCountUrl = () => {
 }
 
 /**
- * @summary Get total waitlist signups count
+ * @summary Total waitlist signups
  */
 export const getWaitlistCount = async ( options?: RequestInit): Promise<WaitlistCount> => {
 
@@ -497,7 +508,7 @@ export type GetWaitlistCountQueryError = ErrorType<unknown>
 
 
 /**
- * @summary Get total waitlist signups count
+ * @summary Total waitlist signups
  */
 
 export function useGetWaitlistCount<TData = Awaited<ReturnType<typeof getWaitlistCount>>, TError = ErrorType<unknown>>(
@@ -517,4 +528,657 @@ export function useGetWaitlistCount<TData = Awaited<ReturnType<typeof getWaitlis
 
 
 
+
+export const getSubmitCustomRequestUrl = () => {
+
+
+
+
+  return `/api/custom-requests`
+}
+
+/**
+ * @summary Submit a custom tool build request
+ */
+export const submitCustomRequest = async (customRequestInput: CustomRequestInput, options?: RequestInit): Promise<CustomRequest> => {
+
+  return customFetch<CustomRequest>(getSubmitCustomRequestUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(customRequestInput)
+  }
+);}
+
+
+
+
+export const getSubmitCustomRequestMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitCustomRequest>>, TError,{data: BodyType<CustomRequestInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof submitCustomRequest>>, TError,{data: BodyType<CustomRequestInput>}, TContext> => {
+
+const mutationKey = ['submitCustomRequest'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof submitCustomRequest>>, {data: BodyType<CustomRequestInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  submitCustomRequest(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SubmitCustomRequestMutationResult = NonNullable<Awaited<ReturnType<typeof submitCustomRequest>>>
+    export type SubmitCustomRequestMutationBody = BodyType<CustomRequestInput>
+    export type SubmitCustomRequestMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Submit a custom tool build request
+ */
+export const useSubmitCustomRequest = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitCustomRequest>>, TError,{data: BodyType<CustomRequestInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof submitCustomRequest>>,
+        TError,
+        {data: BodyType<CustomRequestInput>},
+        TContext
+      > => {
+      return useMutation(getSubmitCustomRequestMutationOptions(options));
+    }
+
+export const getGetAdminSummaryUrl = () => {
+
+
+
+
+  return `/api/admin/summary`
+}
+
+/**
+ * @summary Admin dashboard summary
+ */
+export const getAdminSummary = async ( options?: RequestInit): Promise<AdminSummary> => {
+
+  return customFetch<AdminSummary>(getGetAdminSummaryUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAdminSummaryQueryKey = () => {
+    return [
+    `/api/admin/summary`
+    ] as const;
+    }
+
+
+export const getGetAdminSummaryQueryOptions = <TData = Awaited<ReturnType<typeof getAdminSummary>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAdminSummary>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAdminSummaryQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAdminSummary>>> = ({ signal }) => getAdminSummary({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAdminSummary>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAdminSummaryQueryResult = NonNullable<Awaited<ReturnType<typeof getAdminSummary>>>
+export type GetAdminSummaryQueryError = ErrorType<void>
+
+
+/**
+ * @summary Admin dashboard summary
+ */
+
+export function useGetAdminSummary<TData = Awaited<ReturnType<typeof getAdminSummary>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAdminSummary>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAdminSummaryQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetAdminWaitlistUrl = () => {
+
+
+
+
+  return `/api/admin/waitlist`
+}
+
+/**
+ * @summary All waitlist entries
+ */
+export const getAdminWaitlist = async ( options?: RequestInit): Promise<AdminWaitlistEntry[]> => {
+
+  return customFetch<AdminWaitlistEntry[]>(getGetAdminWaitlistUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAdminWaitlistQueryKey = () => {
+    return [
+    `/api/admin/waitlist`
+    ] as const;
+    }
+
+
+export const getGetAdminWaitlistQueryOptions = <TData = Awaited<ReturnType<typeof getAdminWaitlist>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAdminWaitlist>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAdminWaitlistQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAdminWaitlist>>> = ({ signal }) => getAdminWaitlist({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAdminWaitlist>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAdminWaitlistQueryResult = NonNullable<Awaited<ReturnType<typeof getAdminWaitlist>>>
+export type GetAdminWaitlistQueryError = ErrorType<void>
+
+
+/**
+ * @summary All waitlist entries
+ */
+
+export function useGetAdminWaitlist<TData = Awaited<ReturnType<typeof getAdminWaitlist>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAdminWaitlist>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAdminWaitlistQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetAdminCustomRequestsUrl = () => {
+
+
+
+
+  return `/api/admin/custom-requests`
+}
+
+/**
+ * @summary All custom build requests
+ */
+export const getAdminCustomRequests = async ( options?: RequestInit): Promise<AdminCustomRequest[]> => {
+
+  return customFetch<AdminCustomRequest[]>(getGetAdminCustomRequestsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAdminCustomRequestsQueryKey = () => {
+    return [
+    `/api/admin/custom-requests`
+    ] as const;
+    }
+
+
+export const getGetAdminCustomRequestsQueryOptions = <TData = Awaited<ReturnType<typeof getAdminCustomRequests>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAdminCustomRequests>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAdminCustomRequestsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAdminCustomRequests>>> = ({ signal }) => getAdminCustomRequests({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAdminCustomRequests>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAdminCustomRequestsQueryResult = NonNullable<Awaited<ReturnType<typeof getAdminCustomRequests>>>
+export type GetAdminCustomRequestsQueryError = ErrorType<void>
+
+
+/**
+ * @summary All custom build requests
+ */
+
+export function useGetAdminCustomRequests<TData = Awaited<ReturnType<typeof getAdminCustomRequests>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAdminCustomRequests>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAdminCustomRequestsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getUpdateCustomRequestUrl = (id: number,) => {
+
+
+
+
+  return `/api/admin/custom-requests/${id}`
+}
+
+/**
+ * @summary Update a custom request status or payment
+ */
+export const updateCustomRequest = async (id: number,
+    customRequestUpdate: CustomRequestUpdate, options?: RequestInit): Promise<AdminCustomRequest> => {
+
+  return customFetch<AdminCustomRequest>(getUpdateCustomRequestUrl(id),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(customRequestUpdate)
+  }
+);}
+
+
+
+
+export const getUpdateCustomRequestMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateCustomRequest>>, TError,{id: number;data: BodyType<CustomRequestUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateCustomRequest>>, TError,{id: number;data: BodyType<CustomRequestUpdate>}, TContext> => {
+
+const mutationKey = ['updateCustomRequest'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateCustomRequest>>, {id: number;data: BodyType<CustomRequestUpdate>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  updateCustomRequest(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateCustomRequestMutationResult = NonNullable<Awaited<ReturnType<typeof updateCustomRequest>>>
+    export type UpdateCustomRequestMutationBody = BodyType<CustomRequestUpdate>
+    export type UpdateCustomRequestMutationError = ErrorType<void>
+
+    /**
+ * @summary Update a custom request status or payment
+ */
+export const useUpdateCustomRequest = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateCustomRequest>>, TError,{id: number;data: BodyType<CustomRequestUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateCustomRequest>>,
+        TError,
+        {id: number;data: BodyType<CustomRequestUpdate>},
+        TContext
+      > => {
+      return useMutation(getUpdateCustomRequestMutationOptions(options));
+    }
+
+export const getCreateToolUrl = () => {
+
+
+
+
+  return `/api/admin/tools`
+}
+
+/**
+ * @summary Add a new tool listing
+ */
+export const createTool = async (toolInput: ToolInput, options?: RequestInit): Promise<Tool> => {
+
+  return customFetch<Tool>(getCreateToolUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(toolInput)
+  }
+);}
+
+
+
+
+export const getCreateToolMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createTool>>, TError,{data: BodyType<ToolInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createTool>>, TError,{data: BodyType<ToolInput>}, TContext> => {
+
+const mutationKey = ['createTool'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createTool>>, {data: BodyType<ToolInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createTool(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateToolMutationResult = NonNullable<Awaited<ReturnType<typeof createTool>>>
+    export type CreateToolMutationBody = BodyType<ToolInput>
+    export type CreateToolMutationError = ErrorType<void>
+
+    /**
+ * @summary Add a new tool listing
+ */
+export const useCreateTool = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createTool>>, TError,{data: BodyType<ToolInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createTool>>,
+        TError,
+        {data: BodyType<ToolInput>},
+        TContext
+      > => {
+      return useMutation(getCreateToolMutationOptions(options));
+    }
+
+export const getUpdateToolUrl = (id: number,) => {
+
+
+
+
+  return `/api/admin/tools/${id}`
+}
+
+/**
+ * @summary Update a tool listing
+ */
+export const updateTool = async (id: number,
+    toolUpdate: ToolUpdate, options?: RequestInit): Promise<Tool> => {
+
+  return customFetch<Tool>(getUpdateToolUrl(id),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(toolUpdate)
+  }
+);}
+
+
+
+
+export const getUpdateToolMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateTool>>, TError,{id: number;data: BodyType<ToolUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateTool>>, TError,{id: number;data: BodyType<ToolUpdate>}, TContext> => {
+
+const mutationKey = ['updateTool'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateTool>>, {id: number;data: BodyType<ToolUpdate>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  updateTool(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateToolMutationResult = NonNullable<Awaited<ReturnType<typeof updateTool>>>
+    export type UpdateToolMutationBody = BodyType<ToolUpdate>
+    export type UpdateToolMutationError = ErrorType<void>
+
+    /**
+ * @summary Update a tool listing
+ */
+export const useUpdateTool = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateTool>>, TError,{id: number;data: BodyType<ToolUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateTool>>,
+        TError,
+        {id: number;data: BodyType<ToolUpdate>},
+        TContext
+      > => {
+      return useMutation(getUpdateToolMutationOptions(options));
+    }
+
+export const getDeleteToolUrl = (id: number,) => {
+
+
+
+
+  return `/api/admin/tools/${id}`
+}
+
+/**
+ * @summary Delete a tool listing
+ */
+export const deleteTool = async (id: number, options?: RequestInit): Promise<DeleteResult> => {
+
+  return customFetch<DeleteResult>(getDeleteToolUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getDeleteToolMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteTool>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteTool>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['deleteTool'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteTool>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  deleteTool(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteToolMutationResult = NonNullable<Awaited<ReturnType<typeof deleteTool>>>
+
+    export type DeleteToolMutationError = ErrorType<void>
+
+    /**
+ * @summary Delete a tool listing
+ */
+export const useDeleteTool = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteTool>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteTool>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getDeleteToolMutationOptions(options));
+    }
+
+export const getAdminLoginUrl = () => {
+
+
+
+
+  return `/api/admin/login`
+}
+
+/**
+ * @summary Verify admin password and return token
+ */
+export const adminLogin = async (adminLoginInput: AdminLoginInput, options?: RequestInit): Promise<AdminLoginResult> => {
+
+  return customFetch<AdminLoginResult>(getAdminLoginUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(adminLoginInput)
+  }
+);}
+
+
+
+
+export const getAdminLoginMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof adminLogin>>, TError,{data: BodyType<AdminLoginInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof adminLogin>>, TError,{data: BodyType<AdminLoginInput>}, TContext> => {
+
+const mutationKey = ['adminLogin'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof adminLogin>>, {data: BodyType<AdminLoginInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  adminLogin(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AdminLoginMutationResult = NonNullable<Awaited<ReturnType<typeof adminLogin>>>
+    export type AdminLoginMutationBody = BodyType<AdminLoginInput>
+    export type AdminLoginMutationError = ErrorType<void>
+
+    /**
+ * @summary Verify admin password and return token
+ */
+export const useAdminLogin = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof adminLogin>>, TError,{data: BodyType<AdminLoginInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof adminLogin>>,
+        TError,
+        {data: BodyType<AdminLoginInput>},
+        TContext
+      > => {
+      return useMutation(getAdminLoginMutationOptions(options));
+    }
 

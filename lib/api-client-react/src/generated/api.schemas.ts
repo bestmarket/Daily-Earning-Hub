@@ -34,6 +34,50 @@ export interface Tool {
   features?: string[];
 }
 
+export type ToolInputStatus = typeof ToolInputStatus[keyof typeof ToolInputStatus];
+
+
+export const ToolInputStatus = {
+  available: 'available',
+  coming_soon: 'coming_soon',
+  beta: 'beta',
+} as const;
+
+export interface ToolInput {
+  name: string;
+  description: string;
+  category: string;
+  price: number;
+  currency?: string;
+  status?: ToolInputStatus;
+  featured?: boolean;
+  emoji?: string;
+  tagline?: string;
+  features?: string[];
+}
+
+export type ToolUpdateStatus = typeof ToolUpdateStatus[keyof typeof ToolUpdateStatus];
+
+
+export const ToolUpdateStatus = {
+  available: 'available',
+  coming_soon: 'coming_soon',
+  beta: 'beta',
+} as const;
+
+export interface ToolUpdate {
+  name?: string;
+  description?: string;
+  category?: string;
+  price?: number;
+  currency?: string;
+  status?: ToolUpdateStatus;
+  featured?: boolean;
+  emoji?: string;
+  tagline?: string;
+  features?: string[];
+}
+
 export interface MarketplaceStats {
   totalTools: number;
   totalCustomers: number;
@@ -63,6 +107,114 @@ export interface WaitlistEntry {
 
 export interface WaitlistCount {
   count: number;
+}
+
+export interface CustomRequestInput {
+  /** @nullable */
+  name?: string | null;
+  email: string;
+  /** @nullable */
+  businessType?: string | null;
+  description: string;
+  /** @nullable */
+  budget?: string | null;
+  /** @nullable */
+  whatsapp?: string | null;
+}
+
+export interface CustomRequest {
+  id: number;
+  /** @nullable */
+  name?: string | null;
+  email: string;
+  /** @nullable */
+  businessType?: string | null;
+  description: string;
+  /** @nullable */
+  budget?: string | null;
+  /** @nullable */
+  whatsapp?: string | null;
+  status: string;
+  createdAt: string;
+}
+
+export type CustomRequestUpdateStatus = typeof CustomRequestUpdateStatus[keyof typeof CustomRequestUpdateStatus];
+
+
+export const CustomRequestUpdateStatus = {
+  new: 'new',
+  contacted: 'contacted',
+  quoted: 'quoted',
+  paid: 'paid',
+  delivered: 'delivered',
+  cancelled: 'cancelled',
+} as const;
+
+export interface CustomRequestUpdate {
+  status?: CustomRequestUpdateStatus;
+  /** @nullable */
+  paymentMethod?: string | null;
+  /** @nullable */
+  paymentAmount?: number | null;
+  /** @nullable */
+  notes?: string | null;
+}
+
+export interface AdminSummary {
+  totalTools: number;
+  totalWaitlist: number;
+  totalCustomRequests: number;
+  newCustomRequests: number;
+  paidRequests: number;
+  totalRevenue: number;
+}
+
+export interface AdminWaitlistEntry {
+  id: number;
+  email: string;
+  /** @nullable */
+  name?: string | null;
+  /** @nullable */
+  toolId?: number | null;
+  /** @nullable */
+  toolName?: string | null;
+  /** @nullable */
+  message?: string | null;
+  createdAt: string;
+}
+
+export interface AdminCustomRequest {
+  id: number;
+  /** @nullable */
+  name?: string | null;
+  email: string;
+  /** @nullable */
+  businessType?: string | null;
+  description: string;
+  /** @nullable */
+  budget?: string | null;
+  /** @nullable */
+  whatsapp?: string | null;
+  status: string;
+  /** @nullable */
+  paymentMethod?: string | null;
+  /** @nullable */
+  paymentAmount?: number | null;
+  /** @nullable */
+  notes?: string | null;
+  createdAt: string;
+}
+
+export interface AdminLoginInput {
+  password: string;
+}
+
+export interface AdminLoginResult {
+  token: string;
+}
+
+export interface DeleteResult {
+  success: boolean;
 }
 
 export type ListToolsParams = {
