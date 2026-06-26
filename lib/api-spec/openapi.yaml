@@ -3,20 +3,23 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Tools4Biz marketplace API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: tools
+    description: Tool marketplace operations
+  - name: waitlist
+    description: Waitlist/early access operations
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +27,97 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /tools:
+    get:
+      operationId: listTools
+      tags: [tools]
+      summary: List all tools
+      parameters:
+        - name: category
+          in: query
+          schema:
+            type: string
+        - name: featured
+          in: query
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: List of tools
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Tool"
+
+  /tools/{id}:
+    get:
+      operationId: getTool
+      tags: [tools]
+      summary: Get a single tool
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Tool details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tool"
+        "404":
+          description: Not found
+
+  /tools/stats:
+    get:
+      operationId: getToolStats
+      tags: [tools]
+      summary: Get marketplace stats (total tools, customers, categories)
+      responses:
+        "200":
+          description: Marketplace stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MarketplaceStats"
+
+  /waitlist:
+    post:
+      operationId: joinWaitlist
+      tags: [waitlist]
+      summary: Join the waitlist or express interest in a tool
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WaitlistInput"
+      responses:
+        "201":
+          description: Successfully joined
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WaitlistEntry"
+
+  /waitlist/count:
+    get:
+      operationId: getWaitlistCount
+      tags: [waitlist]
+      summary: Get total waitlist signups count
+      responses:
+        "200":
+          description: Waitlist count
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WaitlistCount"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +128,81 @@ components:
       required:
         - status
 
+    Tool:
+      type: object
+      required: [id, name, description, category, price, currency, status, featured]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+        price:
+          type: number
+        currency:
+          type: string
+        status:
+          type: string
+          enum: [available, coming_soon, beta]
+        featured:
+          type: boolean
+        emoji:
+          type: ["string", "null"]
+        tagline:
+          type: ["string", "null"]
+        features:
+          type: array
+          items:
+            type: string
+
+    MarketplaceStats:
+      type: object
+      required: [totalTools, totalCustomers, totalCategories, upcomingTools]
+      properties:
+        totalTools:
+          type: integer
+        totalCustomers:
+          type: integer
+        totalCategories:
+          type: integer
+        upcomingTools:
+          type: integer
+
+    WaitlistInput:
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+        name:
+          type: ["string", "null"]
+        toolId:
+          type: ["integer", "null"]
+        message:
+          type: ["string", "null"]
+
+    WaitlistEntry:
+      type: object
+      required: [id, email, createdAt]
+      properties:
+        id:
+          type: integer
+        email:
+          type: string
+        name:
+          type: ["string", "null"]
+        toolId:
+          type: ["integer", "null"]
+        createdAt:
+          type: string
+
+    WaitlistCount:
+      type: object
+      required: [count]
+      properties:
+        count:
+          type: integer
