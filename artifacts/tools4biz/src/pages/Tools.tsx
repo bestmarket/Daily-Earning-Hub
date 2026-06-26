@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Search, SlidersHorizontal } from "lucide-react";
-import { Button } from "react-day-picker";
+import { Button } from "@/components/ui/button";
 
 export default function Tools() {
   const [category, setCategory] = useState<string>("all");
