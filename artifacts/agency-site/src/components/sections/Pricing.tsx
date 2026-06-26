@@ -1,5 +1,4 @@
-import { motion } from "framer-motion";
-import { useInView } from "framer-motion";
+import { motion, useInView } from "framer-motion";
 import { useRef } from "react";
 import { CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -19,9 +18,6 @@ const plans = [
     ],
     cta: "Get Started",
     popular: false,
-    gradient: "from-slate-700/50 to-slate-800/50",
-    border: "border-border/50",
-    buttonVariant: "outline" as const,
   },
   {
     name: "Business",
@@ -38,9 +34,6 @@ const plans = [
     ],
     cta: "Start My Project",
     popular: true,
-    gradient: "from-primary/20 to-accent/20",
-    border: "border-primary/40",
-    buttonVariant: "default" as const,
   },
   {
     name: "Custom Software",
@@ -57,23 +50,16 @@ const plans = [
     ],
     cta: "Discuss My Project",
     popular: false,
-    gradient: "from-accent/20 to-violet-900/30",
-    border: "border-accent/30",
-    buttonVariant: "outline" as const,
   },
 ];
 
 export default function Pricing() {
   const ref = useRef(null);
-  const inView = useInView(ref, { once: true, margin: "-100px" });
-
-  const openLeadMagnet = () => {
-    window.dispatchEvent(new CustomEvent("open-lead-magnet"));
-  };
+  const inView = useInView(ref, { once: true, margin: "-80px" });
+  const openLeadMagnet = () => window.dispatchEvent(new CustomEvent("open-lead-magnet"));
 
   return (
-    <section id="pricing" className="py-24 md:py-32 relative">
-      <div className="absolute inset-0 bg-gradient-to-b from-transparent via-primary/5 to-transparent pointer-events-none" />
+    <section id="pricing" className="py-24 md:py-32 bg-[#F8FAFC]">
       <div className="container mx-auto px-4 md:px-6">
         <motion.div
           ref={ref}
@@ -82,14 +68,14 @@ export default function Pricing() {
           animate={inView ? { opacity: 1, y: 0 } : {}}
           transition={{ duration: 0.6 }}
         >
-          <span className="inline-block text-sm font-semibold tracking-widest text-primary uppercase mb-4">
+          <span className="inline-block text-sm font-bold tracking-widest text-[#7C3AED] uppercase mb-4">
             Pricing
           </span>
-          <h2 className="text-3xl md:text-5xl font-bold mb-6">
+          <h2 className="text-3xl md:text-5xl font-extrabold mb-6 text-[#111827]">
             Simple, Transparent Pricing
           </h2>
-          <p className="text-muted-foreground text-lg max-w-xl mx-auto">
-            No hidden fees. No retainers. You get a fixed price before we start — and free estimates are always available.
+          <p className="text-[#6B7280] text-lg max-w-xl mx-auto">
+            No hidden fees. No retainers. Fixed price before we start — free estimates always available.
           </p>
         </motion.div>
 
@@ -97,43 +83,47 @@ export default function Pricing() {
           {plans.map((plan, i) => (
             <motion.div
               key={plan.name}
-              className={`relative rounded-2xl border ${plan.border} bg-gradient-to-br ${plan.gradient} backdrop-blur-sm p-8 flex flex-col ${plan.popular ? "ring-1 ring-primary/40 shadow-2xl shadow-primary/10" : ""}`}
+              className={`relative rounded-2xl flex flex-col p-8 ${
+                plan.popular
+                  ? "bg-gradient-to-b from-[#7C3AED] to-[#6366F1] text-white shadow-2xl shadow-purple-300/40 ring-4 ring-purple-300/20"
+                  : "bg-white border border-[#E5E7EB] shadow-sm"
+              }`}
               initial={{ opacity: 0, y: 30 }}
               animate={inView ? { opacity: 1, y: 0 } : {}}
               transition={{ duration: 0.5, delay: i * 0.1 }}
             >
               {plan.popular && (
                 <div className="absolute -top-4 left-1/2 -translate-x-1/2">
-                  <span className="bg-gradient-to-r from-primary to-accent text-white text-xs font-bold px-4 py-1.5 rounded-full shadow-lg">
-                    Most Popular
+                  <span className="bg-white text-[#7C3AED] text-xs font-bold px-4 py-1.5 rounded-full shadow-lg">
+                    ⭐ Most Popular
                   </span>
                 </div>
               )}
 
               <div className="mb-6">
-                <h3 className="font-bold text-lg mb-1">{plan.name}</h3>
-                <p className="text-sm text-muted-foreground mb-4">{plan.description}</p>
-                <div>
-                  <span className="text-xs text-muted-foreground">{plan.label}</span>
-                  <div className="text-4xl font-bold">{plan.price}</div>
-                </div>
+                <h3 className={`font-bold text-lg mb-1 ${plan.popular ? "text-white" : "text-[#111827]"}`}>{plan.name}</h3>
+                <p className={`text-sm mb-4 ${plan.popular ? "text-purple-200" : "text-[#6B7280]"}`}>{plan.description}</p>
+                <div className={`text-xs ${plan.popular ? "text-purple-200" : "text-[#6B7280]"} mb-1`}>{plan.label}</div>
+                <div className={`text-4xl font-extrabold ${plan.popular ? "text-white" : "text-[#111827]"}`}>{plan.price}</div>
               </div>
 
               <ul className="space-y-3 flex-1 mb-8">
                 {plan.features.map((feature) => (
                   <li key={feature} className="flex items-center gap-3 text-sm">
-                    <CheckCircle2 className="w-4 h-4 text-primary flex-shrink-0" />
-                    <span>{feature}</span>
+                    <CheckCircle2 className={`w-4 h-4 flex-shrink-0 ${plan.popular ? "text-purple-200" : "text-[#7C3AED]"}`} />
+                    <span className={plan.popular ? "text-purple-100" : "text-[#374151]"}>{feature}</span>
                   </li>
                 ))}
               </ul>
 
               <Button
-                variant={plan.buttonVariant}
                 size="lg"
-                className={`w-full ${plan.popular ? "shadow-lg shadow-primary/25" : ""}`}
+                className={`w-full font-semibold ${
+                  plan.popular
+                    ? "bg-white text-[#7C3AED] hover:bg-purple-50 shadow-lg"
+                    : "btn-premium text-white"
+                }`}
                 onClick={openLeadMagnet}
-                data-testid={`button-pricing-${plan.name.toLowerCase().replace(/\s+/g, "-")}`}
               >
                 {plan.cta}
               </Button>
@@ -142,13 +132,13 @@ export default function Pricing() {
         </div>
 
         <motion.p
-          className="text-center text-sm text-muted-foreground mt-8"
+          className="text-center text-sm text-[#6B7280] mt-8"
           initial={{ opacity: 0 }}
           animate={inView ? { opacity: 1 } : {}}
           transition={{ delay: 0.5 }}
         >
-          All projects include a free discovery call, revision rounds, and post-launch support.
-          <button onClick={openLeadMagnet} className="text-primary underline underline-offset-2 ml-1 hover:no-underline">
+          All projects include a free discovery call, revision rounds, and post-launch support. {" "}
+          <button onClick={openLeadMagnet} className="text-[#7C3AED] underline underline-offset-2 hover:no-underline font-medium">
             Get a free estimate →
           </button>
         </motion.p>

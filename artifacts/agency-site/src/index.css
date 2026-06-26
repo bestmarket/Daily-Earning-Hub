@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
 @import "tailwindcss";
 @import "tw-animate-css";
 @plugin "@tailwindcss/typography";
@@ -58,37 +58,41 @@
 }
 
 :root {
+  /* Light premium purple SaaS theme */
   --background: 0 0% 100%;
-  --foreground: 222 47% 11%;
+  --foreground: 220 39% 11%;
   --card: 0 0% 100%;
-  --card-foreground: 222 47% 11%;
-  --card-border: 214 32% 91%;
-  --primary: 217 91% 60%;
+  --card-foreground: 220 39% 11%;
+  --card-border: 220 13% 91%;
+  /* Primary: #7C3AED purple */
+  --primary: 262 83% 57%;
   --primary-foreground: 0 0% 100%;
-  --secondary: 210 40% 96%;
-  --secondary-foreground: 222 47% 11%;
-  --muted: 210 40% 96%;
-  --muted-foreground: 215 16% 47%;
-  --accent: 262 83% 58%;
+  /* Secondary / muted */
+  --secondary: 220 14% 96%;
+  --secondary-foreground: 220 39% 11%;
+  --muted: 220 14% 96%;
+  --muted-foreground: 220 9% 46%;
+  /* Accent: #6366F1 indigo */
+  --accent: 239 84% 67%;
   --accent-foreground: 0 0% 100%;
-  --border: 214 32% 91%;
-  --input: 214 32% 91%;
-  --ring: 217 91% 60%;
+  --border: 220 13% 91%;
+  --input: 220 13% 91%;
+  --ring: 262 83% 57%;
   --destructive: 0 84% 60%;
   --destructive-foreground: 0 0% 100%;
   --popover: 0 0% 100%;
-  --popover-foreground: 222 47% 11%;
-  --popover-border: 214 32% 91%;
-  --sidebar: 0 0% 98%;
-  --sidebar-foreground: 222 47% 11%;
-  --sidebar-border: 214 32% 91%;
-  --sidebar-primary: 217 91% 60%;
+  --popover-foreground: 220 39% 11%;
+  --popover-border: 220 13% 91%;
+  --sidebar: 0 0% 100%;
+  --sidebar-foreground: 220 39% 11%;
+  --sidebar-border: 220 13% 91%;
+  --sidebar-primary: 262 83% 57%;
   --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 210 40% 96%;
-  --sidebar-accent-foreground: 222 47% 11%;
-  --sidebar-ring: 217 91% 60%;
-  --chart-1: 217 91% 60%;
-  --chart-2: 262 83% 58%;
+  --sidebar-accent: 220 14% 96%;
+  --sidebar-accent-foreground: 220 39% 11%;
+  --sidebar-ring: 262 83% 57%;
+  --chart-1: 262 83% 57%;
+  --chart-2: 239 84% 67%;
   --chart-3: 142 76% 36%;
   --chart-4: 38 92% 50%;
   --chart-5: 0 84% 60%;
@@ -97,49 +101,41 @@
   --radius: 0.75rem;
 }
 
-.dark {
-  --background: 222 47% 7%;
-  --foreground: 210 40% 98%;
-  --card: 222 47% 10%;
-  --card-foreground: 210 40% 98%;
-  --card-border: 217 33% 17%;
-  --primary: 217 91% 60%;
-  --primary-foreground: 222 47% 4%;
-  --secondary: 217 33% 17%;
-  --secondary-foreground: 210 40% 98%;
-  --muted: 217 33% 14%;
-  --muted-foreground: 215 20% 65%;
-  --accent: 262 83% 58%;
-  --accent-foreground: 210 40% 98%;
-  --border: 217 33% 17%;
-  --input: 217 33% 20%;
-  --ring: 217 91% 60%;
-  --destructive: 0 84% 60%;
-  --destructive-foreground: 210 40% 98%;
-  --popover: 222 47% 10%;
-  --popover-foreground: 210 40% 98%;
-  --popover-border: 217 33% 17%;
-  --sidebar: 222 47% 8%;
-  --sidebar-foreground: 210 40% 98%;
-  --sidebar-border: 217 33% 17%;
-  --sidebar-primary: 217 91% 60%;
-  --sidebar-primary-foreground: 222 47% 4%;
-  --sidebar-accent: 217 33% 14%;
-  --sidebar-accent-foreground: 210 40% 98%;
-  --sidebar-ring: 217 91% 60%;
-  --chart-1: 217 91% 60%;
-  --chart-2: 262 83% 58%;
-  --chart-3: 142 76% 36%;
-  --chart-4: 38 92% 50%;
-  --chart-5: 0 84% 60%;
-}
-
 @layer base {
   * {
     @apply border-border;
   }
   body {
-    @apply font-sans antialiased bg-background text-foreground selection:bg-primary selection:text-primary-foreground;
+    @apply font-sans antialiased bg-background text-foreground selection:bg-primary/20 selection:text-primary;
     scroll-behavior: smooth;
   }
+}
+
+/* Premium button styles */
+.btn-premium {
+  background: linear-gradient(135deg, #7C3AED 0%, #6366F1 100%);
+  box-shadow: 0 4px 15px rgba(124, 58, 237, 0.3);
+  transition: all 0.2s ease;
+}
+.btn-premium:hover {
+  box-shadow: 0 8px 25px rgba(124, 58, 237, 0.45);
+  transform: translateY(-1px);
+}
+
+/* Section alternation */
+.section-alt {
+  background-color: #F8FAFC;
+}
+.section-alt2 {
+  background-color: #F3F4F6;
+}
+
+/* Premium card shadow */
+.card-premium {
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
+  transition: box-shadow 0.25s ease, transform 0.25s ease;
+}
+.card-premium:hover {
+  box-shadow: 0 4px 16px rgba(0,0,0,0.08), 0 12px 32px rgba(0,0,0,0.06);
+  transform: translateY(-2px);
 }
