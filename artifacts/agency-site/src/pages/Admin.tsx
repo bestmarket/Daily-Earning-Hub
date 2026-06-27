@@ -5,9 +5,26 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Save, Lock, DollarSign, CreditCard, MessageSquare, Sparkles, RefreshCw, ChevronDown, ChevronUp } from "lucide-react";
+import { Save, Lock, DollarSign, CreditCard, MessageSquare, Sparkles, RefreshCw, ChevronDown, ChevronUp, AlertTriangle } from "lucide-react";
 import API_BASE from "@/lib/api";
 const ADMIN_TOKEN = "devstudio-admin";
+const LS_KEY = "devstudio_site_settings";
+
+const DEFAULT_SETTINGS = {
+  pricing: [
+    { id: "starter", name: "Starter", price: "$299", description: "Perfect for small businesses", features: ["Landing Page", "Contact Form", "Mobile Friendly", "1 Revision"], popular: false },
+    { id: "pro", name: "Pro", price: "$799", description: "For growing businesses", features: ["Up to 5 Pages", "Booking System", "Admin Dashboard", "Payment Integration", "3 Revisions"], popular: true },
+    { id: "enterprise", name: "Enterprise", price: "$1,999", description: "Full custom software", features: ["Unlimited Pages", "Custom Features", "AI Integration", "Priority Support", "Unlimited Revisions"], popular: false },
+  ],
+  paymentMethods: [
+    { id: "paypal", name: "PayPal", enabled: true, details: "" },
+    { id: "stripe", name: "Stripe", enabled: false, details: "" },
+    { id: "bank", name: "Bank Transfer", enabled: true, details: "" },
+    { id: "crypto", name: "Crypto", enabled: false, details: "" },
+  ],
+  contact: { whatsapp: "+1234567890", email: "hello@devstudio.com", whatsappDisplay: "+1 (234) 567-890" },
+  hero: { headline: "We Build Software That Helps Your Business Get More Customers & Save Time.", subheadline: "From booking systems and customer portals to AI-powered tools and SaaS platforms — we build custom software that grows your revenue.", ctaPrimary: "Get My Free Business Tool Idea", ctaSecondary: "View Examples" },
+};
 
 type PricingPlan = {
   id: string;
@@ -63,6 +80,7 @@ export default function Admin() {
   const [settings, setSettings] = useState<SiteSettings | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState<string | null>(null);
+  const [apiOffline, setApiOffline] = useState(false);
 
   const login = () => {
     if (password === "devstudio-admin" || password === ADMIN_TOKEN) {
@@ -77,10 +95,14 @@ export default function Admin() {
     setLoading(true);
     try {
       const res = await fetch(`${API_BASE}/api/site-settings`);
+      if (!res.ok) throw new Error();
       const data = await res.json();
       setSettings(data);
+      setApiOffline(false);
     } catch {
-      toast({ title: "Failed to load settings", variant: "destructive" });
+      setApiOffline(true);
+      const stored = localStorage.getItem(LS_KEY);
+      setSettings(stored ? JSON.parse(stored) : DEFAULT_SETTINGS);
     } finally {
       setLoading(false);
     }
@@ -90,9 +112,15 @@ export default function Admin() {
     if (authed) loadSettings();
   }, [authed]);
 
+  const saveLocally = (updated: SiteSettings) => {
+    localStorage.setItem(LS_KEY, JSON.stringify(updated));
+    toast({ title: "Saved locally", description: "Changes are saved in this browser. Connect an API server to persist across devices." });
+  };
+
   const savePricing = async () => {
     if (!settings) return;
     setSaving("pricing");
+    if (apiOffline) { saveLocally(settings); setSaving(null); return; }
     try {
       const res = await fetch(`${API_BASE}/api/admin/site-settings/pricing`, {
         method: "PUT",
@@ -111,6 +139,7 @@ export default function Admin() {
   const savePayments = async () => {
     if (!settings) return;
     setSaving("payments");
+    if (apiOffline) { saveLocally(settings); setSaving(null); return; }
     try {
       const res = await fetch(`${API_BASE}/api/admin/site-settings/payment-methods`, {
         method: "PUT",
@@ -129,6 +158,7 @@ export default function Admin() {
   const saveContact = async () => {
     if (!settings) return;
     setSaving("contact");
+    if (apiOffline) { saveLocally(settings); setSaving(null); return; }
     try {
       const res = await fetch(`${API_BASE}/api/admin/site-settings/contact`, {
         method: "PATCH",
@@ -147,6 +177,7 @@ export default function Admin() {
   const saveHero = async () => {
     if (!settings) return;
     setSaving("hero");
+    if (apiOffline) { saveLocally(settings); setSaving(null); return; }
     try {
       const res = await fetch(`${API_BASE}/api/admin/site-settings/hero`, {
         method: "PATCH",
@@ -217,7 +248,7 @@ export default function Admin() {
     <div className="min-h-screen bg-background text-foreground">
       {/* Header */}
       <div className="border-b border-border/60 bg-card/50 backdrop-blur sticky top-0 z-10">
-        <div className="max-w-4xl mx-auto px-6 py-4 flex items-center justify-between">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Sparkles className="w-5 h-5 text-primary" />
             <div>
@@ -236,7 +267,18 @@ export default function Admin() {
         </div>
       </div>
 
-      <div className="max-w-4xl mx-auto px-6 py-8 space-y-6">
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8 space-y-6">
+
+        {/* Offline banner */}
+        {apiOffline && (
+          <div className="flex items-start gap-3 rounded-xl border border-yellow-300 bg-yellow-50 px-4 py-3 text-sm text-yellow-800">
+            <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0 text-yellow-600" />
+            <div>
+              <span className="font-semibold">No API server connected.</span>{" "}
+              Changes you save here are stored in this browser only and won't affect other visitors. To make changes live for everyone, deploy the API server and set <code className="bg-yellow-100 px-1 rounded">VITE_API_BASE_URL</code> in Vercel.
+            </div>
+          </div>
+        )}
 
         {/* Pricing Plans */}
         <Section title="Pricing Plans" icon={<DollarSign className="w-5 h-5 text-primary" />}>
