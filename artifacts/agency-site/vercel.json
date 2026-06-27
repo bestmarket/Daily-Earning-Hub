@@ -2,5 +2,8 @@
   "buildCommand": "cd ../.. && pnpm --filter @workspace/agency-site run build",
   "outputDirectory": "dist/public",
   "installCommand": "cd ../.. && pnpm install",
-  "framework": null
+  "framework": null,
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
 }
