@@ -1,0 +1,6 @@
+{
+  "buildCommand": "pnpm --filter @workspace/agency-site run build",
+  "outputDirectory": "artifacts/agency-site/dist/public",
+  "installCommand": "pnpm install",
+  "framework": null
+}
