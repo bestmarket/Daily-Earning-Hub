@@ -84,48 +84,50 @@ export default function Navbar() {
         </button>
       </div>
 
-      {/* Mobile Menu */}
-      <div
-        className={`md:hidden fixed inset-0 bg-white z-40 transition-transform duration-300 flex flex-col items-center justify-center gap-5 ${
-          mobileMenuOpen ? "translate-y-0" : "-translate-y-full"
-        }`}
-      >
-        {[
-          { label: "Home", id: "home" },
-          { label: "Solutions", id: "solutions" },
-          { label: "Pricing", id: "pricing" },
-          { label: "Process", id: "process" },
-          { label: "FAQ", id: "faq" },
-        ].map((item) => (
-          <button
-            key={item.id}
-            onClick={() => scrollTo(item.id)}
-            className="text-2xl font-semibold text-[#111827] hover:text-[#7C3AED] transition-colors"
-          >
-            {item.label}
-          </button>
-        ))}
+      {/* Mobile Menu Overlay */}
+      {mobileMenuOpen && (
+        <div className="md:hidden fixed inset-0 bg-white z-40 flex flex-col overflow-y-auto">
+          {/* Spacer for navbar height */}
+          <div className="h-16 flex-shrink-0" />
+          <div className="flex flex-col items-center justify-center flex-1 gap-6 py-10 px-6">
+            {[
+              { label: "Home", id: "home" },
+              { label: "Solutions", id: "solutions" },
+              { label: "Pricing", id: "pricing" },
+              { label: "Process", id: "process" },
+              { label: "FAQ", id: "faq" },
+            ].map((item) => (
+              <button
+                key={item.id}
+                onClick={() => scrollTo(item.id)}
+                className="text-2xl font-semibold text-[#111827] hover:text-[#7C3AED] transition-colors"
+              >
+                {item.label}
+              </button>
+            ))}
 
-        <Link
-          href="/free-tools"
-          onClick={() => setMobileMenuOpen(false)}
-          className="flex items-center gap-2 text-xl font-semibold text-[#7C3AED]"
-        >
-          <Wrench className="w-5 h-5" />
-          Free Tools
-        </Link>
+            <Link
+              href="/free-tools"
+              onClick={() => setMobileMenuOpen(false)}
+              className="flex items-center gap-2 text-xl font-semibold text-[#7C3AED] bg-purple-50 border border-purple-200 px-5 py-2.5 rounded-full"
+            >
+              <Wrench className="w-5 h-5" />
+              Free Tools
+            </Link>
 
-        <Button
-          size="lg"
-          className="btn-premium text-white mt-2 px-8"
-          onClick={() => {
-            setMobileMenuOpen(false);
-            window.dispatchEvent(new CustomEvent("open-lead-magnet"));
-          }}
-        >
-          Start My Project
-        </Button>
-      </div>
+            <Button
+              size="lg"
+              className="btn-premium text-white mt-2 px-10 h-14 text-base w-full max-w-xs"
+              onClick={() => {
+                setMobileMenuOpen(false);
+                window.dispatchEvent(new CustomEvent("open-lead-magnet"));
+              }}
+            >
+              Start My Project
+            </Button>
+          </div>
+        </div>
+      )}
     </header>
   );
 }

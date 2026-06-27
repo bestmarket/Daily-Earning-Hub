@@ -27,13 +27,12 @@ export default function Hero() {
   return (
     <section
       id="home"
-      className="relative pt-28 pb-20 md:pt-40 md:pb-32 overflow-hidden bg-white"
+      className="relative pt-24 pb-14 md:pt-40 md:pb-32 overflow-hidden bg-white"
     >
       {/* Background decorations */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden">
         <div className="absolute top-0 right-0 w-[600px] h-[600px] rounded-full bg-gradient-to-bl from-purple-100/60 via-indigo-50/40 to-transparent blur-3xl" />
         <div className="absolute bottom-0 left-0 w-[400px] h-[400px] rounded-full bg-gradient-to-tr from-violet-50/80 to-transparent blur-2xl" />
-        {/* Grid pattern */}
         <div
           className="absolute inset-0 opacity-[0.03]"
           style={{
@@ -44,22 +43,22 @@ export default function Hero() {
       </div>
 
       <div className="container mx-auto px-4 md:px-6 relative z-10">
-        <div className="flex flex-col lg:flex-row items-center gap-12 lg:gap-16">
+        <div className="flex flex-col lg:flex-row items-center gap-10 lg:gap-16">
           {/* Content */}
-          <div className="flex-1 text-center lg:text-left">
+          <div className="flex-1 text-center lg:text-left w-full">
             {/* Badge */}
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.4 }}
-              className="inline-flex items-center gap-2 bg-purple-50 border border-purple-200 text-[#7C3AED] text-sm font-semibold px-4 py-2 rounded-full mb-6"
+              className="inline-flex items-center gap-2 bg-purple-50 border border-purple-200 text-[#7C3AED] text-xs sm:text-sm font-semibold px-3 sm:px-4 py-1.5 sm:py-2 rounded-full mb-5"
             >
-              <span className="w-2 h-2 rounded-full bg-[#7C3AED] animate-pulse" />
+              <span className="w-2 h-2 rounded-full bg-[#7C3AED] animate-pulse flex-shrink-0" />
               Custom Web Apps for Growing Businesses
             </motion.div>
 
             <motion.h1
-              className="text-4xl md:text-5xl lg:text-6xl xl:text-[4.25rem] font-extrabold tracking-tight text-[#111827] mb-6 leading-[1.1]"
+              className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl xl:text-[4.25rem] font-extrabold tracking-tight text-[#111827] mb-5 leading-[1.15]"
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, delay: 0.1 }}
@@ -72,7 +71,7 @@ export default function Hero() {
             </motion.h1>
 
             <motion.p
-              className="text-lg md:text-xl text-[#6B7280] mb-8 max-w-xl mx-auto lg:mx-0 leading-relaxed"
+              className="text-base sm:text-lg md:text-xl text-[#6B7280] mb-7 max-w-xl mx-auto lg:mx-0 leading-relaxed"
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, delay: 0.2 }}
@@ -81,14 +80,14 @@ export default function Hero() {
             </motion.p>
 
             <motion.div
-              className="flex flex-col sm:flex-row gap-3 justify-center lg:justify-start mb-10"
+              className="flex flex-col sm:flex-row gap-3 justify-center lg:justify-start mb-8"
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, delay: 0.3 }}
             >
               <Button
                 size="lg"
-                className="btn-premium text-white h-14 px-8 text-base font-semibold"
+                className="btn-premium text-white h-12 sm:h-14 px-6 sm:px-8 text-sm sm:text-base font-semibold w-full sm:w-auto"
                 onClick={openLeadMagnet}
               >
                 Get My Free Business Tool Idea
@@ -97,7 +96,7 @@ export default function Hero() {
               <Button
                 size="lg"
                 variant="outline"
-                className="h-14 px-8 text-base font-medium border-[#E5E7EB] text-[#6B7280] hover:text-[#7C3AED] hover:border-[#7C3AED]/30 hover:bg-purple-50 transition-all"
+                className="h-12 sm:h-14 px-6 sm:px-8 text-sm sm:text-base font-medium border-[#E5E7EB] text-[#6B7280] hover:text-[#7C3AED] hover:border-[#7C3AED]/30 hover:bg-purple-50 transition-all w-full sm:w-auto"
                 onClick={scrollToSolutions}
               >
                 View Examples
@@ -106,7 +105,7 @@ export default function Hero() {
 
             {/* Trust badges */}
             <motion.div
-              className="flex flex-wrap gap-3 justify-center lg:justify-start"
+              className="flex flex-wrap gap-2 justify-center lg:justify-start"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ duration: 0.5, delay: 0.4 }}
@@ -124,22 +123,22 @@ export default function Hero() {
 
             {/* Stats */}
             <motion.div
-              className="flex gap-8 justify-center lg:justify-start mt-10 pt-8 border-t border-[#E5E7EB]"
+              className="flex gap-6 sm:gap-8 justify-center lg:justify-start mt-8 pt-6 border-t border-[#E5E7EB]"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ duration: 0.5, delay: 0.5 }}
             >
               {stats.map((s) => (
                 <div key={s.label}>
-                  <div className="text-2xl font-extrabold text-[#7C3AED]">{s.value}</div>
+                  <div className="text-xl sm:text-2xl font-extrabold text-[#7C3AED]">{s.value}</div>
                   <div className="text-xs text-[#6B7280] font-medium mt-0.5">{s.label}</div>
                 </div>
               ))}
             </motion.div>
           </div>
 
-          {/* Dashboard Visual */}
-          <div className="flex-1 w-full max-w-lg lg:max-w-none relative">
+          {/* Dashboard Visual — hidden on small mobile, shown from md up */}
+          <div className="hidden sm:block flex-1 w-full max-w-lg lg:max-w-none relative">
             <motion.div
               className="relative w-full aspect-[4/3] rounded-2xl border border-[#E5E7EB] bg-white shadow-2xl shadow-purple-100/60 overflow-hidden"
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
@@ -158,7 +157,6 @@ export default function Hero() {
 
               {/* Dashboard content */}
               <div className="p-4 bg-[#F8FAFC] h-full">
-                {/* Top metric cards */}
                 <div className="grid grid-cols-3 gap-2 mb-3">
                   {[
                     { label: "Revenue", value: "$12,480", color: "text-[#7C3AED]", bg: "bg-purple-50" },
@@ -172,7 +170,6 @@ export default function Hero() {
                   ))}
                 </div>
 
-                {/* Chart area */}
                 <div className="bg-white rounded-xl border border-[#E5E7EB] p-3 mb-3 shadow-sm">
                   <div className="text-[9px] text-[#6B7280] font-semibold mb-2">Monthly Revenue</div>
                   <div className="flex items-end gap-1 h-16">
@@ -191,7 +188,6 @@ export default function Hero() {
                   </div>
                 </div>
 
-                {/* Recent bookings */}
                 <div className="bg-white rounded-xl border border-[#E5E7EB] p-3 shadow-sm">
                   <div className="text-[9px] text-[#6B7280] font-semibold mb-2">Recent Bookings</div>
                   {["Sarah M. — 10:00 AM", "James O. — 11:30 AM", "Priya K. — 2:00 PM"].map((name) => (
@@ -203,14 +199,13 @@ export default function Hero() {
                 </div>
               </div>
 
-              {/* Background gradient overlay */}
               <div className="absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-white/20 to-transparent pointer-events-none" />
             </motion.div>
 
-            {/* Floating cards */}
-            <FloatingCard label="Booking Confirmed ✓" sub="Auto reminder sent" delay={0} top="-5%" left="-8%" color="purple" />
-            <FloatingCard label="New Customer" sub="+$299 revenue" delay={1.5} top="30%" right="-8%" color="green" />
-            <FloatingCard label="Payment Received" sub="$499 — Stripe" delay={0.8} bottom="10%" left="-5%" color="purple" />
+            {/* Floating cards — contained within parent, no negative offsets on mobile */}
+            <FloatingCard label="Booking Confirmed ✓" sub="Auto reminder sent" delay={0} top="-5%" left="2%" color="purple" />
+            <FloatingCard label="New Customer" sub="+$299 revenue" delay={1.5} top="30%" right="2%" color="green" />
+            <FloatingCard label="Payment Received" sub="$499 — Stripe" delay={0.8} bottom="10%" left="2%" color="purple" />
             <FloatingCard label="AI Assistant" sub="48 leads captured" delay={2} top="5%" right="5%" color="indigo" />
           </div>
         </div>
