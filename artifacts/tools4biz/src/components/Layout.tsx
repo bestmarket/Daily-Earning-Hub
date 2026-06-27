@@ -50,22 +50,47 @@ export default function Layout({ children }: { children: ReactNode }) {
       </main>
 
       <footer className="border-t bg-muted/20 mt-auto">
-        <div className="container mx-auto px-4 md:px-6 py-12 flex flex-col md:flex-row justify-between items-center gap-6">
-          <div className="flex flex-col items-center md:items-start gap-2">
-            <Link href="/" className="flex items-center gap-2" data-testid="link-footer-home">
-              <div className="w-6 h-6 rounded bg-primary flex items-center justify-center text-white font-bold text-xs">
-                T
+        <div className="container mx-auto px-4 md:px-6 py-12">
+          <div className="flex flex-col md:flex-row justify-between items-start gap-10">
+            <div className="flex flex-col gap-3 max-w-sm">
+              <Link href="/" className="flex items-center gap-2" data-testid="link-footer-home">
+                <div className="w-6 h-6 rounded bg-primary flex items-center justify-center text-white font-bold text-xs">
+                  T
+                </div>
+                <span className="font-bold text-lg tracking-tight">Tools4Biz</span>
+              </Link>
+              <p className="text-sm text-muted-foreground">
+                Premium AI-built software tools curated for ambitious businesses. Built by an indie hacker.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-10 text-sm font-medium">
+              <div className="flex flex-col gap-3">
+                <p className="font-bold text-foreground text-xs uppercase tracking-widest">Product</p>
+                <Link href="/tools" className="text-muted-foreground hover:text-foreground transition-colors" data-testid="link-footer-tools">All Tools</Link>
+                <Link href="/about" className="text-muted-foreground hover:text-foreground transition-colors" data-testid="link-footer-about">About</Link>
+                <Link href="/custom-request" className="text-muted-foreground hover:text-foreground transition-colors">Custom Build</Link>
               </div>
-              <span className="font-bold text-lg tracking-tight">Tools4Biz</span>
-            </Link>
-            <p className="text-sm text-muted-foreground text-center md:text-left max-w-sm">
-              Premium AI-built software tools curated for ambitious businesses. Built by an indie hacker.
-            </p>
+              <div className="flex flex-col gap-3">
+                <p className="font-bold text-foreground text-xs uppercase tracking-widest">Connect</p>
+                <a href="https://twitter.com" target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground transition-colors">X (Twitter)</a>
+              </div>
+              <div className="flex flex-col gap-3">
+                <p className="font-bold text-foreground text-xs uppercase tracking-widest">Legal</p>
+                <Link href="/privacy-policy" className="text-muted-foreground hover:text-foreground transition-colors">Privacy Policy</Link>
+                <Link href="/terms" className="text-muted-foreground hover:text-foreground transition-colors">Terms of Service</Link>
+                <Link href="/refund" className="text-muted-foreground hover:text-foreground transition-colors">Refund Policy</Link>
+              </div>
+            </div>
           </div>
-          <div className="flex gap-6 text-sm font-medium">
-            <Link href="/tools" className="text-muted-foreground hover:text-foreground transition-colors" data-testid="link-footer-tools">Catalog</Link>
-            <Link href="/about" className="text-muted-foreground hover:text-foreground transition-colors" data-testid="link-footer-about">About</Link>
-            <a href="https://twitter.com" target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground transition-colors">X (Twitter)</a>
+
+          <div className="border-t border-border/40 mt-10 pt-6 flex flex-col md:flex-row justify-between items-center gap-3 text-xs text-muted-foreground">
+            <p>© {new Date().getFullYear()} Tools4Biz. All rights reserved.</p>
+            <div className="flex gap-4">
+              <Link href="/privacy-policy" className="hover:text-foreground transition-colors">Privacy</Link>
+              <Link href="/terms" className="hover:text-foreground transition-colors">Terms</Link>
+              <Link href="/refund" className="hover:text-foreground transition-colors">Refunds</Link>
+            </div>
           </div>
         </div>
       </footer>

@@ -10,6 +10,9 @@ import ToolDetail from "@/pages/ToolDetail";
 import About from "@/pages/About";
 import CustomRequest from "@/pages/CustomRequest";
 import Admin from "@/pages/Admin";
+import PrivacyPolicy from "@/pages/PrivacyPolicy";
+import Terms from "@/pages/Terms";
+import Refund from "@/pages/Refund";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -30,6 +33,9 @@ function Router() {
         <Route path="/about" component={About} />
         <Route path="/custom-request" component={CustomRequest} />
         <Route path="/admin" component={Admin} />
+        <Route path="/privacy-policy" component={PrivacyPolicy} />
+        <Route path="/terms" component={Terms} />
+        <Route path="/refund" component={Refund} />
         <Route component={NotFound} />
       </Switch>
     </Layout>

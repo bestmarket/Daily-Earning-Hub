@@ -9,7 +9,6 @@ import {
   useUpdateCustomRequest,
   useDeleteTool,
   useCreateTool,
-  useUpdateTool,
   getGetAdminSummaryQueryKey,
   getGetAdminCustomRequestsQueryKey,
   getListToolsQueryKey
@@ -23,7 +22,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { LogOut, LayoutDashboard, Wrench, Users, MessageSquare } from "lucide-react";
+import { LogOut, LayoutDashboard, Wrench, Users, MessageSquare, Link2, Copy, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Admin() {
@@ -186,9 +185,24 @@ function AdminDashboard({ token }: { token: string }) {
     );
   };
 
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    toast.success("Link copied to clipboard");
+  };
+
+  const baseUrl = typeof window !== "undefined" ? window.location.origin : "https://tools4biz.com";
+
+  const staticLinks = [
+    { label: "All Tools Catalog", path: "/tools", description: "Browse all available tools" },
+    { label: "Custom Request Form", path: "/custom-request", description: "Request a custom software build" },
+    { label: "About Page", path: "/about", description: "Our story and manifesto" },
+    { label: "Privacy Policy", path: "/privacy-policy", description: "Data & privacy information" },
+    { label: "Terms of Service", path: "/terms", description: "Usage terms and conditions" },
+    { label: "Refund Policy", path: "/refund", description: "Refund and return policy" },
+  ];
+
   return (
     <div className="space-y-8">
-      {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <SummaryCard 
           title="Total Revenue" 
@@ -223,6 +237,9 @@ function AdminDashboard({ token }: { token: string }) {
           </TabsTrigger>
           <TabsTrigger value="tools" className="h-10 rounded-lg px-6 font-semibold data-[state=active]:bg-primary/10 data-[state=active]:text-primary">
             Tools Catalog
+          </TabsTrigger>
+          <TabsTrigger value="links" className="h-10 rounded-lg px-6 font-semibold data-[state=active]:bg-primary/10 data-[state=active]:text-primary">
+            <Link2 className="w-4 h-4 mr-2" />Page Links
           </TabsTrigger>
         </TabsList>
 
@@ -435,6 +452,100 @@ function AdminDashboard({ token }: { token: string }) {
               ))}
             </TableBody>
           </Table>
+        </TabsContent>
+
+        <TabsContent value="links" className="bg-card border border-border/50 rounded-2xl shadow-sm overflow-hidden">
+          <div className="p-6 border-b border-border/50 bg-muted/20">
+            <h2 className="text-xl font-bold tracking-tight">All Page Links</h2>
+            <p className="text-sm text-muted-foreground mt-1">Quick access to every public page URL for sharing and marketing.</p>
+          </div>
+
+          <div className="p-6 space-y-6">
+            <div>
+              <h3 className="text-sm font-bold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-2">
+                <Link2 className="w-4 h-4" /> Static Pages
+              </h3>
+              <div className="space-y-3">
+                {staticLinks.map((link) => {
+                  const fullUrl = `${baseUrl}${link.path}`;
+                  return (
+                    <div key={link.path} className="flex items-center justify-between p-4 bg-muted/30 rounded-xl border border-border/40 gap-4">
+                      <div className="min-w-0">
+                        <p className="font-semibold text-sm text-foreground">{link.label}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">{link.description}</p>
+                        <p className="text-xs font-mono text-primary/70 mt-1 truncate">{fullUrl}</p>
+                      </div>
+                      <div className="flex gap-2 shrink-0">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 w-8 p-0"
+                          onClick={() => copyToClipboard(fullUrl)}
+                          title="Copy link"
+                        >
+                          <Copy className="w-3.5 h-3.5" />
+                        </Button>
+                        <a href={link.path} target="_blank" rel="noopener noreferrer">
+                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" title="Open in new tab">
+                            <ExternalLink className="w-3.5 h-3.5" />
+                          </Button>
+                        </a>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {tools && tools.length > 0 && (
+              <div>
+                <h3 className="text-sm font-bold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-2">
+                  <Wrench className="w-4 h-4" /> Tool Detail Pages
+                </h3>
+                <div className="space-y-3">
+                  {tools.map((tool) => {
+                    const fullUrl = `${baseUrl}/tools/${tool.id}`;
+                    return (
+                      <div key={tool.id} className="flex items-center justify-between p-4 bg-muted/30 rounded-xl border border-border/40 gap-4">
+                        <div className="min-w-0 flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-lg bg-background border border-border/50 flex items-center justify-center text-sm shrink-0">
+                            {tool.emoji || '🚀'}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="font-semibold text-sm text-foreground">{tool.name}</p>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <Badge
+                                className={`text-xs h-5 ${tool.status === 'available' ? 'bg-green-100 text-green-700 border-green-200' : 'bg-orange-100 text-orange-700 border-orange-200'}`}
+                              >
+                                {tool.status.replace("_", " ")}
+                              </Badge>
+                              <span className="text-xs text-muted-foreground font-mono truncate">{fullUrl}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex gap-2 shrink-0">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0"
+                            onClick={() => copyToClipboard(fullUrl)}
+                            title="Copy link"
+                          >
+                            <Copy className="w-3.5 h-3.5" />
+                          </Button>
+                          <a href={`/tools/${tool.id}`} target="_blank" rel="noopener noreferrer">
+                            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" title="Open in new tab">
+                              <ExternalLink className="w-3.5 h-3.5" />
+                            </Button>
+                          </a>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
         </TabsContent>
       </Tabs>
     </div>
