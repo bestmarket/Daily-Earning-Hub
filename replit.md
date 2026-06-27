@@ -36,9 +36,40 @@ _Describe the high-level user-facing capabilities of this app once they exist._
 
 _Populate as you build — explicit user instructions worth remembering across sessions._
 
+## Vercel Deployment (agency-site)
+
+The `agency-site` is configured to deploy to Vercel as a static frontend. The `vercel.json` at the repo root points Vercel at the right build command and output directory.
+
+### Environment variables to set in the Vercel dashboard
+
+| Variable | Required | Description |
+|---|---|---|
+| `VITE_API_BASE_URL` | **Yes** | Full URL of your deployed API server (e.g. `https://your-api.railway.app`). Without this, all `/api/...` calls will fail since Vercel has no backend. |
+
+### How to set them
+1. Go to your Vercel project → **Settings** → **Environment Variables**
+2. Add `VITE_API_BASE_URL` with the URL of your separately-hosted API server
+3. Set the environment to **Production** (and Preview if desired)
+4. Redeploy
+
+### Deploying the API server
+The API server (`artifacts/api-server`) is an Express app — it cannot run on Vercel directly. Host it on a platform that supports Node.js long-running servers, such as:
+- **Railway** (recommended — easiest pnpm monorepo support)
+- **Render**
+- **Fly.io**
+
+Once deployed there, copy that URL into the `VITE_API_BASE_URL` variable above.
+
+The API server requires its own environment variable:
+| Variable | Description |
+|---|---|
+| `DATABASE_URL` | PostgreSQL connection string |
+| `GOOGLE_GENERATIVE_AI_API_KEY` | Google Gemini API key (for AI recommendation feature) |
+
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- `PORT` and `BASE_PATH` are optional in `vite.config.ts` — they default to `3000` and `/` when not set (as on Vercel builds). Do not make them required again.
+- The pnpm version is pinned to `10.26.1` in `package.json` (`packageManager` field). If you upgrade pnpm, update this field and regenerate the lockfile before pushing.
 
 ## Pointers
 

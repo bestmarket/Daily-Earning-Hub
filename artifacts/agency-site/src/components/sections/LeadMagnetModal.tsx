@@ -6,6 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CheckCircle2, Loader2, Sparkles, ArrowRight, AlertCircle } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import API_BASE from "@/lib/api";
 
 const industries = [
   "Restaurant / Food & Beverage", "Retail / E-commerce", "Healthcare / Medical",
@@ -29,8 +30,6 @@ type Rec = {
 };
 
 type Step = 1 | 2 | 3 | 4 | "loading" | "result" | "error";
-
-const API_BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 export default function LeadMagnetModal() {
   const [open, setOpen] = useState(false);

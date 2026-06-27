@@ -6,8 +6,7 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { Save, Lock, DollarSign, CreditCard, MessageSquare, Sparkles, RefreshCw, ChevronDown, ChevronUp } from "lucide-react";
-
-const API_BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+import API_BASE from "@/lib/api";
 const ADMIN_TOKEN = "devstudio-admin";
 
 type PricingPlan = {
