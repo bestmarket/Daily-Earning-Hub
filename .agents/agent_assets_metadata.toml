@@ -1,5 +1,4 @@
 uploads = []
-outputs = []
 
 [[generated]]
 id = "Kk39ozKdR7GKFWipl-R_x"
@@ -84,3 +83,9 @@ id = "lrr9aUkcVt0xn5xh-cjvG"
 uri = "file://artifacts/agency-site/public/showcase-dental.png"
 type = "image"
 title = "Dental UI Mockup"
+
+[[outputs]]
+id = "m9hrn_GciN_UgKUAlZ1sd"
+uri = "file://og-preview.png"
+type = "image"
+title = "OG Image — Tool #1 (Digital Product Store Builder)"

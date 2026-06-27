@@ -1,0 +1,2 @@
+- [Satori flex requirement](satori-flex.md) — every element with multiple children needs explicit `display: flex`; satori has no block default.
+- [DB schema push required](db-schema.md) — fresh env starts with empty DB; must run `pnpm --filter @workspace/db run push` before any tool routes work.

@@ -50,6 +50,7 @@ export default function ToolDetail() {
     ? `${tool.tagline} — ${tool.description?.slice(0, 120)}...`
     : `${tool.description?.slice(0, 155)}...`;
   const seoKeywords = `${tool.name}, ${tool.category}, business software, ${isAvailable ? "buy" : "waitlist"}, Tools4Biz, indie tools, business tools`;
+  const ogImage = `https://tools4biz.com/api/og/${tool.id}`;
 
   return (
     <>
@@ -58,6 +59,7 @@ export default function ToolDetail() {
         description={seoDescription}
         keywords={seoKeywords}
         canonicalPath={`/tools/${tool.id}`}
+        ogImage={ogImage}
       />
       <div className="flex-1 w-full bg-background animate-in fade-in duration-500 pb-24">
         <div className="h-64 bg-primary/5 absolute top-0 left-0 right-0 border-b border-border/40 -z-10"></div>

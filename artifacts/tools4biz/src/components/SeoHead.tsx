@@ -5,9 +5,10 @@ interface SeoHeadProps {
   description: string;
   keywords?: string;
   canonicalPath?: string;
+  ogImage?: string;
 }
 
-export default function SeoHead({ title, description, keywords, canonicalPath }: SeoHeadProps) {
+export default function SeoHead({ title, description, keywords, canonicalPath, ogImage }: SeoHeadProps) {
   useEffect(() => {
     document.title = title;
 
@@ -24,12 +25,21 @@ export default function SeoHead({ title, description, keywords, canonicalPath }:
 
     setMeta("description", description);
     if (keywords) setMeta("keywords", keywords);
+
     setMeta("og:title", title, true);
     setMeta("og:description", description, true);
     setMeta("og:type", "website", true);
-    setMeta("twitter:card", "summary_large_image");
+    if (ogImage) {
+      setMeta("og:image", ogImage, true);
+      setMeta("og:image:width", "1200", true);
+      setMeta("og:image:height", "630", true);
+      setMeta("og:image:type", "image/png", true);
+    }
+
+    setMeta("twitter:card", ogImage ? "summary_large_image" : "summary");
     setMeta("twitter:title", title);
     setMeta("twitter:description", description);
+    if (ogImage) setMeta("twitter:image", ogImage);
 
     if (canonicalPath) {
       let link = document.querySelector('link[rel="canonical"]') as HTMLLinkElement | null;
@@ -40,7 +50,7 @@ export default function SeoHead({ title, description, keywords, canonicalPath }:
       }
       link.setAttribute("href", `https://tools4biz.com${canonicalPath}`);
     }
-  }, [title, description, keywords, canonicalPath]);
+  }, [title, description, keywords, canonicalPath, ogImage]);
 
   return null;
 }
