@@ -1,11 +1,13 @@
 import { useState, useEffect } from "react";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
-import { Menu, X, Sparkles } from "lucide-react";
+import { Menu, X, Sparkles, Wrench } from "lucide-react";
 
 export default function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [location, navigate] = useLocation();
+  const isHome = location === "/";
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 20);
@@ -15,7 +17,12 @@ export default function Navbar() {
 
   const scrollTo = (id: string) => {
     setMobileMenuOpen(false);
-    document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
+    if (!isHome) {
+      navigate("/");
+      setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior: "smooth" }), 300);
+    } else {
+      document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
+    }
   };
 
   return (
@@ -35,7 +42,7 @@ export default function Navbar() {
         </Link>
 
         {/* Desktop Nav */}
-        <nav className="hidden md:flex items-center gap-8">
+        <nav className="hidden md:flex items-center gap-7">
           {[
             { label: "Home", id: "home" },
             { label: "Solutions", id: "solutions" },
@@ -51,16 +58,18 @@ export default function Navbar() {
               {item.label}
             </button>
           ))}
+
+          {/* Free Tools link — highlighted */}
+          <Link
+            href="/free-tools"
+            className="flex items-center gap-1.5 text-sm font-semibold text-[#7C3AED] bg-purple-50 border border-purple-200 px-3 py-1.5 rounded-full hover:bg-purple-100 transition-colors"
+          >
+            <Wrench className="w-3.5 h-3.5" />
+            Free Tools
+          </Link>
         </nav>
 
         <div className="hidden md:flex items-center gap-3">
-          <Button
-            variant="ghost"
-            className="text-[#6B7280] hover:text-[#7C3AED] hover:bg-purple-50 font-medium"
-            onClick={() => scrollTo("pricing")}
-          >
-            View Pricing
-          </Button>
           <Button
             onClick={() => window.dispatchEvent(new CustomEvent("open-lead-magnet"))}
             className="btn-premium text-white font-semibold"
@@ -77,7 +86,7 @@ export default function Navbar() {
 
       {/* Mobile Menu */}
       <div
-        className={`md:hidden fixed inset-0 bg-white z-40 transition-transform duration-300 flex flex-col items-center justify-center gap-6 ${
+        className={`md:hidden fixed inset-0 bg-white z-40 transition-transform duration-300 flex flex-col items-center justify-center gap-5 ${
           mobileMenuOpen ? "translate-y-0" : "-translate-y-full"
         }`}
       >
@@ -96,9 +105,19 @@ export default function Navbar() {
             {item.label}
           </button>
         ))}
+
+        <Link
+          href="/free-tools"
+          onClick={() => setMobileMenuOpen(false)}
+          className="flex items-center gap-2 text-xl font-semibold text-[#7C3AED]"
+        >
+          <Wrench className="w-5 h-5" />
+          Free Tools
+        </Link>
+
         <Button
           size="lg"
-          className="btn-premium text-white mt-4 px-8"
+          className="btn-premium text-white mt-2 px-8"
           onClick={() => {
             setMobileMenuOpen(false);
             window.dispatchEvent(new CustomEvent("open-lead-magnet"));

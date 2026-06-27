@@ -7,6 +7,7 @@ import Pricing from "@/components/sections/Pricing";
 import HowItWorks from "@/components/sections/HowItWorks";
 import WhyChooseUs from "@/components/sections/WhyChooseUs";
 import FeaturedProjects from "@/components/sections/FeaturedProjects";
+import Testimonials from "@/components/sections/Testimonials";
 import FAQ from "@/components/sections/FAQ";
 import FinalCTA from "@/components/sections/FinalCTA";
 import Footer from "@/components/layout/Footer";
@@ -27,6 +28,7 @@ export default function Home() {
         <HowItWorks />
         <WhyChooseUs />
         <FeaturedProjects />
+        <Testimonials />
         <FAQ />
         <FinalCTA />
       </main>
