@@ -1,11 +1,18 @@
 import { useState, useEffect } from "react";
+import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { Save, Lock, DollarSign, CreditCard, MessageSquare, Sparkles, RefreshCw, ChevronDown, ChevronUp, AlertTriangle } from "lucide-react";
+import {
+  Save, Lock, DollarSign, CreditCard, MessageSquare, Sparkles, RefreshCw,
+  ChevronDown, ChevronUp, AlertTriangle, Mail, Send, Target, Plus, Trash2,
+  CheckCircle2, Clock, Wrench, ExternalLink, Calculator, Brain, TrendingUp, Users,
+} from "lucide-react";
 import API_BASE from "@/lib/api";
 const ADMIN_TOKEN = "devstudio-admin";
 const LS_KEY = "devstudio_site_settings";
@@ -391,6 +398,58 @@ export default function Admin() {
           </div>
         </Section>
 
+        {/* Free Tools Links */}
+        <Section title="Free Tools" icon={<Wrench className="w-5 h-5 text-primary" />} defaultOpen={true}>
+          <p className="text-sm text-muted-foreground mb-4">
+            Quick links to all 7 free business tools on your site. Share these with prospects to generate leads.
+          </p>
+          <div className="grid sm:grid-cols-2 gap-3">
+            {[
+              { label: "ROI Calculator", icon: <DollarSign className="w-4 h-4 text-purple-600" />, hash: "roi", desc: "Shows annual cost of manual work" },
+              { label: "Project Cost Estimator", icon: <Calculator className="w-4 h-4 text-green-600" />, hash: "cost", desc: "Instant price estimate by features" },
+              { label: "Business Software Quiz", icon: <Brain className="w-4 h-4 text-indigo-600" />, hash: "quiz", desc: "Recommends the right software" },
+              { label: "Break-Even Calculator", icon: <Target className="w-4 h-4 text-amber-600" />, hash: "breakeven", desc: "Payback period & churn cost" },
+              { label: "Lost Leads Calculator", icon: <Users className="w-4 h-4 text-rose-600" />, hash: "leads", desc: "Revenue lost to slow responses" },
+              { label: "Productivity Audit", icon: <Clock className="w-4 h-4 text-teal-600" />, hash: "productivity", desc: "Real cost of admin tasks" },
+              { label: "Revenue Growth Projector", icon: <TrendingUp className="w-4 h-4 text-purple-600" />, hash: "revenue", desc: "12-month revenue comparison" },
+            ].map((tool) => (
+              <a
+                key={tool.hash}
+                href={`/free-tools`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-3 p-3 rounded-xl border border-border/50 hover:border-primary/40 hover:bg-primary/5 transition-all group"
+              >
+                <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center flex-shrink-0">
+                  {tool.icon}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-semibold text-foreground">{tool.label}</div>
+                  <div className="text-xs text-muted-foreground truncate">{tool.desc}</div>
+                </div>
+                <ExternalLink className="w-3.5 h-3.5 text-muted-foreground group-hover:text-primary flex-shrink-0" />
+              </a>
+            ))}
+          </div>
+          <div className="mt-4 flex gap-3">
+            <Link href="/free-tools">
+              <Button variant="outline" className="gap-2">
+                <Wrench className="w-4 h-4" /> Open Free Tools Page
+              </Button>
+            </Link>
+            <Button
+              variant="ghost"
+              className="gap-2 text-muted-foreground"
+              onClick={() => { navigator.clipboard.writeText(window.location.origin + "/free-tools"); toast({ title: "Link copied!", description: "Free Tools page URL copied to clipboard." }); }}
+            >
+              Copy Link
+            </Button>
+          </div>
+        </Section>
+
+        {/* Email Outreach */}
+        <EmailOutreachSection />
+
         {/* Contact Info */}
         <Section title="Contact & WhatsApp" icon={<MessageSquare className="w-5 h-5 text-primary" />} defaultOpen={false}>
           <div className="space-y-4">
@@ -429,5 +488,264 @@ export default function Admin() {
 
       </div>
     </div>
+  );
+}
+
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+interface Lead {
+  id: number;
+  name: string;
+  email: string;
+  company: string;
+  role: string;
+  service: string;
+  note: string;
+  status: "new" | "contacted" | "replied" | "converted";
+  addedAt: string;
+}
+
+// ─── Email Outreach Section ───────────────────────────────────────────────────
+
+function EmailOutreachSection() {
+  const DEFAULT_TEMPLATE = `Hi {{name}},
+
+I came across your business and thought you might benefit from a custom software solution tailored for companies like yours.
+
+We specialise in building {{service}} — helping businesses like {{company}} save time, reduce manual work, and grow revenue.
+
+We'd love to offer you a free consultation to see how we can help.
+
+Would you be open to a quick chat?
+
+Best,
+[Your Name]
+DevStudio — devstudio.com`;
+
+  const [leads, setLeads] = useState<Lead[]>(() => {
+    try { return JSON.parse(localStorage.getItem("ds_leads") || "[]"); } catch { return []; }
+  });
+  const [emailTemplate, setEmailTemplate] = useState(
+    () => localStorage.getItem("ds_email_template") || DEFAULT_TEMPLATE
+  );
+  const [newLead, setNewLead] = useState({ name: "", email: "", company: "", role: "", service: "", note: "" });
+  const [isAddOpen, setIsAddOpen] = useState(false);
+  const [composing, setComposing] = useState<Lead | null>(null);
+  const [composedEmail, setComposedEmail] = useState("");
+
+  const saveLeads = (updated: Lead[]) => {
+    setLeads(updated);
+    localStorage.setItem("ds_leads", JSON.stringify(updated));
+  };
+
+  const addLead = () => {
+    if (!newLead.email) return;
+    const lead: Lead = { ...newLead, id: Date.now(), status: "new", addedAt: new Date().toISOString() };
+    saveLeads([lead, ...leads]);
+    setNewLead({ name: "", email: "", company: "", role: "", service: "", note: "" });
+    setIsAddOpen(false);
+  };
+
+  const removeLead = (id: number) => {
+    if (confirm("Remove this lead?")) saveLeads(leads.filter((l) => l.id !== id));
+  };
+
+  const updateLeadStatus = (id: number, status: Lead["status"]) => {
+    saveLeads(leads.map((l) => (l.id === id ? { ...l, status } : l)));
+  };
+
+  const composeEmail = (lead: Lead) => {
+    const body = emailTemplate
+      .replace(/\{\{name\}\}/g, lead.name || "there")
+      .replace(/\{\{service\}\}/g, lead.service || "[Service]")
+      .replace(/\{\{company\}\}/g, lead.company || "your company");
+    setComposedEmail(body);
+    setComposing(lead);
+  };
+
+  const openMailto = (lead: Lead) => {
+    const subject = encodeURIComponent(`Custom Software for ${lead.company || "Your Business"}`);
+    const body = encodeURIComponent(composedEmail);
+    window.open(`mailto:${lead.email}?subject=${subject}&body=${body}`, "_blank");
+    updateLeadStatus(lead.id, "contacted");
+    setComposing(null);
+  };
+
+  const statusCounts = {
+    new: leads.filter((l) => l.status === "new").length,
+    contacted: leads.filter((l) => l.status === "contacted").length,
+    replied: leads.filter((l) => l.status === "replied").length,
+    converted: leads.filter((l) => l.status === "converted").length,
+  };
+
+  return (
+    <Section title="Email Outreach" icon={<Mail className="w-5 h-5 text-primary" />} defaultOpen={false}>
+      <div className="space-y-6">
+        {/* Stats */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {[
+            { label: "New Leads", count: statusCounts.new, color: "text-blue-600", bg: "bg-blue-50 border-blue-100", icon: <Target className="w-4 h-4" /> },
+            { label: "Contacted", count: statusCounts.contacted, color: "text-yellow-600", bg: "bg-yellow-50 border-yellow-100", icon: <Mail className="w-4 h-4" /> },
+            { label: "Replied", count: statusCounts.replied, color: "text-purple-600", bg: "bg-purple-50 border-purple-100", icon: <RefreshCw className="w-4 h-4" /> },
+            { label: "Converted", count: statusCounts.converted, color: "text-green-600", bg: "bg-green-50 border-green-100", icon: <CheckCircle2 className="w-4 h-4" /> },
+          ].map((s) => (
+            <div key={s.label} className={`flex items-center gap-3 p-3 rounded-xl border ${s.bg}`}>
+              <div className={s.color}>{s.icon}</div>
+              <div>
+                <div className={`text-2xl font-extrabold ${s.color}`}>{s.count}</div>
+                <div className="text-xs font-semibold text-muted-foreground">{s.label}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="grid lg:grid-cols-3 gap-6">
+          {/* Lead List */}
+          <div className="lg:col-span-2 rounded-xl border border-border/50 overflow-hidden">
+            <div className="p-4 border-b border-border/50 bg-muted/20 flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-bold flex items-center gap-2"><Target className="w-4 h-4 text-primary" /> Prospects</h3>
+                <p className="text-xs text-muted-foreground">{leads.length} leads tracked</p>
+              </div>
+              <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
+                <DialogTrigger asChild>
+                  <Button size="sm" className="gap-1.5 font-semibold"><Plus className="w-4 h-4" /> Add Lead</Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-md">
+                  <DialogHeader><DialogTitle>Add New Lead</DialogTitle></DialogHeader>
+                  <div className="space-y-3 mt-2">
+                    {[
+                      { key: "name", placeholder: "Contact name", label: "Name" },
+                      { key: "email", placeholder: "email@company.com", label: "Email *" },
+                      { key: "company", placeholder: "Company name", label: "Company" },
+                      { key: "role", placeholder: "CEO, Founder, Manager…", label: "Role" },
+                      { key: "service", placeholder: "Booking system, CRM, dashboard…", label: "Service to pitch" },
+                    ].map((f) => (
+                      <div key={f.key}>
+                        <label className="text-xs font-semibold text-muted-foreground mb-1 block">{f.label}</label>
+                        <Input
+                          placeholder={f.placeholder}
+                          value={(newLead as any)[f.key]}
+                          onChange={(e) => setNewLead((p) => ({ ...p, [f.key]: e.target.value }))}
+                        />
+                      </div>
+                    ))}
+                    <div>
+                      <label className="text-xs font-semibold text-muted-foreground mb-1 block">Note</label>
+                      <Textarea placeholder="Any context about this lead…" value={newLead.note} onChange={(e) => setNewLead((p) => ({ ...p, note: e.target.value }))} rows={2} />
+                    </div>
+                    <Button onClick={addLead} className="w-full font-semibold" disabled={!newLead.email}>Add Lead</Button>
+                  </div>
+                </DialogContent>
+              </Dialog>
+            </div>
+
+            {leads.length === 0 ? (
+              <div className="py-14 text-center text-muted-foreground">
+                <Target className="w-10 h-10 mx-auto mb-3 opacity-20" />
+                <p className="font-medium text-sm">No leads yet. Add your first prospect.</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-border/40">
+                {leads.map((lead) => (
+                  <div key={lead.id} className="p-4 flex items-start gap-3 hover:bg-muted/20 transition-colors">
+                    <div className="w-8 h-8 rounded-full bg-primary/10 text-primary font-bold text-sm flex items-center justify-center shrink-0">
+                      {(lead.name || lead.email).slice(0, 2).toUpperCase()}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-semibold text-sm">{lead.name || "—"}</span>
+                        <span className="text-xs text-muted-foreground">{lead.email}</span>
+                        {lead.company && <Badge variant="outline" className="text-xs h-5">{lead.company}</Badge>}
+                      </div>
+                      {lead.service && <p className="text-xs text-primary/80 font-medium mt-0.5">Pitch: {lead.service}</p>}
+                      {lead.note && <p className="text-xs text-muted-foreground mt-0.5 truncate">{lead.note}</p>}
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+                      <Select value={lead.status} onValueChange={(v) => updateLeadStatus(lead.id, v as Lead["status"])}>
+                        <SelectTrigger className={`w-[110px] h-7 text-xs font-semibold ${
+                          lead.status === "converted" ? "text-green-700 border-green-200 bg-green-50" :
+                          lead.status === "replied" ? "text-purple-700 border-purple-200 bg-purple-50" :
+                          lead.status === "contacted" ? "text-yellow-700 border-yellow-200 bg-yellow-50" :
+                          "text-blue-700 border-blue-200 bg-blue-50"
+                        }`}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="new">🔵 New</SelectItem>
+                          <SelectItem value="contacted">📧 Contacted</SelectItem>
+                          <SelectItem value="replied">💬 Replied</SelectItem>
+                          <SelectItem value="converted">✅ Converted</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Button size="sm" variant="outline" className="h-7 px-2 text-xs gap-1" onClick={() => composeEmail(lead)}>
+                        <Send className="w-3 h-3" /> Email
+                      </Button>
+                      <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive/60 hover:text-destructive" onClick={() => removeLead(lead.id)}>
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Email Template / Composer */}
+          <div className="space-y-4">
+            {composing ? (
+              <div className="rounded-xl border border-primary/30 overflow-hidden">
+                <div className="p-4 border-b border-border/50 bg-primary/5">
+                  <h3 className="text-sm font-bold flex items-center gap-2"><Mail className="w-4 h-4 text-primary" /> Email to {composing.name || composing.email}</h3>
+                  <p className="text-xs text-muted-foreground mt-0.5">Edit before sending</p>
+                </div>
+                <div className="p-4 space-y-3">
+                  <Textarea value={composedEmail} onChange={(e) => setComposedEmail(e.target.value)} rows={12} className="text-xs font-mono resize-none" />
+                  <div className="flex gap-2">
+                    <Button className="flex-1 font-semibold gap-2" onClick={() => openMailto(composing)}>
+                      <Send className="w-4 h-4" /> Open in Email App
+                    </Button>
+                    <Button variant="outline" onClick={() => setComposing(null)}>Cancel</Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground text-center">Opens your email client with the message pre-filled</p>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-border/50 overflow-hidden">
+                <div className="p-4 border-b border-border/50 bg-muted/20">
+                  <h3 className="text-sm font-bold flex items-center gap-2"><Mail className="w-4 h-4 text-primary" /> Email Template</h3>
+                  <p className="text-xs text-muted-foreground mt-0.5">Uses {"{{name}}"}, {"{{service}}"}, {"{{company}}"} tokens. Auto-saved.</p>
+                </div>
+                <div className="p-4 space-y-3">
+                  <Textarea
+                    value={emailTemplate}
+                    onChange={(e) => { setEmailTemplate(e.target.value); localStorage.setItem("ds_email_template", e.target.value); }}
+                    rows={14}
+                    className="text-xs font-mono resize-none"
+                    placeholder="Write your outreach email template here…"
+                  />
+                  <p className="text-xs text-muted-foreground">Click <strong>Email</strong> next to any lead to compose and send.</p>
+                </div>
+              </div>
+            )}
+
+            <div className="rounded-xl border border-border/50 p-4 space-y-2">
+              <h4 className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Outreach Tips</h4>
+              {[
+                { icon: <Target className="w-3.5 h-3.5 text-blue-500" />, tip: 'Find prospects by searching LinkedIn for your niche + "Founder" or "Owner"' },
+                { icon: <AlertTriangle className="w-3.5 h-3.5 text-yellow-500" />, tip: 'Add a personal note about their business to boost reply rates' },
+                { icon: <Clock className="w-3.5 h-3.5 text-purple-500" />, tip: 'Send Tue–Thu, 8–10am for highest open rates' },
+                { icon: <CheckCircle2 className="w-3.5 h-3.5 text-green-500" />, tip: 'Follow up once after 3 days — most deals close on follow-up' },
+              ].map((item, i) => (
+                <div key={i} className="flex items-start gap-2">
+                  <div className="mt-0.5 shrink-0">{item.icon}</div>
+                  <p className="text-xs text-muted-foreground leading-relaxed">{item.tip}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </Section>
   );
 }
