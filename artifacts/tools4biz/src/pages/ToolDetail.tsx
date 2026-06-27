@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ChevronLeft, CheckCircle2, ArrowRight, ShieldCheck, Zap } from "lucide-react";
+import { ChevronLeft, CheckCircle2, ArrowRight, ShieldCheck, Zap, Share2, Check } from "lucide-react";
 import ActionModal from "@/components/ActionModal";
 import SeoHead from "@/components/SeoHead";
 
@@ -14,6 +14,14 @@ export default function ToolDetail() {
   const { data: tool, isLoading } = useGetTool(id, { query: { enabled: !!id } });
   
   const [modalOpen, setModalOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const handleShare = () => {
+    navigator.clipboard.writeText(window.location.href).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
 
   if (isLoading) {
     return (
@@ -159,6 +167,38 @@ export default function ToolDetail() {
                   <ArrowRight className="w-5 h-5 ml-2 group-hover/btn:translate-x-1 transition-transform" />
                 </Button>
                 
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full h-10 text-sm rounded-xl font-semibold gap-2 transition-all"
+                  onClick={handleShare}
+                >
+                  {copied ? (
+                    <>
+                      <Check className="w-4 h-4 text-green-500" />
+                      <span className="text-green-600">Link Copied!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Share2 className="w-4 h-4" />
+                      Share this Tool
+                    </>
+                  )}
+                </Button>
+
+                <div className="mt-4 rounded-xl overflow-hidden border border-border/50 bg-muted/30">
+                  <div className="px-3 py-2 flex items-center justify-between border-b border-border/40">
+                    <span className="text-xs font-semibold text-muted-foreground tracking-wide uppercase">Social Preview</span>
+                    <span className="text-xs text-muted-foreground">1200 × 630</span>
+                  </div>
+                  <img
+                    src={`/api/og/${tool.id}`}
+                    alt={`Social preview card for ${tool.name}`}
+                    className="w-full block"
+                    loading="lazy"
+                  />
+                </div>
+
                 <div className="space-y-3 pt-4 border-t border-border/40 mt-6">
                   <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground">
                     <ShieldCheck className="w-4 h-4 text-green-500" /> Secure payment via Stripe / Paystack
