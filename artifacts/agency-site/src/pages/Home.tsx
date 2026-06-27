@@ -11,6 +11,7 @@ import FAQ from "@/components/sections/FAQ";
 import FinalCTA from "@/components/sections/FinalCTA";
 import Footer from "@/components/layout/Footer";
 import WhatsAppButton from "@/components/layout/WhatsAppButton";
+import SocialProof from "@/components/layout/SocialProof";
 import LeadMagnetModal from "@/components/sections/LeadMagnetModal";
 
 export default function Home() {
@@ -31,6 +32,7 @@ export default function Home() {
       </main>
       <Footer />
       <WhatsAppButton />
+      <SocialProof />
       <LeadMagnetModal />
     </div>
   );
