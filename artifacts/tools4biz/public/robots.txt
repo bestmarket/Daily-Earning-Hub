@@ -1,2 +1,3 @@
 User-agent: *
 Allow: /
+Sitemap: https://tools4biz.com/sitemap.xml
