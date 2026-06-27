@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useListTools } from "@workspace/api-client-react";
 import ToolCard from "@/components/ToolCard";
+import SeoHead from "@/components/SeoHead";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -21,6 +22,20 @@ export default function Tools() {
   const categories = ["all", "Make Money Online", "Grow on Social Media", "Start a SaaS", "Lead Generation", "Sell Digital Products", "Business Growth"];
 
   return (
+    <>
+      <SeoHead
+        title="All Business Tools — Tools4Biz Catalog"
+        description="Browse the complete catalog of premium business software. Digital product stores, client portals, WhatsApp automation, lead hunters, cold email senders, SaaS kits and more. One-time payment."
+        keywords="business tools catalog, digital product store, client portal software, WhatsApp automation, lead generation tool, cold email software, SaaS starter kit"
+        canonicalPath="/tools"
+        jsonLd={{
+          "@context": "https://schema.org",
+          "@type": "ItemList",
+          "name": "Tools4Biz — Business Software Catalog",
+          "description": "Premium indie business software. One-time payment, lifetime access.",
+          "url": "https://tools4biz.com/tools"
+        }}
+      />
     <div className="flex-1 w-full bg-background animate-in fade-in duration-500">
       <div className="bg-muted/10 border-b border-border/40 py-12 px-4">
         <div className="container mx-auto max-w-6xl">
@@ -93,5 +108,6 @@ export default function Tools() {
         )}
       </div>
     </div>
+    </>
   );
 }

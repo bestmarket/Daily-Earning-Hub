@@ -6,9 +6,10 @@ interface SeoHeadProps {
   keywords?: string;
   canonicalPath?: string;
   ogImage?: string;
+  jsonLd?: object;
 }
 
-export default function SeoHead({ title, description, keywords, canonicalPath, ogImage }: SeoHeadProps) {
+export default function SeoHead({ title, description, keywords, canonicalPath, ogImage, jsonLd }: SeoHeadProps) {
   useEffect(() => {
     document.title = title;
 
@@ -50,7 +51,22 @@ export default function SeoHead({ title, description, keywords, canonicalPath, o
       }
       link.setAttribute("href", `https://tools4biz.com${canonicalPath}`);
     }
-  }, [title, description, keywords, canonicalPath, ogImage]);
+
+    if (jsonLd) {
+      const existing = document.querySelector('script[data-seo-jsonld]');
+      if (existing) existing.remove();
+      const script = document.createElement("script");
+      script.type = "application/ld+json";
+      script.setAttribute("data-seo-jsonld", "true");
+      script.textContent = JSON.stringify(jsonLd);
+      document.head.appendChild(script);
+    }
+
+    return () => {
+      const script = document.querySelector('script[data-seo-jsonld]');
+      if (script) script.remove();
+    };
+  }, [title, description, keywords, canonicalPath, ogImage, jsonLd]);
 
   return null;
 }

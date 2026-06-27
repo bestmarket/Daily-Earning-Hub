@@ -1,8 +1,23 @@
 import { Button } from "@/components/ui/button";
 import { Mail, Github, Twitter, MapPin } from "lucide-react";
+import SeoHead from "@/components/SeoHead";
 
 export default function About() {
   return (
+    <>
+      <SeoHead
+        title="About Tools4Biz — The Builder Behind the Software"
+        description="Tools4Biz is a one-person indie lab building focused, high-performance business software. No bloat, no enterprise pricing. Direct access to the developer who built it."
+        keywords="about tools4biz, indie developer, business software maker, indie SaaS"
+        canonicalPath="/about"
+        jsonLd={{
+          "@context": "https://schema.org",
+          "@type": "AboutPage",
+          "name": "About Tools4Biz",
+          "description": "One-person indie lab dedicated to building un-bloated, effective software for serious businesses.",
+          "url": "https://tools4biz.com/about"
+        }}
+      />
     <div className="flex-1 w-full bg-background animate-in fade-in duration-500 py-16 px-4">
       <div className="max-w-3xl mx-auto space-y-12">
         <div className="text-center space-y-4">
@@ -70,5 +85,6 @@ export default function About() {
         </div>
       </div>
     </div>
+    </>
   );
 }

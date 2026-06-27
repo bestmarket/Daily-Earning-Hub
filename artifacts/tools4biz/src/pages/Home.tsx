@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import { useListTools, useGetToolStats } from "@workspace/api-client-react";
 import ToolCard from "@/components/ToolCard";
 import ActionModal from "@/components/ActionModal";
+import SeoHead from "@/components/SeoHead";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ArrowRight, Zap, Code, Shield, Users, Layers, TrendingUp, Rocket, Star, Quote } from "lucide-react";
@@ -58,6 +59,25 @@ export default function Home() {
   const [modalOpen, setModalOpen] = useState(false);
 
   return (
+    <>
+      <SeoHead
+        title="Tools4Biz — Premium Business Software, One-Time Price"
+        description="Expertly crafted software for serious businesses. Digital stores, client portals, WhatsApp automation, lead hunters, cold email senders and more. No bloat, no recurring fees."
+        keywords="business software, indie tools, digital product store, freelancer portal, whatsapp automation, lead generation, cold email, one-time payment"
+        canonicalPath="/"
+        jsonLd={{
+          "@context": "https://schema.org",
+          "@type": "WebSite",
+          "name": "Tools4Biz",
+          "url": "https://tools4biz.com",
+          "description": "Premium indie business software marketplace. One-time payment, lifetime access.",
+          "potentialAction": {
+            "@type": "SearchAction",
+            "target": "https://tools4biz.com/tools?search={search_term_string}",
+            "query-input": "required name=search_term_string"
+          }
+        }}
+      />
     <div className="flex flex-col w-full min-h-screen animate-in fade-in duration-700">
       {/* Hero Section */}
       <section className="relative pt-24 pb-32 overflow-hidden flex flex-col items-center justify-center text-center px-4 border-b border-border/40">
@@ -208,6 +228,7 @@ export default function Home() {
       
       <ActionModal isOpen={modalOpen} onOpenChange={setModalOpen} />
     </div>
+    </>
   );
 }
 
