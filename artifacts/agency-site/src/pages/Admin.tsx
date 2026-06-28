@@ -64,8 +64,11 @@ const DEFAULT_SETTINGS: SiteSettings = {
     { id: "paypal", name: "PayPal", enabled: true, details: "" },
     { id: "stripe", name: "Stripe", enabled: false, details: "" },
     { id: "paystack", name: "Paystack", enabled: false, details: "" },
+    { id: "flutterwave", name: "Flutterwave", enabled: false, details: "" },
+    { id: "lemonsqueezy", name: "Lemon Squeezy", enabled: false, details: "" },
     { id: "bank", name: "Bank Transfer", enabled: true, details: "" },
-    { id: "crypto", name: "Crypto (USDT/BTC)", enabled: false, details: "" },
+    { id: "crypto_usdt", name: "Crypto — USDT (TRC20/ERC20)", enabled: false, details: "" },
+    { id: "crypto_btc", name: "Crypto — Bitcoin (BTC)", enabled: false, details: "" },
   ],
   contact: { whatsapp: "+1234567890", email: "hello@devstudio.com", whatsappDisplay: "+1 (234) 567-890" },
   hero: { headline: "We Build Software That Helps Your Business Get More Customers & Save Time.", subheadline: "From booking systems and customer portals to AI-powered tools and SaaS platforms — we build custom software that grows your revenue.", ctaPrimary: "Get My Free Business Tool Idea", ctaSecondary: "View Examples" },
@@ -655,6 +658,39 @@ function PaymentsTab({ apiToken }: { apiToken: string }) {
         { key: "PAYPAL_SECRET", label: "Client Secret", hint: "From PayPal Developer Dashboard" },
       ],
     },
+    {
+      id: "paystack", label: "Paystack", icon: "🟢", color: "from-green-50 to-emerald-50 border-green-200",
+      desc: "Accept cards, bank transfers, USSD & mobile money. Popular across Africa. Get keys at dashboard.paystack.com.",
+      link: "https://dashboard.paystack.com/#/settings/developer",
+      keys: [
+        { key: "PAYSTACK_SECRET_KEY", label: "Secret Key", hint: "Starts with sk_live_ or sk_test_" },
+        { key: "PAYSTACK_PUBLIC_KEY", label: "Public Key", hint: "Starts with pk_live_ or pk_test_" },
+      ],
+    },
+    {
+      id: "flutterwave", label: "Flutterwave", icon: "🦋", color: "from-orange-50 to-red-50 border-orange-200",
+      desc: "Accept 30+ payment types across Africa & globally. Get keys at developer.flutterwave.com → API Keys.",
+      link: "https://developer.flutterwave.com/docs/integration-guides/introduction",
+      keys: [
+        { key: "FLUTTERWAVE_SECRET_KEY", label: "Secret Key", hint: "From Flutterwave Dashboard → Settings → API Keys" },
+        { key: "FLUTTERWAVE_PUBLIC_KEY", label: "Public Key", hint: "From Flutterwave Dashboard → Settings → API Keys" },
+      ],
+    },
+    {
+      id: "lemonsqueezy", label: "Lemon Squeezy", icon: "🍋", color: "from-yellow-50 to-lime-50 border-yellow-200",
+      desc: "Sell digital products & subscriptions with built-in tax handling. Get keys at app.lemonsqueezy.com → Settings → API.",
+      link: "https://app.lemonsqueezy.com/settings/api",
+      keys: [
+        { key: "LEMONSQUEEZY_API_KEY", label: "API Key", hint: "From Lemon Squeezy → Settings → API → Generate New API Key" },
+        { key: "LEMONSQUEEZY_STORE_ID", label: "Store ID", hint: "Found in your Lemon Squeezy store URL or dashboard" },
+      ],
+    },
+    {
+      id: "crypto", label: "Crypto Wallets", icon: "₿", color: "from-violet-50 to-purple-50 border-violet-200",
+      desc: "Accept Bitcoin & USDT directly to your wallets — no API keys needed. Just enter your wallet addresses in the payment methods section above.",
+      link: "",
+      keys: [],
+    },
   ];
 
   const hasDirtyKeys = Object.values(keyValues).some(v => v.trim());
@@ -679,7 +715,17 @@ function PaymentsTab({ apiToken }: { apiToken: string }) {
               <div className="w-32 font-semibold text-sm">{pm.name}</div>
               <Input
                 className="flex-1"
-                placeholder={pm.id === "paypal" ? "PayPal email or link" : pm.id === "stripe" ? "Stripe payment link (optional)" : pm.id === "bank" ? "Bank name, account no., sort code" : pm.id === "crypto" ? "Wallet address (USDT/BTC)" : "Details"}
+                placeholder={
+                  pm.id === "paypal" ? "PayPal email or payment link" :
+                  pm.id === "stripe" ? "Stripe payment link (optional)" :
+                  pm.id === "paystack" ? "Paystack payment link (optional)" :
+                  pm.id === "flutterwave" ? "Flutterwave payment link (optional)" :
+                  pm.id === "lemonsqueezy" ? "Lemon Squeezy checkout URL" :
+                  pm.id === "bank" ? "Bank name, account no., sort code" :
+                  pm.id === "crypto_usdt" ? "USDT wallet address (TRC20 or ERC20)" :
+                  pm.id === "crypto_btc" ? "Bitcoin (BTC) wallet address" :
+                  "Details"
+                }
                 value={pm.details}
                 onChange={(e) => updatePayment(idx, "details", e.target.value)}
               />
@@ -718,12 +764,20 @@ function PaymentsTab({ apiToken }: { apiToken: string }) {
                     <p className="text-xs text-muted-foreground">{group.desc}</p>
                   </div>
                 </div>
-                <a href={group.link} target="_blank" rel="noopener noreferrer">
-                  <Button variant="outline" size="sm" className="text-xs gap-1 bg-white/80 border-white h-7">
-                    Get Keys <ExternalLink className="w-3 h-3" />
-                  </Button>
-                </a>
+                {group.link && (
+                  <a href={group.link} target="_blank" rel="noopener noreferrer">
+                    <Button variant="outline" size="sm" className="text-xs gap-1 bg-white/80 border-white h-7">
+                      Get Keys <ExternalLink className="w-3 h-3" />
+                    </Button>
+                  </a>
+                )}
               </div>
+              {group.keys.length === 0 && (
+                <div className="bg-white/80 rounded-lg border border-white p-3 text-xs text-muted-foreground flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-violet-500 flex-shrink-0" />
+                  Enter your wallet addresses in the <span className="font-semibold text-foreground">Accepted Payment Methods</span> section above — no API keys needed for crypto.
+                </div>
+              )}
               {group.keys.map(({ key, label, hint }) => {
                 const status = apiKeys[key];
                 const isSet = status?.set;
