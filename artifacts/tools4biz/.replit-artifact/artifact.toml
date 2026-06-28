@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/tools4biz/"
+title = "Tools4Biz"
+version = "1.0.0"
+id = "artifacts/tools4biz"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/tools4biz/" ]
+localPort = 22944
+
+[services.development]
+run = "pnpm --filter @workspace/tools4biz run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/tools4biz", "run", "build" ]
+publicDir = "artifacts/tools4biz/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22944"
+BASE_PATH = "/tools4biz/"
