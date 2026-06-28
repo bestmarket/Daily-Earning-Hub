@@ -6,6 +6,7 @@ import NotFound from "@/pages/not-found";
 import Home from "@/pages/Home";
 import Admin from "@/pages/Admin";
 import FreeTools from "@/pages/FreeTools";
+import CRM from "@/pages/CRM";
 
 const queryClient = new QueryClient();
 
@@ -15,6 +16,7 @@ function Router() {
       <Route path="/" component={Home} />
       <Route path="/free-tools" component={FreeTools} />
       <Route path="/admin" component={Admin} />
+      <Route path="/admin/crm" component={CRM} />
       <Route component={NotFound} />
     </Switch>
   );

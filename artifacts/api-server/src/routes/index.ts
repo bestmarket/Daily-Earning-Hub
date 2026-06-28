@@ -6,6 +6,7 @@ import adminRouter from "./admin";
 import aiRecommendRouter from "./ai-recommend";
 import siteSettingsRouter from "./site-settings";
 import ogRouter from "./og";
+import crmAiRouter from "./crm-ai";
 
 const router: IRouter = Router();
 
@@ -16,5 +17,6 @@ router.use(adminRouter);
 router.use(aiRecommendRouter);
 router.use(siteSettingsRouter);
 router.use(ogRouter);
+router.use(crmAiRouter);
 
 export default router;

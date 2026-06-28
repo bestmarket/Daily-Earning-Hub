@@ -398,6 +398,34 @@ export default function Admin() {
           </div>
         </Section>
 
+        {/* AI Client Hunter CRM */}
+        <div className="rounded-2xl border-2 border-primary/30 bg-gradient-to-r from-purple-50 to-indigo-50 p-5">
+          <div className="flex items-start gap-4">
+            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#7C3AED] to-[#6366F1] flex items-center justify-center flex-shrink-0 shadow-lg shadow-purple-200">
+              <Sparkles className="w-6 h-6 text-white" />
+            </div>
+            <div className="flex-1">
+              <div className="flex items-center gap-2 mb-1">
+                <h3 className="font-extrabold text-lg text-[#111827]">AI Client Hunter</h3>
+                <span className="text-xs font-bold bg-purple-600 text-white px-2 py-0.5 rounded-full">NEW</span>
+              </div>
+              <p className="text-sm text-[#6B7280] mb-3">
+                Your private AI-powered sales engine. Find prospects, analyze websites, generate personalized emails, WhatsApp messages, LinkedIn pitches, and full proposals — all in one place.
+              </p>
+              <div className="flex flex-wrap gap-2 mb-4">
+                {["AI Website Analyzer","Proposal Generator","Email Outreach","WhatsApp Generator","LinkedIn Pitches","Follow-up Engine","CRM Pipeline"].map(f => (
+                  <span key={f} className="text-xs bg-white border border-purple-200 text-purple-700 font-semibold px-2 py-0.5 rounded-full">{f}</span>
+                ))}
+              </div>
+              <a href="/admin/crm">
+                <Button className="btn-premium text-white font-bold gap-2">
+                  <Sparkles className="w-4 h-4" /> Open AI Client Hunter
+                </Button>
+              </a>
+            </div>
+          </div>
+        </div>
+
         {/* Free Tools Links */}
         <Section title="Free Tools" icon={<Wrench className="w-5 h-5 text-primary" />} defaultOpen={true}>
           <p className="text-sm text-muted-foreground mb-4">
