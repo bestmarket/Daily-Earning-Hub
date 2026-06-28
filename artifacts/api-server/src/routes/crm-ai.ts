@@ -11,12 +11,14 @@ const router = Router();
 function makeTransporter(acct: { host: string; port: number; secure: boolean; user: string; password: string }) {
   const port = acct.port || 587;
   const secure = port === 465;
+  const pass = (acct.password || "").replace(/\s/g, "");
+  const user = (acct.user || "").trim();
   return nodemailer.createTransport({
     host: acct.host,
     port,
     secure,
     requireTLS: !secure,
-    auth: { user: acct.user, pass: acct.password },
+    auth: { user, pass },
     tls: { rejectUnauthorized: false },
     connectionTimeout: 15000,
     greetingTimeout: 10000,

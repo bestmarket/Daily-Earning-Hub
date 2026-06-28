@@ -11,12 +11,14 @@ const router = Router();
 function makeTransporter(acct: { host: string; port: number; secure: boolean; user: string; password: string }) {
   const port = acct.port || 587;
   const secure = port === 465;
+  const pass = (acct.password || "").replace(/\s/g, "");
+  const user = (acct.user || "").trim();
   return nodemailer.createTransport({
     host: acct.host,
     port,
     secure,
     requireTLS: !secure,
-    auth: { user: acct.user, pass: acct.password },
+    auth: { user, pass },
     tls: { rejectUnauthorized: false },
     connectionTimeout: 15000,
     greetingTimeout: 10000,
@@ -61,17 +63,22 @@ router.get("/automation/email-accounts", async (_req, res) => {
   res.json(accounts.map(maskPassword));
 });
 
+function cleanPassword(password: string): string {
+  return (password || "").replace(/\s/g, "");
+}
+
 router.post("/automation/email-accounts", async (req, res) => {
   const { label, provider, host, port, secure, user, password, fromName, fromEmail, imapEnabled, imapHost, imapPort } = req.body;
   if (!user) { res.status(400).json({ error: "user (email address) is required" }); return; }
+  if (!password || !password.trim()) { res.status(400).json({ error: "Password / API key is required" }); return; }
   const inserted = await db.insert(emailAccountsTable).values({
     label: label || user,
     provider: provider || "gmail",
     host: host || "smtp.gmail.com",
     port: port || 587,
     secure: secure ?? false,
-    user,
-    password: password || "",
+    user: user.trim(),
+    password: cleanPassword(password),
     fromName: fromName || "DevStudio",
     fromEmail: fromEmail || "",
     imapEnabled: imapEnabled ?? false,
@@ -94,7 +101,7 @@ router.put("/automation/email-accounts/:id", async (req, res) => {
     ...(port !== undefined && { port }),
     ...(secure !== undefined && { secure }),
     ...(user !== undefined && { user }),
-    ...(password && password !== "••••••••" ? { password } : {}),
+    ...(password && password !== "••••••••" ? { password: cleanPassword(password) } : {}),
     ...(fromName !== undefined && { fromName }),
     ...(fromEmail !== undefined && { fromEmail }),
     ...(imapEnabled !== undefined && { imapEnabled }),
