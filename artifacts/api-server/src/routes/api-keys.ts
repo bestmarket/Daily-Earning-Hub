@@ -19,6 +19,8 @@ function requireAdmin(req: any, res: any, next: any) {
 
 const API_KEY_NAMES = [
   "GEMINI_API_KEY",
+  "BREVO_SMTP_USER",
+  "BREVO_SMTP_KEY",
   "STRIPE_SECRET_KEY",
   "STRIPE_PUBLISHABLE_KEY",
   "PAYPAL_CLIENT_ID",

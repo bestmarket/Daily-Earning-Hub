@@ -1,16 +1,13 @@
 import { Router } from "express";
-import { brevoTransporter, sendMail } from "../lib/brevo-mailer";
+import { verifyBrevo, sendMail } from "../lib/brevo-mailer";
 
 const router = Router();
 
 router.post("/brevo/test", async (req, res) => {
   const to = req.body.to;
-  if (!to) {
-    res.status(400).json({ error: "Missing 'to' email address" });
-    return;
-  }
+  if (!to) { res.status(400).json({ error: "Missing 'to' email address" }); return; }
   try {
-    await brevoTransporter.verify();
+    await verifyBrevo();
     await sendMail({
       to,
       subject: "DevStudio — Brevo SMTP Test",
@@ -29,7 +26,7 @@ router.post("/brevo/test", async (req, res) => {
 
 router.post("/brevo/verify", async (_req, res) => {
   try {
-    await brevoTransporter.verify();
+    await verifyBrevo();
     res.json({ success: true, message: "Brevo SMTP connection verified" });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });

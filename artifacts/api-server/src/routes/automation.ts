@@ -3,7 +3,7 @@ import nodemailer from "nodemailer";
 import { db, emailAccountsTable, automationSettingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { getGeminiAI } from "./api-keys";
-import { brevoTransporter } from "../lib/brevo-mailer";
+import { sendMail as brevoSendMail } from "../lib/brevo-mailer";
 
 const router = Router();
 
@@ -297,9 +297,8 @@ Return ONLY JSON: { "analysis": { "websiteScore":<0-100>,"leadScore":<0-100>,"co
             html: `<div style="font-family:Georgia,serif;max-width:600px;margin:0 auto;padding:24px;color:#1a1a2e;">${html}<hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0;"/><p style="color:#6b7280;font-size:13px;">${acct.fromName}</p></div>`,
           });
         } else {
-          // Brevo fallback — uses server-level credentials from env
-          await brevoTransporter.sendMail({
-            from: `"DevStudio" <${process.env.BREVO_SMTP_USER}>`,
+          // Brevo fallback — uses server-level credentials from env or DB
+          await brevoSendMail({
             to: biz.email,
             subject: emailContent!.subject,
             text: emailContent!.body,

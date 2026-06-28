@@ -860,6 +860,183 @@ function PaymentsTab({ apiToken }: { apiToken: string }) {
   );
 }
 
+// ─── Brevo Setup Section (used inside AISetupTab) ─────────────────────────────
+
+function BrevoSetupSection({ apiToken, apiKeys, onRefresh }: {
+  apiToken: string;
+  apiKeys: Record<string, { masked: string; set: boolean }>;
+  onRefresh: () => void;
+}) {
+  const { toast } = useToast();
+  const [smtpUser, setSmtpUser] = useState("");
+  const [smtpKey, setSmtpKey] = useState("");
+  const [keyVisible, setKeyVisible] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const authHeader = { Authorization: `Bearer ${apiToken}` };
+
+  const isUserSet = apiKeys["BREVO_SMTP_USER"]?.set;
+  const isKeySet = apiKeys["BREVO_SMTP_KEY"]?.set;
+  const isConnected = isUserSet && isKeySet;
+
+  const save = async () => {
+    if (!smtpUser.trim() && !smtpKey.trim()) {
+      toast({ title: "Enter at least one field to update", variant: "destructive" }); return;
+    }
+    setSaving(true);
+    try {
+      const body: Record<string, string> = {};
+      if (smtpUser.trim()) body["BREVO_SMTP_USER"] = smtpUser.trim();
+      if (smtpKey.trim()) body["BREVO_SMTP_KEY"] = smtpKey.trim();
+      const res = await fetch(`${API_BASE}/api/admin/api-keys`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeader },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error();
+      toast({ title: "✅ Brevo credentials saved!" });
+      setSmtpUser(""); setSmtpKey(""); setTestResult(null);
+      onRefresh();
+    } catch {
+      toast({ title: "Failed to save", variant: "destructive" });
+    } finally { setSaving(false); }
+  };
+
+  const remove = async (key: string) => {
+    await fetch(`${API_BASE}/api/admin/api-keys/${key}`, { method: "DELETE", headers: authHeader });
+    toast({ title: `${key} removed` });
+    onRefresh();
+  };
+
+  const testBrevo = async () => {
+    setTesting(true); setTestResult(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/brevo/verify`, { method: "POST" });
+      const data = await res.json();
+      if (data.success) {
+        setTestResult({ ok: true, message: "✅ Brevo SMTP connected and verified!" });
+      } else {
+        setTestResult({ ok: false, message: `❌ ${data.error || "Connection failed"}` });
+      }
+    } catch {
+      setTestResult({ ok: false, message: "❌ Could not reach Brevo. Check your credentials." });
+    } finally { setTesting(false); }
+  };
+
+  return (
+    <div className="rounded-xl border border-border/60 bg-card overflow-hidden">
+      <div className="p-5 border-b border-border/40 bg-gradient-to-r from-blue-50 to-cyan-50">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="font-bold text-sm flex items-center gap-2">
+              <Mail className="w-4 h-4 text-blue-600" /> Brevo SMTP (Email Sending)
+            </h3>
+            <p className="text-xs text-muted-foreground mt-0.5">300 free emails/day. Powers automated outreach & notifications.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Badge className={isConnected ? "bg-green-600 text-white" : "bg-orange-200 text-orange-800 border-orange-300"}>
+              {isConnected ? "✅ Connected" : "⚠️ Not Set"}
+            </Badge>
+            <a href="https://app.brevo.com/settings/keys/smtp" target="_blank" rel="noopener noreferrer">
+              <Button variant="outline" size="sm" className="text-xs gap-1 bg-white h-7">
+                Brevo Dashboard <ExternalLink className="w-3 h-3" />
+              </Button>
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <div className="p-5 space-y-4">
+        {/* Current values */}
+        {(isUserSet || isKeySet) && (
+          <div className="space-y-2">
+            {isUserSet && (
+              <div className="flex items-center gap-3 px-4 py-2.5 bg-green-50 rounded-lg border border-green-200">
+                <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-semibold text-muted-foreground">SMTP Login</p>
+                  <p className="font-mono text-sm">{apiKeys["BREVO_SMTP_USER"]?.masked}</p>
+                </div>
+                <button className="text-xs text-destructive/70 hover:text-destructive flex items-center gap-1" onClick={() => remove("BREVO_SMTP_USER")}>
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              </div>
+            )}
+            {isKeySet && (
+              <div className="flex items-center gap-3 px-4 py-2.5 bg-green-50 rounded-lg border border-green-200">
+                <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-semibold text-muted-foreground">SMTP API Key</p>
+                  <p className="font-mono text-sm">{apiKeys["BREVO_SMTP_KEY"]?.masked}</p>
+                </div>
+                <button className="text-xs text-destructive/70 hover:text-destructive flex items-center gap-1" onClick={() => remove("BREVO_SMTP_KEY")}>
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Input fields */}
+        <div className="grid sm:grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground mb-1 block">
+              {isUserSet ? "Replace SMTP Login" : "SMTP Login (email)"}
+            </label>
+            <Input
+              placeholder="b038ba001@smtp-brevo.com"
+              value={smtpUser}
+              onChange={e => setSmtpUser(e.target.value)}
+              className="font-mono h-9 text-sm"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground mb-1 block">
+              {isKeySet ? "Replace SMTP API Key" : "SMTP API Key"}
+            </label>
+            <div className="relative">
+              <Input
+                type={keyVisible ? "text" : "password"}
+                placeholder="xsmtpsib-…"
+                value={smtpKey}
+                onChange={e => setSmtpKey(e.target.value)}
+                className="font-mono h-9 text-sm pr-9"
+              />
+              <button type="button"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                onClick={() => setKeyVisible(v => !v)}>
+                {keyVisible ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <p className="text-xs text-muted-foreground">
+          Get your SMTP key at <a href="https://app.brevo.com/settings/keys/smtp" target="_blank" rel="noopener noreferrer" className="text-primary underline">app.brevo.com → SMTP & API → Generate SMTP key</a>. Login is the email shown on that page.
+        </p>
+
+        <div className="flex gap-2">
+          <Button onClick={save} disabled={saving || (!smtpUser.trim() && !smtpKey.trim())} className="gap-2 flex-1">
+            {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            {saving ? "Saving…" : "Save Brevo Credentials"}
+          </Button>
+          <Button variant="outline" onClick={testBrevo} disabled={testing || !isConnected} className="gap-2">
+            {testing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <MailCheck className="w-4 h-4" />}
+            {testing ? "Testing…" : "Test"}
+          </Button>
+        </div>
+
+        {testResult && (
+          <div className={`rounded-lg p-3 text-sm font-medium ${testResult.ok ? "bg-green-50 text-green-700 border border-green-200" : "bg-red-50 text-red-700 border border-red-200"}`}>
+            {testResult.message}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── AI Setup Tab ─────────────────────────────────────────────────────────────
 
 function AISetupTab({ apiToken }: { apiToken: string }) {
@@ -1074,6 +1251,12 @@ function AISetupTab({ apiToken }: { apiToken: string }) {
           )}
         </div>
       </div>
+
+      {/* ── Brevo SMTP ── */}
+      <BrevoSetupSection apiToken={apiToken} apiKeys={apiKeys} onRefresh={() =>
+        fetch(`${API_BASE}/api/admin/api-keys`, { headers: { Authorization: `Bearer ${apiToken}` } })
+          .then(r => r.json()).then(setApiKeys).catch(() => {})
+      } />
 
       {/* How to get the key - steps */}
       <div className="rounded-xl border border-border/60 bg-muted/20 p-5">
