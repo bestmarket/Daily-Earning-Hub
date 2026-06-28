@@ -1,0 +1,124 @@
+import { Router } from "express";
+import { db } from "@workspace/db";
+import { siteConfigTable } from "@workspace/db";
+import { eq } from "drizzle-orm";
+
+const router = Router();
+
+const ADMIN_SECRET = process.env.SESSION_SECRET ?? "admin";
+
+function requireAdmin(req: any, res: any, next: any) {
+  const auth = req.headers["authorization"] ?? "";
+  const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+  if (token !== ADMIN_SECRET) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  next();
+}
+
+const API_KEY_NAMES = [
+  "GEMINI_API_KEY",
+  "STRIPE_SECRET_KEY",
+  "STRIPE_PUBLISHABLE_KEY",
+  "PAYPAL_CLIENT_ID",
+  "PAYPAL_SECRET",
+];
+
+function maskKey(val: string): string {
+  if (!val || val.length < 8) return "••••••••";
+  return "••••••••" + val.slice(-4);
+}
+
+router.get("/admin/api-keys", requireAdmin, async (req, res) => {
+  try {
+    const rows = await db
+      .select()
+      .from(siteConfigTable)
+      .then((r) => r.filter((x) => API_KEY_NAMES.includes(x.key)));
+
+    const result: Record<string, { masked: string; set: boolean }> = {};
+    for (const name of API_KEY_NAMES) {
+      const envVal = process.env[name];
+      const dbRow = rows.find((r) => r.key === name);
+      const effectiveVal = envVal || dbRow?.value || "";
+      result[name] = {
+        masked: effectiveVal ? maskKey(effectiveVal) : "",
+        set: !!effectiveVal,
+      };
+    }
+    res.json(result);
+  } catch (err) {
+    req.log.error({ err }, "Get api-keys error");
+    res.status(500).json({ error: "Failed to load API keys" });
+  }
+});
+
+router.post("/admin/api-keys", requireAdmin, async (req, res) => {
+  try {
+    const updates: Record<string, string> = req.body ?? {};
+    const saved: string[] = [];
+
+    for (const [key, value] of Object.entries(updates)) {
+      if (!API_KEY_NAMES.includes(key)) continue;
+      if (!value || typeof value !== "string") continue;
+
+      const existing = await db
+        .select()
+        .from(siteConfigTable)
+        .where(eq(siteConfigTable.key, key))
+        .limit(1);
+
+      if (existing.length > 0) {
+        await db
+          .update(siteConfigTable)
+          .set({ value, updatedAt: new Date() })
+          .where(eq(siteConfigTable.key, key));
+      } else {
+        await db.insert(siteConfigTable).values({ key, value });
+      }
+
+      process.env[key] = value;
+      saved.push(key);
+    }
+
+    res.json({ success: true, saved });
+  } catch (err) {
+    req.log.error({ err }, "Save api-keys error");
+    res.status(500).json({ error: "Failed to save API keys" });
+  }
+});
+
+router.delete("/admin/api-keys/:key", requireAdmin, async (req, res) => {
+  try {
+    const { key } = req.params;
+    if (!API_KEY_NAMES.includes(key)) {
+      res.status(400).json({ error: "Unknown key" });
+      return;
+    }
+    await db.delete(siteConfigTable).where(eq(siteConfigTable.key, key));
+    delete process.env[key];
+    res.json({ success: true });
+  } catch (err) {
+    req.log.error({ err }, "Delete api-key error");
+    res.status(500).json({ error: "Failed to delete API key" });
+  }
+});
+
+export async function getConfigKey(key: string): Promise<string | undefined> {
+  if (process.env[key]) return process.env[key];
+  try {
+    const rows = await db
+      .select()
+      .from(siteConfigTable)
+      .where(eq(siteConfigTable.key, key))
+      .limit(1);
+    if (rows[0]?.value) {
+      process.env[key] = rows[0].value;
+      return rows[0].value;
+    }
+  } catch {}
+  return undefined;
+}
+
+export default router;

@@ -12,6 +12,7 @@ import {
   Save, Lock, DollarSign, CreditCard, MessageSquare, Sparkles, RefreshCw,
   ChevronDown, ChevronUp, AlertTriangle, Mail, Send, Target, Plus, Trash2,
   CheckCircle2, Clock, Wrench, ExternalLink, Calculator, Brain, TrendingUp, Users,
+  Key, Eye, EyeOff, ShieldCheck, Zap,
 } from "lucide-react";
 import API_BASE from "@/lib/api";
 const ADMIN_TOKEN = "devstudio-admin";
@@ -475,6 +476,9 @@ export default function Admin() {
           </div>
         </Section>
 
+        {/* API Keys */}
+        <ApiKeysSection adminToken={ADMIN_TOKEN} />
+
         {/* Email Outreach */}
         <EmailOutreachSection />
 
@@ -516,6 +520,194 @@ export default function Admin() {
 
       </div>
     </div>
+  );
+}
+
+// ─── API Keys Section ─────────────────────────────────────────────────────────
+
+type KeyStatus = { masked: string; set: boolean };
+type KeyStatuses = Record<string, KeyStatus>;
+
+const KEY_GROUPS = [
+  {
+    label: "AI / Gemini",
+    icon: <Brain className="w-5 h-5 text-purple-500" />,
+    color: "from-purple-50 to-indigo-50 border-purple-200",
+    desc: "Powers AI recommendations, SEO checker, business name generator & website grader.",
+    keys: [
+      { key: "GEMINI_API_KEY", label: "Gemini API Key", hint: "Get from console.cloud.google.com → APIs & Services → Credentials" },
+    ],
+  },
+  {
+    label: "Stripe Payments",
+    icon: <CreditCard className="w-5 h-5 text-blue-500" />,
+    color: "from-blue-50 to-cyan-50 border-blue-200",
+    desc: "Accept card payments. Get keys from dashboard.stripe.com → Developers → API Keys.",
+    keys: [
+      { key: "STRIPE_SECRET_KEY", label: "Secret Key", hint: "Starts with sk_live_ or sk_test_" },
+      { key: "STRIPE_PUBLISHABLE_KEY", label: "Publishable Key", hint: "Starts with pk_live_ or pk_test_" },
+    ],
+  },
+  {
+    label: "PayPal",
+    icon: <Zap className="w-5 h-5 text-amber-500" />,
+    color: "from-amber-50 to-yellow-50 border-amber-200",
+    desc: "Accept PayPal payments. Get keys from developer.paypal.com → My Apps & Credentials.",
+    keys: [
+      { key: "PAYPAL_CLIENT_ID", label: "Client ID", hint: "From PayPal Developer Dashboard" },
+      { key: "PAYPAL_SECRET", label: "Client Secret", hint: "From PayPal Developer Dashboard" },
+    ],
+  },
+];
+
+function ApiKeysSection({ adminToken }: { adminToken: string }) {
+  const { toast } = useToast();
+  const [statuses, setStatuses] = useState<KeyStatuses>({});
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [visible, setVisible] = useState<Record<string, boolean>>({});
+  const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [dirtyKeys, setDirtyKeys] = useState<Set<string>>(new Set());
+
+  const authHeader = { Authorization: `Bearer ${adminToken}` };
+
+  useEffect(() => {
+    fetch(`${API_BASE}/api/admin/api-keys`, { headers: authHeader })
+      .then((r) => r.json())
+      .then((data: KeyStatuses) => { setStatuses(data); setLoading(false); })
+      .catch(() => { setLoading(false); });
+  }, []);
+
+  const handleChange = (key: string, val: string) => {
+    setValues((v) => ({ ...v, [key]: val }));
+    setDirtyKeys((d) => new Set(d).add(key));
+  };
+
+  const handleSave = async () => {
+    const toSave: Record<string, string> = {};
+    for (const k of dirtyKeys) {
+      if (values[k]?.trim()) toSave[k] = values[k].trim();
+    }
+    if (!Object.keys(toSave).length) { toast({ title: "No new keys to save", variant: "destructive" }); return; }
+    setSaving(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/api-keys`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeader },
+        body: JSON.stringify(toSave),
+      });
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      toast({ title: `Saved: ${data.saved.join(", ")}` });
+      setValues({});
+      setDirtyKeys(new Set());
+      const fresh = await fetch(`${API_BASE}/api/admin/api-keys`, { headers: authHeader }).then((r) => r.json());
+      setStatuses(fresh);
+    } catch {
+      toast({ title: "Failed to save API keys", variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleClear = async (key: string) => {
+    if (!confirm(`Remove the stored ${key}?`)) return;
+    try {
+      await fetch(`${API_BASE}/api/admin/api-keys/${key}`, { method: "DELETE", headers: authHeader });
+      toast({ title: `${key} removed` });
+      setStatuses((s) => ({ ...s, [key]: { masked: "", set: false } }));
+    } catch {
+      toast({ title: "Failed to remove key", variant: "destructive" });
+    }
+  };
+
+  const hasDirty = dirtyKeys.size > 0 && [...dirtyKeys].some((k) => values[k]?.trim());
+
+  return (
+    <Section title="API Keys" icon={<Key className="w-5 h-5 text-primary" />} defaultOpen={false}>
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-muted-foreground">
+            Stored securely in your database. Keys are never shown in full after saving.
+          </p>
+          <Button onClick={handleSave} disabled={saving || !hasDirty} size="sm" className="gap-2">
+            {saving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5" />}
+            {saving ? "Saving…" : "Save Keys"}
+          </Button>
+        </div>
+
+        {loading ? (
+          <div className="flex items-center justify-center py-10">
+            <RefreshCw className="w-5 h-5 animate-spin text-muted-foreground" />
+          </div>
+        ) : (
+          KEY_GROUPS.map((group) => (
+            <div key={group.label} className={`rounded-xl border bg-gradient-to-br ${group.color} p-4 space-y-3`}>
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-white/70 border border-white flex items-center justify-center shadow-sm">
+                  {group.icon}
+                </div>
+                <div>
+                  <h4 className="font-bold text-sm">{group.label}</h4>
+                  <p className="text-xs text-muted-foreground">{group.desc}</p>
+                </div>
+              </div>
+
+              {group.keys.map(({ key, label, hint }) => {
+                const status = statuses[key];
+                const isSet = status?.set;
+                const inputVal = values[key] ?? "";
+                const show = visible[key];
+                return (
+                  <div key={key} className="bg-white/80 rounded-lg border border-white p-3 space-y-2 shadow-sm">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                        <Key className="w-3 h-3 text-muted-foreground" /> {label}
+                      </label>
+                      {isSet ? (
+                        <Badge className="bg-green-100 text-green-700 border-green-200 text-xs gap-1">
+                          <CheckCircle2 className="w-3 h-3" /> Active
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-xs text-muted-foreground">Not set</Badge>
+                      )}
+                    </div>
+                    {isSet && (
+                      <div className="flex items-center gap-2 px-3 py-1.5 bg-muted/30 rounded-lg border border-border/40">
+                        <span className="font-mono text-xs text-muted-foreground flex-1">{status.masked}</span>
+                        <button
+                          className="text-xs text-destructive/70 hover:text-destructive font-medium flex items-center gap-1"
+                          onClick={() => handleClear(key)}
+                        >
+                          <Trash2 className="w-3 h-3" /> Remove
+                        </button>
+                      </div>
+                    )}
+                    <div className="relative">
+                      <Input
+                        type={show ? "text" : "password"}
+                        placeholder={isSet ? "Enter new key to replace…" : "Paste your key here…"}
+                        value={inputVal}
+                        onChange={(e) => handleChange(key, e.target.value)}
+                        className="pr-10 font-mono text-sm h-9"
+                      />
+                      <button
+                        type="button"
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                        onClick={() => setVisible((v) => ({ ...v, [key]: !v[key] }))}
+                      >
+                        {show ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">{hint}</p>
+                  </div>
+                );
+              })}
+            </div>
+          ))
+        )}
+      </div>
+    </Section>
   );
 }
 

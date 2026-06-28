@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { GoogleGenAI } from "@google/genai";
+import { getConfigKey } from "./api-keys";
 
 const router = Router();
 
@@ -11,9 +12,9 @@ router.post("/ai/recommend", async (req, res) => {
     return;
   }
 
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = await getConfigKey("GEMINI_API_KEY");
   if (!apiKey) {
-    res.status(500).json({ error: "Gemini API key not configured" });
+    res.status(500).json({ error: "Gemini API key not configured. Add it in Admin → API Keys." });
     return;
   }
 

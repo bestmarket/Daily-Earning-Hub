@@ -1,16 +1,17 @@
 import { Router } from "express";
 import { GoogleGenAI } from "@google/genai";
+import { getConfigKey } from "./api-keys";
 
 const router = Router();
 
-function getAI() {
-  const key = process.env.GEMINI_API_KEY;
-  if (!key) throw new Error("GEMINI_API_KEY not set");
+async function getAI() {
+  const key = await getConfigKey("GEMINI_API_KEY");
+  if (!key) throw new Error("GEMINI_API_KEY not configured. Add it in Admin → API Keys.");
   return new GoogleGenAI({ apiKey: key });
 }
 
 async function generate(prompt: string): Promise<string> {
-  const ai = getAI();
+  const ai = await getAI();
   const response = await ai.models.generateContent({
     model: "gemini-2.5-flash",
     contents: [{ role: "user", parts: [{ text: prompt }] }],

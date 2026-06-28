@@ -8,6 +8,7 @@ import siteSettingsRouter from "./site-settings";
 import ogRouter from "./og";
 import crmAiRouter from "./crm-ai";
 import toolsAiRouter from "./tools-ai";
+import apiKeysRouter from "./api-keys";
 
 const router: IRouter = Router();
 
@@ -20,5 +21,6 @@ router.use(siteSettingsRouter);
 router.use(ogRouter);
 router.use(crmAiRouter);
 router.use(toolsAiRouter);
+router.use(apiKeysRouter);
 
 export default router;

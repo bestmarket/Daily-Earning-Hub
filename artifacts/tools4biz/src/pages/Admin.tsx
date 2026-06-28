@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { 
   useAdminLogin, 
@@ -22,8 +22,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { LogOut, LayoutDashboard, Wrench, Users, MessageSquare, Link2, Copy, ExternalLink, Target, Send, Plus, Trash2, Mail, RefreshCw, CheckCircle2, Clock, AlertCircle } from "lucide-react";
+import { LogOut, LayoutDashboard, Wrench, Users, MessageSquare, Link2, Copy, ExternalLink, Target, Send, Plus, Trash2, Mail, RefreshCw, CheckCircle2, Clock, AlertCircle, Key, Eye, EyeOff, ShieldCheck, Zap, CreditCard, Brain } from "lucide-react";
 import { toast } from "sonner";
+import API_BASE from "@/lib/api";
 
 export default function Admin() {
   const [token, setToken] = useState<string | null>(localStorage.getItem('t4b_admin_token'));
@@ -243,6 +244,9 @@ function AdminDashboard({ token }: { token: string }) {
           </TabsTrigger>
           <TabsTrigger value="outreach" className="h-10 rounded-lg px-6 font-semibold data-[state=active]:bg-primary/10 data-[state=active]:text-primary">
             <Target className="w-4 h-4 mr-2" />Outreach
+          </TabsTrigger>
+          <TabsTrigger value="api-keys" className="h-10 rounded-lg px-6 font-semibold data-[state=active]:bg-primary/10 data-[state=active]:text-primary">
+            <Key className="w-4 h-4 mr-2" />API Keys
           </TabsTrigger>
         </TabsList>
 
@@ -554,6 +558,10 @@ function AdminDashboard({ token }: { token: string }) {
         <TabsContent value="outreach">
           <OutreachTab />
         </TabsContent>
+
+        <TabsContent value="api-keys">
+          <ApiKeysTab token={token} />
+        </TabsContent>
       </Tabs>
     </div>
   );
@@ -843,5 +851,208 @@ function SummaryCard({ title, value, subtitle, icon }: { title: string, value: s
         {subtitle && <p className="text-sm text-primary font-medium mt-1">{subtitle}</p>}
       </CardContent>
     </Card>
+  );
+}
+
+// ─── API Keys Tab ─────────────────────────────────────────────────────────────
+
+type KeyStatus = { masked: string; set: boolean };
+type KeyStatuses = Record<string, KeyStatus>;
+
+const KEY_GROUPS = [
+  {
+    label: "AI / Gemini",
+    icon: <Brain className="w-5 h-5 text-purple-500" />,
+    color: "from-purple-50 to-indigo-50 border-purple-200",
+    badge: "bg-purple-100 text-purple-700",
+    desc: "Powers SEO checker, business name generator, website grader, and AI recommendations.",
+    keys: [
+      { key: "GEMINI_API_KEY", label: "Gemini API Key", hint: "Get from console.cloud.google.com → APIs & Services → Credentials" },
+    ],
+  },
+  {
+    label: "Stripe Payments",
+    icon: <CreditCard className="w-5 h-5 text-blue-500" />,
+    color: "from-blue-50 to-cyan-50 border-blue-200",
+    badge: "bg-blue-100 text-blue-700",
+    desc: "Accept card payments. Get keys from dashboard.stripe.com → Developers → API Keys.",
+    keys: [
+      { key: "STRIPE_SECRET_KEY", label: "Secret Key", hint: "Starts with sk_live_ or sk_test_" },
+      { key: "STRIPE_PUBLISHABLE_KEY", label: "Publishable Key", hint: "Starts with pk_live_ or pk_test_" },
+    ],
+  },
+  {
+    label: "PayPal",
+    icon: <Zap className="w-5 h-5 text-amber-500" />,
+    color: "from-amber-50 to-yellow-50 border-amber-200",
+    badge: "bg-amber-100 text-amber-700",
+    desc: "Accept PayPal payments. Get keys from developer.paypal.com → My Apps & Credentials.",
+    keys: [
+      { key: "PAYPAL_CLIENT_ID", label: "Client ID", hint: "From PayPal Developer Dashboard" },
+      { key: "PAYPAL_SECRET", label: "Client Secret", hint: "From PayPal Developer Dashboard" },
+    ],
+  },
+];
+
+function ApiKeysTab({ token }: { token: string }) {
+  const [statuses, setStatuses] = useState<KeyStatuses>({});
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [visible, setVisible] = useState<Record<string, boolean>>({});
+  const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [dirtyKeys, setDirtyKeys] = useState<Set<string>>(new Set());
+
+  const authHeader = { Authorization: `Bearer ${token}` };
+
+  useEffect(() => {
+    fetch(`${API_BASE}/api/admin/api-keys`, { headers: authHeader })
+      .then(r => r.json())
+      .then((data: KeyStatuses) => { setStatuses(data); setLoading(false); })
+      .catch(() => { toast.error("Failed to load API key statuses"); setLoading(false); });
+  }, []);
+
+  const handleChange = (key: string, val: string) => {
+    setValues(v => ({ ...v, [key]: val }));
+    setDirtyKeys(d => new Set(d).add(key));
+  };
+
+  const handleSave = async () => {
+    const toSave: Record<string, string> = {};
+    for (const k of dirtyKeys) {
+      if (values[k]?.trim()) toSave[k] = values[k].trim();
+    }
+    if (Object.keys(toSave).length === 0) { toast.error("No new keys to save"); return; }
+    setSaving(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/api-keys`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeader },
+        body: JSON.stringify(toSave),
+      });
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      toast.success(`Saved: ${data.saved.join(", ")}`);
+      setValues({});
+      setDirtyKeys(new Set());
+      const fresh = await fetch(`${API_BASE}/api/admin/api-keys`, { headers: authHeader }).then(r => r.json());
+      setStatuses(fresh);
+    } catch {
+      toast.error("Failed to save API keys");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleClear = async (key: string) => {
+    if (!confirm(`Remove the stored ${key}?`)) return;
+    try {
+      await fetch(`${API_BASE}/api/admin/api-keys/${key}`, { method: "DELETE", headers: authHeader });
+      toast.success(`${key} removed`);
+      setStatuses(s => ({ ...s, [key]: { masked: "", set: false } }));
+    } catch {
+      toast.error("Failed to remove key");
+    }
+  };
+
+  const hasDirty = dirtyKeys.size > 0 && [...dirtyKeys].some(k => values[k]?.trim());
+
+  return (
+    <div className="p-6 space-y-6">
+      <div className="flex items-start justify-between">
+        <div>
+          <h2 className="text-xl font-bold tracking-tight flex items-center gap-2">
+            <ShieldCheck className="w-5 h-5 text-primary" /> API Keys
+          </h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            Stored securely in your database. Keys are never shown in full after saving.
+          </p>
+        </div>
+        <Button onClick={handleSave} disabled={saving || !hasDirty} className="font-semibold gap-2">
+          {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+          {saving ? "Saving…" : "Save Keys"}
+        </Button>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-16">
+          <RefreshCw className="w-6 h-6 animate-spin text-muted-foreground" />
+        </div>
+      ) : (
+        <div className="space-y-5">
+          {KEY_GROUPS.map(group => (
+            <div key={group.label} className={`rounded-2xl border bg-gradient-to-br ${group.color} p-5 space-y-4`}>
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-white/70 border border-white flex items-center justify-center shadow-sm">
+                  {group.icon}
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm">{group.label}</h3>
+                  <p className="text-xs text-muted-foreground">{group.desc}</p>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                {group.keys.map(({ key, label, hint }) => {
+                  const status = statuses[key];
+                  const isSet = status?.set;
+                  const inputVal = values[key] ?? "";
+                  const show = visible[key];
+
+                  return (
+                    <div key={key} className="bg-white/80 rounded-xl border border-white p-4 space-y-2 shadow-sm">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-bold text-foreground flex items-center gap-2">
+                          <Key className="w-3.5 h-3.5 text-muted-foreground" />
+                          {label}
+                        </label>
+                        {isSet ? (
+                          <Badge className="bg-green-100 text-green-700 border-green-200 text-xs gap-1 font-semibold">
+                            <CheckCircle2 className="w-3 h-3" /> Active
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-xs text-muted-foreground gap-1">
+                            <AlertCircle className="w-3 h-3" /> Not set
+                          </Badge>
+                        )}
+                      </div>
+
+                      {isSet && (
+                        <div className="flex items-center gap-2 px-3 py-2 bg-muted/30 rounded-lg border border-border/40">
+                          <span className="font-mono text-xs text-muted-foreground flex-1">{status.masked}</span>
+                          <Button
+                            variant="ghost" size="sm" className="h-6 px-2 text-xs text-destructive/70 hover:text-destructive"
+                            onClick={() => handleClear(key)}
+                          >
+                            <Trash2 className="w-3 h-3 mr-1" /> Remove
+                          </Button>
+                        </div>
+                      )}
+
+                      <div className="relative">
+                        <Input
+                          type={show ? "text" : "password"}
+                          placeholder={isSet ? "Enter new key to replace…" : "Paste your key here…"}
+                          value={inputVal}
+                          onChange={e => handleChange(key, e.target.value)}
+                          className="pr-10 font-mono text-sm h-10"
+                        />
+                        <button
+                          type="button"
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                          onClick={() => setVisible(v => ({ ...v, [key]: !v[key] }))}
+                        >
+                          {show ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                      <p className="text-xs text-muted-foreground">{hint}</p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
