@@ -22,6 +22,7 @@ import InvoiceGenerator from "@/pages/tools/InvoiceGenerator";
 import ProfitMarginCalculator from "@/pages/tools/ProfitMarginCalculator";
 import NichesIndex from "@/pages/tools/niches/NichesIndex";
 import NicheGrader from "@/pages/tools/niches/NicheGrader";
+import Pay from "@/pages/Pay";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } },
@@ -47,6 +48,7 @@ function Router() {
       <Route path="/privacy-policy" component={PrivacyPolicy} />
       <Route path="/terms" component={Terms} />
       <Route path="/refund" component={Refund} />
+      <Route path="/pay" component={Pay} />
       <Route path="/admin" component={Admin} />
       <Route path="/admin/crm" component={CRM} />
       <Route component={NotFound} />

@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { QRCodeSVG } from "qrcode.react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useAdminLogin,
@@ -697,9 +698,16 @@ function PaymentsTab({ apiToken }: { apiToken: string }) {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="font-bold text-lg">Payment Setup</h2>
-        <p className="text-sm text-muted-foreground">Enable payment methods and connect your payment processor API keys</p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="font-bold text-lg">Payment Setup</h2>
+          <p className="text-sm text-muted-foreground">Enable payment methods and connect your payment processor API keys</p>
+        </div>
+        <a href="/pay" target="_blank" rel="noopener noreferrer" className="flex-shrink-0">
+          <Button variant="outline" size="sm" className="gap-2 text-xs">
+            <ExternalLink className="w-3.5 h-3.5" /> View Pay Page
+          </Button>
+        </a>
       </div>
 
       {/* Payment Methods Toggle */}
@@ -709,31 +717,52 @@ function PaymentsTab({ apiToken }: { apiToken: string }) {
           <p className="text-xs text-muted-foreground mt-0.5">Choose which methods to show on your site. Add details like account info below each.</p>
         </div>
         <div className="p-5 space-y-3">
-          {settings?.paymentMethods.map((pm, idx) => (
-            <div key={pm.id} className="flex items-center gap-4 rounded-xl border border-border/50 p-4 hover:bg-muted/20 transition-colors">
-              <Switch checked={pm.enabled} onCheckedChange={(v) => updatePayment(idx, "enabled", v)} />
-              <div className="w-32 font-semibold text-sm">{pm.name}</div>
-              <Input
-                className="flex-1"
-                placeholder={
-                  pm.id === "paypal" ? "PayPal email or payment link" :
-                  pm.id === "stripe" ? "Stripe payment link (optional)" :
-                  pm.id === "paystack" ? "Paystack payment link (optional)" :
-                  pm.id === "flutterwave" ? "Flutterwave payment link (optional)" :
-                  pm.id === "lemonsqueezy" ? "Lemon Squeezy checkout URL" :
-                  pm.id === "bank" ? "Bank name, account no., sort code" :
-                  pm.id === "crypto_usdt" ? "USDT wallet address (TRC20 or ERC20)" :
-                  pm.id === "crypto_btc" ? "Bitcoin (BTC) wallet address" :
-                  "Details"
-                }
-                value={pm.details}
-                onChange={(e) => updatePayment(idx, "details", e.target.value)}
-              />
-              <Badge variant={pm.enabled ? "default" : "secondary"} className={pm.enabled ? "bg-green-100 text-green-700 border-green-200 hover:bg-green-100" : ""}>
-                {pm.enabled ? "Active" : "Off"}
-              </Badge>
-            </div>
-          ))}
+          {settings?.paymentMethods.map((pm, idx) => {
+            const isCrypto = pm.id === "crypto_usdt" || pm.id === "crypto_btc";
+            const cryptoAddress = isCrypto ? pm.details.trim() : "";
+            const qrValue = pm.id === "crypto_btc" && cryptoAddress ? `bitcoin:${cryptoAddress}` : cryptoAddress;
+
+            return (
+              <div key={pm.id} className={`rounded-xl border border-border/50 transition-colors ${pm.enabled ? "bg-card" : "bg-muted/10"}`}>
+                <div className="flex items-center gap-4 p-4">
+                  <Switch checked={pm.enabled} onCheckedChange={(v) => updatePayment(idx, "enabled", v)} />
+                  <div className="w-36 font-semibold text-sm flex-shrink-0">{pm.name}</div>
+                  <Input
+                    className="flex-1"
+                    placeholder={
+                      pm.id === "paypal" ? "PayPal email or payment link" :
+                      pm.id === "stripe" ? "Stripe payment link (optional)" :
+                      pm.id === "paystack" ? "Paystack payment link (optional)" :
+                      pm.id === "flutterwave" ? "Flutterwave payment link (optional)" :
+                      pm.id === "lemonsqueezy" ? "Lemon Squeezy checkout URL" :
+                      pm.id === "bank" ? "Bank name, account no., sort code" :
+                      pm.id === "crypto_usdt" ? "USDT wallet address (TRC20 or ERC20)" :
+                      pm.id === "crypto_btc" ? "Bitcoin (BTC) wallet address" :
+                      "Details"
+                    }
+                    value={pm.details}
+                    onChange={(e) => updatePayment(idx, "details", e.target.value)}
+                  />
+                  <Badge variant={pm.enabled ? "default" : "secondary"} className={pm.enabled ? "bg-green-100 text-green-700 border-green-200 hover:bg-green-100" : ""}>
+                    {pm.enabled ? "Active" : "Off"}
+                  </Badge>
+                </div>
+                {/* Inline QR preview for crypto wallets */}
+                {isCrypto && cryptoAddress && (
+                  <div className="px-4 pb-4 flex items-start gap-4 border-t border-border/30 pt-3">
+                    <div className="bg-white rounded-xl p-3 border border-violet-100 shadow-sm flex-shrink-0">
+                      <QRCodeSVG value={qrValue} size={96} level="M" fgColor="#4c1d95" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold text-violet-700 mb-1">QR Preview</p>
+                      <p className="font-mono text-xs text-muted-foreground break-all leading-relaxed">{cryptoAddress}</p>
+                      <p className="text-xs text-muted-foreground mt-2">This QR code is shown to clients on the <a href="/pay" target="_blank" className="text-primary underline">/pay page</a>.</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
           <Button onClick={savePayments} disabled={saving || !settings} className="mt-2">
             {saving ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
             Save Payment Methods
