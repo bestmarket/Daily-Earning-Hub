@@ -7,15 +7,18 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Switch } from "@/components/ui/switch";
 import {
   Search, Plus, Globe, Mail, Phone, Trash2, Star, ChevronRight,
   BarChart3, Send, MessageCircle, Linkedin, RefreshCw, CheckCircle2,
   AlertTriangle, Clock, TrendingUp, Users, Target, Sparkles, Download,
-  X, Copy, Check, Building, ArrowRight, Zap, LayoutDashboard,
+  X, Copy, Check, Building, Zap, LayoutDashboard, Radar,
+  Settings, Eye, EyeOff, Wifi, WifiOff, PlayCircle, StopCircle,
+  ChevronDown, ChevronUp, Bot, MapPin, Filter,
 } from "lucide-react";
 import API_BASE from "@/lib/api";
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 type LeadStatus = "new" | "contacted" | "waiting" | "proposal_sent" | "meeting" | "negotiating" | "won" | "lost" | "archive";
 type Priority = "low" | "medium" | "high";
@@ -40,11 +43,35 @@ interface Prospect {
   nextFollowUp: string;
   notes: string;
   addedAt: string;
+  hunted?: boolean;
+  painPoint?: string;
+  emailSentAt?: string;
   analysis?: WebsiteAnalysis;
   generatedEmail?: { subject: string; body: string };
   generatedWhatsApp?: string;
   generatedLinkedIn?: string;
   proposal?: ProposalData;
+}
+
+interface HuntedBusiness {
+  businessName: string;
+  ownerName: string;
+  category: string;
+  email: string;
+  phone: string;
+  website: string;
+  city: string;
+  country: string;
+  instagram: string;
+  facebook: string;
+  linkedin: string;
+  softwareNeedScore: number;
+  painPoint: string;
+  estimatedValue: number;
+  notes: string;
+  selected?: boolean;
+  importing?: boolean;
+  imported?: boolean;
 }
 
 interface WebsiteAnalysis {
@@ -79,7 +106,18 @@ interface ProposalData {
   };
 }
 
-// ─── Constants ───────────────────────────────────────────────────────────────
+interface EmailConfig {
+  provider: "gmail" | "smtp" | "outlook";
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  password: string;
+  fromName: string;
+  fromEmail: string;
+}
+
+// ─── Constants ────────────────────────────────────────────────────────────────
 
 const STORAGE_KEY = "ds_crm_prospects";
 const AGENCY_NAME = "DevStudio";
@@ -100,7 +138,9 @@ const CATEGORIES = [
   "Restaurant", "School", "Church", "Hospital", "Real Estate", "Hotel",
   "Salon", "Lawyer", "Accountant", "Construction", "Supermarket",
   "Pharmacy", "Gym", "Car Dealer", "Bakery", "Clinic", "Dentist",
-  "Auto Repair", "Travel Agency", "Insurance", "Consultant", "Other",
+  "Auto Repair", "Travel Agency", "Insurance", "Consultant",
+  "Spa & Wellness", "Photography Studio", "Event Planner", "Florist",
+  "Catering", "Vet Clinic", "Optician", "Tutoring Center", "Other",
 ];
 
 const CHECK_LABELS: Record<string, string> = {
@@ -115,7 +155,13 @@ const CHECK_LABELS: Record<string, string> = {
   callToAction: "Call-to-Action", trustElements: "Trust Elements",
 };
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+const PROVIDER_PRESETS: Record<string, Partial<EmailConfig>> = {
+  gmail: { host: "smtp.gmail.com", port: 587, secure: false, provider: "gmail" },
+  outlook: { host: "smtp-mail.outlook.com", port: 587, secure: false, provider: "outlook" },
+  smtp: { host: "", port: 587, secure: false, provider: "smtp" },
+};
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function loadProspects(): Prospect[] {
   try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]"); } catch { return []; }
@@ -125,16 +171,24 @@ function saveProspects(data: Prospect[]) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
 }
 
+function apiBase() {
+  return API_BASE.replace("/agency-site", "");
+}
+
 async function callCRM(endpoint: string, body: object) {
-  const base = API_BASE.replace("/agency-site", "");
-  const r = await fetch(`${base}/api/crm/${endpoint}`, {
+  const r = await fetch(`${apiBase()}/api/crm/${endpoint}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!r.ok) throw new Error(`API error ${r.status}`);
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({}));
+    throw new Error((err as any).error || `API error ${r.status}`);
+  }
   return r.json();
 }
+
+// ─── Shared UI ────────────────────────────────────────────────────────────────
 
 function ScoreBar({ label, value, color }: { label: string; value: number; color: string }) {
   return (
@@ -144,13 +198,8 @@ function ScoreBar({ label, value, color }: { label: string; value: number; color
         <span className="font-bold" style={{ color }}>{value}/100</span>
       </div>
       <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-        <motion.div
-          className="h-full rounded-full"
-          style={{ backgroundColor: color }}
-          initial={{ width: 0 }}
-          animate={{ width: `${value}%` }}
-          transition={{ duration: 0.8 }}
-        />
+        <motion.div className="h-full rounded-full" style={{ backgroundColor: color }}
+          initial={{ width: 0 }} animate={{ width: `${value}%` }} transition={{ duration: 0.8 }} />
       </div>
     </div>
   );
@@ -175,30 +224,470 @@ function LoadingSpinner({ text }: { text: string }) {
   );
 }
 
-// ─── Dashboard ───────────────────────────────────────────────────────────────
+// ─── Email Settings Panel ─────────────────────────────────────────────────────
+
+function EmailSettingsPanel() {
+  const [config, setConfig] = useState<EmailConfig>({
+    provider: "gmail", host: "smtp.gmail.com", port: 587, secure: false,
+    user: "", password: "", fromName: "DevStudio", fromEmail: "",
+  });
+  const [showPass, setShowPass] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testEmail, setTestEmail] = useState("");
+  const [status, setStatus] = useState<{ type: "success" | "error"; msg: string } | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch(`${apiBase()}/api/crm/email-config`)
+      .then(r => r.json())
+      .then(d => { setConfig(d); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, []);
+
+  const applyPreset = (provider: string) => {
+    const preset = PROVIDER_PRESETS[provider] || {};
+    setConfig(prev => ({ ...prev, ...preset }));
+  };
+
+  const save = async () => {
+    setSaving(true); setStatus(null);
+    try {
+      const r = await fetch(`${apiBase()}/api/crm/email-config`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(config),
+      });
+      if (!r.ok) throw new Error("Save failed");
+      setStatus({ type: "success", msg: "Email settings saved." });
+    } catch (e: any) {
+      setStatus({ type: "error", msg: e.message });
+    } finally { setSaving(false); }
+  };
+
+  const sendTest = async () => {
+    setTesting(true); setStatus(null);
+    try {
+      const r = await fetch(`${apiBase()}/api/crm/test-email`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to: testEmail || config.user }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error);
+      setStatus({ type: "success", msg: `Test email sent to ${testEmail || config.user}` });
+    } catch (e: any) {
+      setStatus({ type: "error", msg: e.message });
+    } finally { setTesting(false); }
+  };
+
+  if (loading) return <LoadingSpinner text="Loading email settings…" />;
+
+  return (
+    <div className="space-y-5 max-w-2xl">
+      <div>
+        <h3 className="font-bold text-lg mb-1">Email Sender Setup</h3>
+        <p className="text-sm text-muted-foreground">Configure the email account used to send outreach to your prospects. Works with Gmail, Outlook, or any custom SMTP.</p>
+      </div>
+
+      {status && (
+        <div className={`flex items-center gap-2 text-sm px-4 py-3 rounded-lg border ${status.type === "success" ? "bg-green-50 text-green-800 border-green-200" : "bg-red-50 text-red-700 border-red-200"}`}>
+          {status.type === "success" ? <CheckCircle2 className="w-4 h-4 flex-shrink-0" /> : <AlertTriangle className="w-4 h-4 flex-shrink-0" />}
+          {status.msg}
+        </div>
+      )}
+
+      {/* Provider */}
+      <div className="rounded-xl border border-border/50 overflow-hidden">
+        <div className="p-3 bg-muted/20 border-b border-border/50">
+          <h4 className="text-sm font-bold">Email Provider</h4>
+        </div>
+        <div className="p-4">
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              { id: "gmail", label: "Gmail", icon: "📧", hint: "Use App Password" },
+              { id: "outlook", label: "Outlook / 365", icon: "📨", hint: "Microsoft account" },
+              { id: "smtp", label: "Custom SMTP", icon: "⚙️", hint: "Any mail provider" },
+            ].map(p => (
+              <button key={p.id} onClick={() => applyPreset(p.id)}
+                className={`flex flex-col items-center gap-1 p-3 rounded-xl border-2 transition-all text-sm font-semibold ${config.provider === p.id ? "border-primary bg-primary/5 text-primary" : "border-border/50 hover:border-primary/40"}`}>
+                <span className="text-2xl">{p.icon}</span>
+                <span>{p.label}</span>
+                <span className="text-xs font-normal text-muted-foreground">{p.hint}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* SMTP settings */}
+      <div className="rounded-xl border border-border/50 overflow-hidden">
+        <div className="p-3 bg-muted/20 border-b border-border/50">
+          <h4 className="text-sm font-bold">Connection Settings</h4>
+        </div>
+        <div className="p-4 grid grid-cols-2 gap-3">
+          <div className="col-span-2 md:col-span-1">
+            <label className="text-xs font-semibold text-muted-foreground mb-1 block">SMTP Host</label>
+            <Input value={config.host} onChange={e => setConfig(p => ({ ...p, host: e.target.value }))} placeholder="smtp.gmail.com" />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground mb-1 block">Port</label>
+            <Input type="number" value={config.port} onChange={e => setConfig(p => ({ ...p, port: Number(e.target.value) }))} placeholder="587" />
+          </div>
+          <div className="col-span-2 flex items-center gap-3">
+            <Switch checked={config.secure} onCheckedChange={v => setConfig(p => ({ ...p, secure: v }))} />
+            <label className="text-sm font-medium">Use SSL/TLS (port 465)</label>
+          </div>
+        </div>
+      </div>
+
+      {/* Credentials */}
+      <div className="rounded-xl border border-border/50 overflow-hidden">
+        <div className="p-3 bg-muted/20 border-b border-border/50">
+          <h4 className="text-sm font-bold">Login Credentials</h4>
+        </div>
+        <div className="p-4 grid grid-cols-2 gap-3">
+          <div className="col-span-2">
+            <label className="text-xs font-semibold text-muted-foreground mb-1 block">Email Address (your login)</label>
+            <Input type="email" value={config.user} onChange={e => setConfig(p => ({ ...p, user: e.target.value }))} placeholder="you@gmail.com" />
+          </div>
+          <div className="col-span-2">
+            <label className="text-xs font-semibold text-muted-foreground mb-1 block">
+              Password
+              {config.provider === "gmail" && <span className="text-primary ml-1 font-normal">(use Gmail App Password, not your main password)</span>}
+            </label>
+            <div className="relative">
+              <Input type={showPass ? "text" : "password"} value={config.password}
+                onChange={e => setConfig(p => ({ ...p, password: e.target.value }))}
+                placeholder={config.provider === "gmail" ? "16-char App Password" : "your password"} className="pr-10" />
+              <button className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                onClick={() => setShowPass(v => !v)}>
+                {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+            {config.provider === "gmail" && (
+              <p className="text-xs text-muted-foreground mt-1.5">
+                <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener noreferrer" className="text-primary underline">Generate Gmail App Password →</a>
+                {" "}(requires 2FA enabled on your Google account)
+              </p>
+            )}
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground mb-1 block">Sender Name</label>
+            <Input value={config.fromName} onChange={e => setConfig(p => ({ ...p, fromName: e.target.value }))} placeholder="DevStudio" />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground mb-1 block">From Email (optional)</label>
+            <Input type="email" value={config.fromEmail} onChange={e => setConfig(p => ({ ...p, fromEmail: e.target.value }))} placeholder="Same as login if empty" />
+          </div>
+        </div>
+      </div>
+
+      {/* Save & Test */}
+      <div className="flex flex-col sm:flex-row gap-3">
+        <Button onClick={save} disabled={saving} className="gap-2 font-semibold">
+          {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+          {saving ? "Saving…" : "Save Settings"}
+        </Button>
+        <div className="flex gap-2 flex-1">
+          <Input value={testEmail} onChange={e => setTestEmail(e.target.value)} placeholder="Test recipient email (optional)" className="flex-1" />
+          <Button variant="outline" onClick={sendTest} disabled={testing || !config.user || !config.password} className="gap-2 whitespace-nowrap">
+            {testing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+            {testing ? "Sending…" : "Send Test"}
+          </Button>
+        </div>
+      </div>
+
+      <div className="text-xs text-muted-foreground bg-muted/30 rounded-lg p-3 border border-border/40 space-y-1">
+        <p className="font-semibold">Tips for reliable email delivery:</p>
+        <p>• Gmail: Enable 2FA → generate App Password at myaccount.google.com/apppasswords</p>
+        <p>• Outlook: Use your Microsoft 365 password or an app-specific password</p>
+        <p>• Custom domain: Use your hosting provider's outgoing SMTP details</p>
+      </div>
+    </div>
+  );
+}
+
+// ─── AI Hunter Panel ──────────────────────────────────────────────────────────
+
+function AIHunterPanel({ onImport }: { onImport: (prospects: Omit<Prospect, "id" | "addedAt">[]) => void }) {
+  const [category, setCategory] = useState("Restaurant");
+  const [city, setCity] = useState("");
+  const [country, setCountry] = useState("");
+  const [count, setCount] = useState("10");
+  const [extraContext, setExtraContext] = useState("");
+  const [autoGenerate, setAutoGenerate] = useState(true);
+  const [hunting, setHunting] = useState(false);
+  const [results, setResults] = useState<HuntedBusiness[]>([]);
+  const [progress, setProgress] = useState("");
+  const [error, setError] = useState("");
+  const [selectAll, setSelectAll] = useState(true);
+
+  const hunt = async () => {
+    if (!city.trim()) { setError("Please enter a city to hunt in."); return; }
+    setHunting(true); setError(""); setResults([]); setProgress("🔍 AI is scanning for businesses…");
+
+    try {
+      const businesses: HuntedBusiness[] = await callCRM("hunt-businesses", {
+        category, city: city.trim(), country: country.trim(), count: Number(count), extraContext,
+      });
+      const tagged = businesses.map(b => ({ ...b, selected: true, imported: false, importing: false }));
+      setResults(tagged);
+      setProgress(`✓ Found ${tagged.length} ${category} businesses in ${city}`);
+    } catch (e: any) {
+      setError(e.message); setProgress("");
+    } finally { setHunting(false); }
+  };
+
+  const toggleSelect = (i: number) => setResults(prev => prev.map((b, idx) => idx === i ? { ...b, selected: !b.selected } : b));
+
+  const toggleAll = () => {
+    const newVal = !selectAll;
+    setSelectAll(newVal);
+    setResults(prev => prev.map(b => ({ ...b, selected: newVal })));
+  };
+
+  const importSelected = async () => {
+    const selected = results.filter(b => b.selected && !b.imported);
+    if (selected.length === 0) return;
+
+    const toImport: Omit<Prospect, "id" | "addedAt">[] = [];
+
+    for (let i = 0; i < results.length; i++) {
+      const b = results[i];
+      if (!b.selected || b.imported) continue;
+
+      setResults(prev => prev.map((r, idx) => idx === i ? { ...r, importing: true } : r));
+
+      let prospect: Omit<Prospect, "id" | "addedAt"> = {
+        businessName: b.businessName,
+        ownerName: b.ownerName,
+        category: b.category,
+        website: b.website,
+        email: b.email,
+        phone: b.phone,
+        country: b.country,
+        city: b.city,
+        facebook: b.facebook,
+        instagram: b.instagram,
+        linkedin: b.linkedin,
+        status: "new",
+        priority: b.softwareNeedScore >= 8 ? "high" : b.softwareNeedScore >= 5 ? "medium" : "low",
+        expectedValue: b.estimatedValue,
+        probability: 20,
+        nextFollowUp: "",
+        notes: b.painPoint || b.notes || "",
+        hunted: true,
+        painPoint: b.painPoint,
+      };
+
+      if (autoGenerate) {
+        try {
+          const generated = await callCRM("auto-generate", {
+            businessName: b.businessName, category: b.category,
+            website: b.website, city: b.city, country: b.country,
+            ownerName: b.ownerName, painPoint: b.painPoint, agencyName: AGENCY_NAME,
+          });
+          if (generated.analysis) prospect.analysis = generated.analysis;
+          if (generated.email) prospect.generatedEmail = generated.email;
+          if (generated.whatsapp) prospect.generatedWhatsApp = generated.whatsapp;
+          if (generated.linkedin) prospect.generatedLinkedIn = generated.linkedin;
+          if (generated.analysis?.estimatedValue) {
+            prospect.expectedValue = Math.round((generated.analysis.estimatedValue.min + generated.analysis.estimatedValue.max) / 2);
+          }
+        } catch { /* continue without AI data */ }
+      }
+
+      toImport.push(prospect);
+      setResults(prev => prev.map((r, idx) => idx === i ? { ...r, importing: false, imported: true } : r));
+    }
+
+    onImport(toImport);
+  };
+
+  const selectedCount = results.filter(b => b.selected && !b.imported).length;
+
+  return (
+    <div className="space-y-5">
+      {/* Header */}
+      <div className="bg-gradient-to-r from-purple-600 to-indigo-600 rounded-2xl p-5 text-white">
+        <div className="flex items-center gap-3 mb-3">
+          <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
+            <Radar className="w-5 h-5" />
+          </div>
+          <div>
+            <h2 className="font-extrabold text-lg">AI Business Hunter</h2>
+            <p className="text-white/80 text-sm">Finds real businesses in any city + auto-generates analysis & outreach</p>
+          </div>
+        </div>
+        <div className="grid grid-cols-3 gap-3 text-center">
+          {[
+            { v: "Auto", l: "Business Discovery" },
+            { v: "AI", l: "Analysis & Scoring" },
+            { v: "Ready", l: "Emails & Proposals" },
+          ].map(s => (
+            <div key={s.l} className="bg-white/10 rounded-xl p-2">
+              <div className="font-extrabold text-sm">{s.v}</div>
+              <div className="text-white/70 text-xs">{s.l}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Hunt config */}
+      <div className="rounded-xl border border-border/50 overflow-hidden">
+        <div className="p-3 bg-muted/20 border-b border-border/50 flex items-center justify-between">
+          <h3 className="font-bold text-sm flex items-center gap-2"><Filter className="w-4 h-4" /> Hunt Settings</h3>
+        </div>
+        <div className="p-4 grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground mb-1 block">Business Category</label>
+            <Select value={category} onValueChange={setCategory}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>{CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground mb-1 block">How Many</label>
+            <Select value={count} onValueChange={setCount}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {["5", "10", "15", "20"].map(n => <SelectItem key={n} value={n}>{n} businesses</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground mb-1 block">City *</label>
+            <div className="relative">
+              <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+              <Input className="pl-8" value={city} onChange={e => setCity(e.target.value)} placeholder="e.g. Lagos, London, Miami" />
+            </div>
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground mb-1 block">Country</label>
+            <Input value={country} onChange={e => setCountry(e.target.value)} placeholder="e.g. Nigeria, UK, USA" />
+          </div>
+          <div className="col-span-2">
+            <label className="text-xs font-semibold text-muted-foreground mb-1 block">Extra Context (optional)</label>
+            <Input value={extraContext} onChange={e => setExtraContext(e.target.value)} placeholder="e.g. focus on mid-size businesses, avoid chains, luxury segment…" />
+          </div>
+          <div className="col-span-2 flex items-center justify-between p-3 bg-purple-50 border border-purple-200 rounded-xl">
+            <div>
+              <div className="text-sm font-bold text-purple-900 flex items-center gap-2"><Bot className="w-4 h-4" /> Auto-Generate Analysis & Emails</div>
+              <div className="text-xs text-purple-700 mt-0.5">AI writes website analysis, cold email, WhatsApp, and LinkedIn for each prospect automatically</div>
+            </div>
+            <Switch checked={autoGenerate} onCheckedChange={setAutoGenerate} />
+          </div>
+        </div>
+        <div className="px-4 pb-4">
+          {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-3">{error}</div>}
+          <Button onClick={hunt} disabled={hunting || !city.trim()} className="w-full gap-2 btn-premium text-white font-bold h-11">
+            {hunting
+              ? <><RefreshCw className="w-4 h-4 animate-spin" /> Hunting businesses…</>
+              : <><Radar className="w-4 h-4" /> Start AI Hunt</>}
+          </Button>
+        </div>
+      </div>
+
+      {/* Progress */}
+      {progress && !hunting && (
+        <div className="text-sm text-green-800 bg-green-50 border border-green-200 rounded-lg px-4 py-3 font-semibold">{progress}</div>
+      )}
+
+      {/* Results */}
+      {results.length > 0 && (
+        <div className="rounded-xl border border-border/50 overflow-hidden">
+          <div className="p-3 bg-muted/20 border-b border-border/50 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <button onClick={toggleAll} className="flex items-center gap-2 text-sm font-semibold">
+                <div className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${selectAll ? "bg-primary border-primary" : "border-gray-300"}`}>
+                  {selectAll && <Check className="w-2.5 h-2.5 text-white" />}
+                </div>
+                Select All
+              </button>
+              <span className="text-xs text-muted-foreground">{selectedCount} selected</span>
+            </div>
+            <Button onClick={importSelected} disabled={selectedCount === 0}
+              className="gap-2 font-semibold h-8 text-sm">
+              <Download className="w-3.5 h-3.5" />
+              Import {selectedCount > 0 ? selectedCount : ""} {autoGenerate ? "+ Auto-Generate" : ""}
+            </Button>
+          </div>
+
+          <div className="divide-y divide-border/30 max-h-[600px] overflow-y-auto">
+            {results.map((b, i) => (
+              <div key={i} className={`p-4 flex items-start gap-3 transition-colors ${b.imported ? "bg-green-50/60" : b.selected ? "" : "opacity-60"}`}>
+                {b.imported ? (
+                  <div className="w-5 h-5 rounded-full bg-green-600 flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <Check className="w-3 h-3 text-white" />
+                  </div>
+                ) : b.importing ? (
+                  <div className="w-5 h-5 flex-shrink-0 mt-0.5">
+                    <div className="w-5 h-5 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+                  </div>
+                ) : (
+                  <button onClick={() => toggleSelect(i)}
+                    className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 mt-0.5 transition-colors ${b.selected ? "bg-primary border-primary" : "border-gray-300"}`}>
+                    {b.selected && <Check className="w-2.5 h-2.5 text-white" />}
+                  </button>
+                )}
+
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="font-bold text-sm">{b.businessName}</div>
+                      <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-2 flex-wrap">
+                        {b.ownerName && <span>{b.ownerName}</span>}
+                        {b.email && <span className="text-primary">{b.email}</span>}
+                        {b.phone && <span>{b.phone}</span>}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <div className={`text-xs font-bold px-2 py-0.5 rounded-full ${b.softwareNeedScore >= 8 ? "bg-red-100 text-red-700" : b.softwareNeedScore >= 5 ? "bg-yellow-100 text-yellow-700" : "bg-green-100 text-green-700"}`}>
+                        {b.softwareNeedScore}/10 need
+                      </div>
+                      {b.estimatedValue > 0 && (
+                        <div className="text-xs font-bold text-purple-700">${b.estimatedValue.toLocaleString()}</div>
+                      )}
+                    </div>
+                  </div>
+                  {b.painPoint && <p className="text-xs text-muted-foreground mt-1.5 italic">"{b.painPoint}"</p>}
+                  <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                    {b.website && <span className="text-xs text-primary flex items-center gap-0.5"><Globe className="w-3 h-3" />{b.website}</span>}
+                    {b.imported && <span className="text-xs font-bold text-green-700">✓ Imported {autoGenerate ? "+ AI Generated" : ""}</span>}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Dashboard ────────────────────────────────────────────────────────────────
 
 function Dashboard({ prospects }: { prospects: Prospect[] }) {
   const stats = {
     total: prospects.length,
+    hunted: prospects.filter(p => p.hunted).length,
     contacted: prospects.filter(p => p.status === "contacted" || p.status === "waiting").length,
     proposals: prospects.filter(p => p.status === "proposal_sent").length,
     won: prospects.filter(p => p.status === "won").length,
     pipeline: prospects.filter(p => !["lost","archive"].includes(p.status)).reduce((s, p) => s + (p.expectedValue || 0), 0),
     analyzed: prospects.filter(p => p.analysis).length,
-    emails: prospects.filter(p => p.generatedEmail).length,
-    whatsapp: prospects.filter(p => p.generatedWhatsApp).length,
+    emailsSent: prospects.filter(p => p.emailSentAt).length,
   };
   const convRate = stats.total > 0 ? Math.round((stats.won / stats.total) * 100) : 0;
 
   const cards = [
     { label: "Total Prospects", value: stats.total, icon: <Users className="w-5 h-5" />, color: "text-blue-600", bg: "bg-blue-50 border-blue-100" },
-    { label: "Analyzed", value: stats.analyzed, icon: <BarChart3 className="w-5 h-5" />, color: "text-purple-600", bg: "bg-purple-50 border-purple-100" },
-    { label: "Emails Generated", value: stats.emails, icon: <Mail className="w-5 h-5" />, color: "text-indigo-600", bg: "bg-indigo-50 border-indigo-100" },
-    { label: "Proposals Sent", value: stats.proposals, icon: <Send className="w-5 h-5" />, color: "text-orange-600", bg: "bg-orange-50 border-orange-100" },
+    { label: "AI Hunted", value: stats.hunted, icon: <Radar className="w-5 h-5" />, color: "text-purple-600", bg: "bg-purple-50 border-purple-100" },
+    { label: "AI Analyzed", value: stats.analyzed, icon: <BarChart3 className="w-5 h-5" />, color: "text-indigo-600", bg: "bg-indigo-50 border-indigo-100" },
+    { label: "Emails Sent", value: stats.emailsSent, icon: <Send className="w-5 h-5" />, color: "text-orange-600", bg: "bg-orange-50 border-orange-100" },
     { label: "Projects Won", value: stats.won, icon: <CheckCircle2 className="w-5 h-5" />, color: "text-green-600", bg: "bg-green-50 border-green-100" },
     { label: "Conversion Rate", value: `${convRate}%`, icon: <TrendingUp className="w-5 h-5" />, color: "text-emerald-600", bg: "bg-emerald-50 border-emerald-100" },
     { label: "Pipeline Value", value: `$${stats.pipeline.toLocaleString()}`, icon: <Target className="w-5 h-5" />, color: "text-amber-600", bg: "bg-amber-50 border-amber-100" },
-    { label: "WhatsApp Msgs", value: stats.whatsapp, icon: <MessageCircle className="w-5 h-5" />, color: "text-green-700", bg: "bg-green-50 border-green-100" },
+    { label: "Proposals Sent", value: stats.proposals, icon: <Download className="w-5 h-5" />, color: "text-pink-600", bg: "bg-pink-50 border-pink-100" },
   ];
 
   const pipeline = Object.entries(STATUS_CONFIG).map(([key, cfg]) => ({
@@ -238,16 +727,16 @@ function Dashboard({ prospects }: { prospects: Prospect[] }) {
 
       {prospects.length === 0 && (
         <div className="text-center py-16 text-muted-foreground">
-          <Sparkles className="w-12 h-12 mx-auto mb-4 opacity-20" />
-          <p className="font-semibold text-lg">Your AI Sales Engine is Ready</p>
-          <p className="text-sm mt-1">Add a prospect, then use AI to analyze their website, generate proposals and emails in seconds.</p>
+          <Radar className="w-12 h-12 mx-auto mb-4 opacity-20" />
+          <p className="font-semibold text-lg">AI Hunter Ready</p>
+          <p className="text-sm mt-1">Use the Hunter tab to automatically find businesses — AI will analyze them and write outreach for you.</p>
         </div>
       )}
     </div>
   );
 }
 
-// ─── Add/Edit Prospect Dialog ────────────────────────────────────────────────
+// ─── Add/Edit Prospect Dialog ─────────────────────────────────────────────────
 
 const EMPTY_PROSPECT = {
   businessName: "", ownerName: "", category: "", website: "", email: "",
@@ -263,7 +752,6 @@ function AddProspectDialog({ onAdd, editData, onClose }: {
 }) {
   const [form, setForm] = useState(editData ? { ...editData } : { ...EMPTY_PROSPECT });
   const [open, setOpen] = useState(!!editData);
-
   const set = (k: string, v: any) => setForm(f => ({ ...f, [k]: v }));
 
   const handleSubmit = () => {
@@ -280,7 +768,7 @@ function AddProspectDialog({ onAdd, editData, onClose }: {
     <Dialog open={open} onOpenChange={v => { setOpen(v); if (!v) onClose?.(); }}>
       {!editData && (
         <DialogTrigger asChild>
-          <Button className="gap-2 font-semibold"><Plus className="w-4 h-4" /> Add Prospect</Button>
+          <Button variant="outline" className="gap-2 font-semibold"><Plus className="w-4 h-4" /> Add Manually</Button>
         </DialogTrigger>
       )}
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -366,26 +854,22 @@ function AnalysisPanel({ prospect, onUpdate }: { prospect: Prospect; onUpdate: (
     setLoading(true); setError("");
     try {
       const data = await callCRM("analyze-website", {
-        website: prospect.website,
-        businessName: prospect.businessName,
-        category: prospect.category,
+        website: prospect.website, businessName: prospect.businessName, category: prospect.category,
       });
       onUpdate({ ...prospect, analysis: data });
-    } catch (e: any) {
-      setError(e.message);
-    } finally { setLoading(false); }
+    } catch (e: any) { setError(e.message); }
+    finally { setLoading(false); }
   };
 
   const a = prospect.analysis;
-
-  if (loading) return <LoadingSpinner text="AI is analyzing the business website…" />;
+  if (loading) return <LoadingSpinner text="AI is analyzing the business…" />;
 
   if (!a) return (
     <div className="text-center py-12">
       <BarChart3 className="w-12 h-12 mx-auto mb-4 text-primary/30" />
       <h3 className="font-bold text-lg mb-2">AI Website Analysis</h3>
       <p className="text-muted-foreground text-sm mb-6 max-w-sm mx-auto">
-        Get a full digital audit — scores, issues, opportunities, and recommended solutions for {prospect.businessName}.
+        Get a full digital audit — scores, issues, opportunities for {prospect.businessName}.
       </p>
       {error && <p className="text-red-500 text-sm mb-4">{error}</p>}
       <Button onClick={analyze} className="gap-2 btn-premium text-white font-bold">
@@ -400,7 +884,7 @@ function AnalysisPanel({ prospect, onUpdate }: { prospect: Prospect; onUpdate: (
     <div className="space-y-6">
       <div className="flex items-start justify-between">
         <div>
-          <h3 className="font-bold text-lg">{prospect.businessName} — Website Report</h3>
+          <h3 className="font-bold text-lg">{prospect.businessName} — Report</h3>
           <p className="text-sm text-muted-foreground mt-1">{a.summary}</p>
         </div>
         <Button size="sm" variant="outline" onClick={analyze} className="gap-1.5 flex-shrink-0">
@@ -408,7 +892,6 @@ function AnalysisPanel({ prospect, onUpdate }: { prospect: Prospect; onUpdate: (
         </Button>
       </div>
 
-      {/* Scores */}
       <div className="grid grid-cols-3 gap-3">
         {[
           { label: "Website Score", v: a.websiteScore },
@@ -426,7 +909,6 @@ function AnalysisPanel({ prospect, onUpdate }: { prospect: Prospect; onUpdate: (
         ))}
       </div>
 
-      {/* Feature Checklist */}
       <div className="rounded-xl border border-border/50 overflow-hidden">
         <div className="p-3 bg-muted/20 border-b border-border/50">
           <h4 className="text-sm font-bold">Feature Checklist</h4>
@@ -441,7 +923,6 @@ function AnalysisPanel({ prospect, onUpdate }: { prospect: Prospect; onUpdate: (
         </div>
       </div>
 
-      {/* Issues */}
       {a.issues.length > 0 && (
         <div className="rounded-xl border border-border/50 overflow-hidden">
           <div className="p-3 bg-muted/20 border-b border-border/50">
@@ -464,7 +945,6 @@ function AnalysisPanel({ prospect, onUpdate }: { prospect: Prospect; onUpdate: (
         </div>
       )}
 
-      {/* Opportunities */}
       {a.opportunities.length > 0 && (
         <div className="rounded-xl border border-border/50 overflow-hidden">
           <div className="p-3 bg-muted/20 border-b border-border/50">
@@ -488,7 +968,6 @@ function AnalysisPanel({ prospect, onUpdate }: { prospect: Prospect; onUpdate: (
         </div>
       )}
 
-      {/* Project Estimate */}
       <div className="bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-200 rounded-xl p-4">
         <h4 className="font-bold text-sm text-purple-900 mb-3">Project Estimate</h4>
         <div className="grid grid-cols-3 gap-3 text-center">
@@ -510,16 +989,18 @@ function AnalysisPanel({ prospect, onUpdate }: { prospect: Prospect; onUpdate: (
   );
 }
 
-// ─── Outreach Panel ──────────────────────────────────────────────────────────
+// ─── Outreach Panel ───────────────────────────────────────────────────────────
 
 function OutreachPanel({ prospect, onUpdate }: { prospect: Prospect; onUpdate: (p: Prospect) => void }) {
   const [loadingEmail, setLoadingEmail] = useState(false);
   const [loadingWA, setLoadingWA] = useState(false);
   const [loadingLI, setLoadingLI] = useState(false);
   const [loadingFollowup, setLoadingFollowup] = useState(false);
+  const [sendingEmail, setSendingEmail] = useState(false);
   const [followupDay, setFollowupDay] = useState("3");
   const [followup, setFollowup] = useState<{ subject: string; body: string } | null>(null);
   const [error, setError] = useState("");
+  const [sendStatus, setSendStatus] = useState<{ type: "success" | "error"; msg: string } | null>(null);
 
   const issues = prospect.analysis?.issues.slice(0, 3).map(i => i.title).join(", ") || "";
   const opportunities = prospect.analysis?.opportunities.slice(0, 2).map(o => o.title).join(", ") || "";
@@ -535,6 +1016,29 @@ function OutreachPanel({ prospect, onUpdate }: { prospect: Prospect; onUpdate: (
       onUpdate({ ...prospect, generatedEmail: data });
     } catch (e: any) { setError(e.message); }
     finally { setLoadingEmail(false); }
+  };
+
+  const sendEmail = async () => {
+    if (!prospect.email || !prospect.generatedEmail) return;
+    setSendingEmail(true); setSendStatus(null);
+    try {
+      const r = await fetch(`${apiBase()}/api/crm/send-email`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to: prospect.email,
+          subject: prospect.generatedEmail.subject,
+          body: prospect.generatedEmail.body,
+          prospectName: prospect.businessName,
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error);
+      onUpdate({ ...prospect, status: "contacted", emailSentAt: new Date().toISOString() });
+      setSendStatus({ type: "success", msg: `Email sent to ${prospect.email}` });
+    } catch (e: any) {
+      setSendStatus({ type: "error", msg: e.message });
+    } finally { setSendingEmail(false); }
   };
 
   const genWA = async () => {
@@ -577,11 +1081,20 @@ function OutreachPanel({ prospect, onUpdate }: { prospect: Prospect; onUpdate: (
   return (
     <div className="space-y-5">
       {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+      {sendStatus && (
+        <div className={`flex items-center gap-2 text-sm px-4 py-3 rounded-lg border ${sendStatus.type === "success" ? "bg-green-50 text-green-800 border-green-200" : "bg-red-50 text-red-700 border-red-200"}`}>
+          {sendStatus.type === "success" ? <CheckCircle2 className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
+          {sendStatus.msg}
+        </div>
+      )}
 
       {/* Email */}
       <div className="rounded-xl border border-border/50 overflow-hidden">
         <div className="p-4 border-b border-border/50 bg-muted/20 flex items-center justify-between">
-          <h4 className="font-bold text-sm flex items-center gap-2"><Mail className="w-4 h-4 text-primary" /> Cold Email</h4>
+          <h4 className="font-bold text-sm flex items-center gap-2">
+            <Mail className="w-4 h-4 text-primary" /> Cold Email
+            {prospect.emailSentAt && <span className="text-xs text-green-600 font-normal">✓ Sent {new Date(prospect.emailSentAt).toLocaleDateString()}</span>}
+          </h4>
           <div className="flex gap-2">
             {prospect.generatedEmail && <CopyButton text={`Subject: ${prospect.generatedEmail.subject}\n\n${prospect.generatedEmail.body}`} />}
             <Button size="sm" variant="outline" onClick={genEmail} disabled={loadingEmail} className="h-7 text-xs gap-1">
@@ -589,19 +1102,35 @@ function OutreachPanel({ prospect, onUpdate }: { prospect: Prospect; onUpdate: (
               {prospect.generatedEmail ? "Regenerate" : "Generate"}
             </Button>
             {prospect.generatedEmail && prospect.email && (
-              <Button size="sm" className="h-7 text-xs gap-1" onClick={() => window.open(`mailto:${prospect.email}?subject=${encodeURIComponent(prospect.generatedEmail!.subject)}&body=${encodeURIComponent(prospect.generatedEmail!.body)}`, "_blank")}>
-                <Send className="w-3 h-3" /> Send
+              <Button size="sm" onClick={sendEmail} disabled={sendingEmail}
+                className="h-7 text-xs gap-1 bg-primary hover:bg-primary/90 text-white font-semibold">
+                {sendingEmail ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+                {sendingEmail ? "Sending…" : "Send Now"}
               </Button>
             )}
           </div>
         </div>
         {loadingEmail ? <LoadingSpinner text="Crafting personalized email…" /> : prospect.generatedEmail ? (
           <div className="p-4 space-y-3">
+            {prospect.email && (
+              <div className="text-xs text-muted-foreground bg-muted/30 rounded-lg px-3 py-2">
+                Sending to: <span className="font-semibold text-foreground">{prospect.email}</span>
+              </div>
+            )}
             <div className="bg-muted/30 rounded-lg p-3">
               <div className="text-xs font-bold text-muted-foreground mb-1">SUBJECT</div>
-              <div className="text-sm font-semibold">{prospect.generatedEmail.subject}</div>
+              <Input value={prospect.generatedEmail.subject}
+                onChange={e => onUpdate({ ...prospect, generatedEmail: { ...prospect.generatedEmail!, subject: e.target.value } })}
+                className="border-none bg-transparent p-0 font-semibold text-sm h-auto focus-visible:ring-0" />
             </div>
-            <Textarea value={prospect.generatedEmail.body} onChange={e => onUpdate({ ...prospect, generatedEmail: { ...prospect.generatedEmail!, body: e.target.value } })} rows={10} className="text-sm font-mono" />
+            <Textarea value={prospect.generatedEmail.body}
+              onChange={e => onUpdate({ ...prospect, generatedEmail: { ...prospect.generatedEmail!, body: e.target.value } })}
+              rows={10} className="text-sm font-mono" />
+            {!prospect.email && (
+              <div className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                No email address for this prospect — add one to enable sending.
+              </div>
+            )}
           </div>
         ) : <div className="p-6 text-center text-sm text-muted-foreground">Click Generate to create a personalized email for {prospect.businessName}</div>}
       </div>
@@ -617,7 +1146,8 @@ function OutreachPanel({ prospect, onUpdate }: { prospect: Prospect; onUpdate: (
               {prospect.generatedWhatsApp ? "Regenerate" : "Generate"}
             </Button>
             {prospect.generatedWhatsApp && prospect.phone && (
-              <Button size="sm" className="h-7 text-xs gap-1 bg-green-600 hover:bg-green-700 text-white" onClick={() => window.open(`https://wa.me/${prospect.phone.replace(/\D/g,"")}?text=${encodeURIComponent(prospect.generatedWhatsApp!)}`, "_blank")}>
+              <Button size="sm" className="h-7 text-xs gap-1 bg-green-600 hover:bg-green-700 text-white"
+                onClick={() => window.open(`https://wa.me/${prospect.phone.replace(/\D/g,"")}?text=${encodeURIComponent(prospect.generatedWhatsApp!)}`, "_blank")}>
                 <MessageCircle className="w-3 h-3" /> Open WA
               </Button>
             )}
@@ -625,9 +1155,10 @@ function OutreachPanel({ prospect, onUpdate }: { prospect: Prospect; onUpdate: (
         </div>
         {loadingWA ? <LoadingSpinner text="Writing WhatsApp message…" /> : prospect.generatedWhatsApp ? (
           <div className="p-4">
-            <Textarea value={prospect.generatedWhatsApp} onChange={e => onUpdate({ ...prospect, generatedWhatsApp: e.target.value })} rows={5} className="text-sm" />
+            <Textarea value={prospect.generatedWhatsApp}
+              onChange={e => onUpdate({ ...prospect, generatedWhatsApp: e.target.value })} rows={5} className="text-sm" />
           </div>
-        ) : <div className="p-6 text-center text-sm text-muted-foreground">Generate a short, human WhatsApp message</div>}
+        ) : <div className="p-6 text-center text-sm text-muted-foreground">Generate a short WhatsApp message</div>}
       </div>
 
       {/* LinkedIn */}
@@ -642,9 +1173,10 @@ function OutreachPanel({ prospect, onUpdate }: { prospect: Prospect; onUpdate: (
             </Button>
           </div>
         </div>
-        {loadingLI ? <LoadingSpinner text="Writing LinkedIn connection message…" /> : prospect.generatedLinkedIn ? (
+        {loadingLI ? <LoadingSpinner text="Writing LinkedIn message…" /> : prospect.generatedLinkedIn ? (
           <div className="p-4">
-            <Textarea value={prospect.generatedLinkedIn} onChange={e => onUpdate({ ...prospect, generatedLinkedIn: e.target.value })} rows={3} className="text-sm" />
+            <Textarea value={prospect.generatedLinkedIn}
+              onChange={e => onUpdate({ ...prospect, generatedLinkedIn: e.target.value })} rows={3} className="text-sm" />
             <div className="text-xs text-muted-foreground mt-2">{prospect.generatedLinkedIn.length}/300 characters</div>
           </div>
         ) : <div className="p-6 text-center text-sm text-muted-foreground">Generate a 300-char LinkedIn connection request</div>}
@@ -679,13 +1211,13 @@ function OutreachPanel({ prospect, onUpdate }: { prospect: Prospect; onUpdate: (
             </div>
             <Textarea value={followup.body} onChange={e => setFollowup({ ...followup, body: e.target.value })} rows={6} className="text-sm" />
           </div>
-        ) : <div className="p-6 text-center text-sm text-muted-foreground">Generate follow-up messages for Day 3, 7, 14, or 30</div>}
+        ) : <div className="p-6 text-center text-sm text-muted-foreground">Generate follow-ups for Day 3, 7, 14, or 30</div>}
       </div>
     </div>
   );
 }
 
-// ─── Proposal Panel ──────────────────────────────────────────────────────────
+// ─── Proposal Panel ───────────────────────────────────────────────────────────
 
 function ProposalPanel({ prospect, onUpdate }: { prospect: Prospect; onUpdate: (p: Prospect) => void }) {
   const [loading, setLoading] = useState(false);
@@ -708,7 +1240,6 @@ function ProposalPanel({ prospect, onUpdate }: { prospect: Prospect; onUpdate: (
   };
 
   const p = prospect.proposal?.sections;
-
   if (loading) return <LoadingSpinner text="AI is generating your proposal…" />;
 
   if (!p) return (
@@ -716,7 +1247,7 @@ function ProposalPanel({ prospect, onUpdate }: { prospect: Prospect; onUpdate: (
       <Download className="w-12 h-12 mx-auto mb-4 text-primary/30" />
       <h3 className="font-bold text-lg mb-2">AI Proposal Generator</h3>
       <p className="text-muted-foreground text-sm mb-4 max-w-sm mx-auto">
-        Generate a full professional proposal for {prospect.businessName}. Run AI Analysis first for best results.
+        Generate a full professional proposal for {prospect.businessName}.
       </p>
       {!prospect.analysis && <p className="text-amber-600 text-xs mb-4">Tip: Run Website Analysis first for a more accurate proposal.</p>}
       {error && <p className="text-red-500 text-sm mb-4">{error}</p>}
@@ -731,12 +1262,8 @@ function ProposalPanel({ prospect, onUpdate }: { prospect: Prospect; onUpdate: (
       <div className="flex items-center justify-between">
         <h3 className="font-bold text-lg">Proposal — {prospect.businessName}</h3>
         <div className="flex gap-2">
-          <Button size="sm" variant="outline" onClick={generate} className="gap-1.5">
-            <RefreshCw className="w-3.5 h-3.5" /> Regenerate
-          </Button>
-          <Button size="sm" onClick={() => window.print()} className="gap-1.5">
-            <Download className="w-3.5 h-3.5" /> Print/PDF
-          </Button>
+          <Button size="sm" variant="outline" onClick={generate} className="gap-1.5"><RefreshCw className="w-3.5 h-3.5" /> Regenerate</Button>
+          <Button size="sm" onClick={() => window.print()} className="gap-1.5"><Download className="w-3.5 h-3.5" /> Print/PDF</Button>
         </div>
       </div>
 
@@ -763,7 +1290,7 @@ function ProposalPanel({ prospect, onUpdate }: { prospect: Prospect; onUpdate: (
   );
 }
 
-// ─── Prospect Detail ─────────────────────────────────────────────────────────
+// ─── Prospect Detail ──────────────────────────────────────────────────────────
 
 function ProspectDetail({ prospect, onUpdate, onDelete, onBack }: {
   prospect: Prospect;
@@ -777,20 +1304,27 @@ function ProspectDetail({ prospect, onUpdate, onDelete, onBack }: {
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3">
-        <Button variant="ghost" size="sm" onClick={onBack} className="gap-1"><ChevronRight className="w-4 h-4 rotate-180" /> Back</Button>
+        <Button variant="ghost" size="sm" onClick={onBack} className="gap-1">
+          <ChevronRight className="w-4 h-4 rotate-180" /> Back
+        </Button>
         <div className="flex-1">
-          <h2 className="font-extrabold text-xl">{prospect.businessName}</h2>
+          <h2 className="font-extrabold text-xl flex items-center gap-2">
+            {prospect.businessName}
+            {prospect.hunted && <span className="text-xs font-semibold text-purple-600 bg-purple-100 px-2 py-0.5 rounded-full flex items-center gap-1"><Radar className="w-3 h-3" /> AI Hunted</span>}
+          </h2>
           <div className="flex items-center gap-2 mt-1">
             <Badge className={`${cfg.bg} ${cfg.color} ${cfg.border} border text-xs`}>{cfg.label}</Badge>
             {prospect.category && <span className="text-xs text-muted-foreground">{prospect.category}</span>}
+            {prospect.city && <span className="text-xs text-muted-foreground">{prospect.city}{prospect.country ? `, ${prospect.country}` : ""}</span>}
             {prospect.priority === "high" && <span className="text-xs font-bold text-red-600">🔴 High Priority</span>}
           </div>
         </div>
         <Button size="sm" variant="outline" onClick={() => setEditing(true)}>Edit</Button>
-        <Button size="sm" variant="ghost" className="text-destructive/70 hover:text-destructive" onClick={onDelete}><Trash2 className="w-4 h-4" /></Button>
+        <Button size="sm" variant="ghost" className="text-destructive/70 hover:text-destructive" onClick={onDelete}>
+          <Trash2 className="w-4 h-4" />
+        </Button>
       </div>
 
-      {/* Quick info */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
           { label: "Website", value: prospect.website, href: prospect.website, icon: <Globe className="w-3.5 h-3.5" /> },
@@ -807,7 +1341,6 @@ function ProspectDetail({ prospect, onUpdate, onDelete, onBack }: {
         ) : null)}
       </div>
 
-      {/* Status + follow-up */}
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className="text-xs font-semibold text-muted-foreground mb-1 block">Pipeline Status</label>
@@ -826,6 +1359,13 @@ function ProspectDetail({ prospect, onUpdate, onDelete, onBack }: {
           </div>
         )}
       </div>
+
+      {prospect.painPoint && (
+        <div className="rounded-xl border border-purple-200 bg-purple-50 p-4">
+          <div className="text-xs font-bold text-purple-800 mb-1">AI IDENTIFIED PAIN POINT</div>
+          <p className="text-sm text-purple-900">{prospect.painPoint}</p>
+        </div>
+      )}
 
       {prospect.notes && (
         <div className="rounded-xl border border-border/50 p-4">
@@ -896,7 +1436,7 @@ function ProspectList({ prospects, onSelect, onDelete, onUpdate }: {
       {filtered.length === 0 ? (
         <div className="text-center py-14 text-muted-foreground">
           <Building className="w-10 h-10 mx-auto mb-3 opacity-20" />
-          <p className="font-medium">{prospects.length === 0 ? "No prospects yet." : "No results match your filters."}</p>
+          <p className="font-medium">{prospects.length === 0 ? "No prospects yet. Use AI Hunter to find businesses automatically." : "No results match your filters."}</p>
         </div>
       ) : (
         <div className="divide-y divide-border/40 rounded-xl border border-border/50 overflow-hidden">
@@ -912,29 +1452,21 @@ function ProspectList({ prospects, onSelect, onDelete, onUpdate }: {
                     <span className="font-bold text-sm">{p.businessName}</span>
                     <Badge className={`${cfg.bg} ${cfg.color} ${cfg.border} border text-xs h-5`}>{cfg.label}</Badge>
                     {p.priority === "high" && <span className="text-xs text-red-600 font-bold">🔴</span>}
+                    {p.hunted && <span className="text-xs text-purple-600 font-bold flex items-center gap-0.5"><Radar className="w-3 h-3" /></span>}
                     {p.analysis && <span className="text-xs text-purple-600 font-bold">✓ Analyzed</span>}
+                    {p.emailSentAt && <span className="text-xs text-green-600 font-bold">✓ Emailed</span>}
                   </div>
                   <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground flex-wrap">
                     {p.category && <span>{p.category}</span>}
                     {p.city && <span>{p.city}{p.country ? `, ${p.country}` : ""}</span>}
-                    {p.website && <span className="text-primary truncate max-w-32">{p.website}</span>}
-                    {p.expectedValue > 0 && <span className="text-green-700 font-semibold">${p.expectedValue.toLocaleString()}</span>}
+                    {p.email && <span>{p.email}</span>}
+                    {p.expectedValue > 0 && <span className="text-purple-700 font-semibold">${p.expectedValue.toLocaleString()}</span>}
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Button size="sm" variant="ghost" className="h-8 px-3 text-xs gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => onSelect(p)}>
-                    <Sparkles className="w-3 h-3" /> Open
-                  </Button>
-                  <Select value={p.status} onValueChange={v => onUpdate({ ...p, status: v as LeadStatus })}>
-                    <SelectTrigger className={`w-[110px] h-7 text-xs font-semibold ${cfg.color} ${cfg.bg} ${cfg.border} border`} onClick={e => e.stopPropagation()}>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>{Object.entries(STATUS_CONFIG).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}</SelectContent>
-                  </Select>
-                  <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive/50 hover:text-destructive" onClick={() => onDelete(p.id)}>
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </Button>
-                </div>
+                <Button size="sm" variant="ghost" className="opacity-0 group-hover:opacity-100 text-destructive/70 h-7 w-7 p-0 flex-shrink-0"
+                  onClick={e => { e.stopPropagation(); onDelete(p.id); }}>
+                  <Trash2 className="w-3.5 h-3.5" />
+                </Button>
               </div>
             );
           })}
@@ -949,110 +1481,108 @@ function ProspectList({ prospects, onSelect, onDelete, onUpdate }: {
 export default function CRM() {
   const [prospects, setProspects] = useState<Prospect[]>(loadProspects);
   const [selected, setSelected] = useState<Prospect | null>(null);
-  const [view, setView] = useState<"dashboard" | "prospects" | "detail">("dashboard");
+  const [tab, setTab] = useState("hunter");
 
-  const persist = useCallback((updated: Prospect[]) => {
-    setProspects(updated);
-    saveProspects(updated);
+  const save = useCallback((data: Prospect[]) => {
+    setProspects(data);
+    saveProspects(data);
   }, []);
 
-  const addProspect = (data: Omit<Prospect, "id" | "addedAt">) => {
-    const p: Prospect = { ...data, id: Date.now(), addedAt: new Date().toISOString() };
-    persist([p, ...prospects]);
-  };
+  const addProspects = useCallback((newOnes: Omit<Prospect, "id" | "addedAt">[]) => {
+    setProspects(prev => {
+      const maxId = prev.length > 0 ? Math.max(...prev.map(p => p.id)) : 0;
+      const added = newOnes.map((p, i) => ({ ...p, id: maxId + i + 1, addedAt: new Date().toISOString() }));
+      const next = [...prev, ...added];
+      saveProspects(next);
+      return next;
+    });
+    setTab("prospects");
+  }, []);
 
-  const updateProspect = (p: Prospect) => {
-    const updated = prospects.map(x => x.id === p.id ? p : x);
-    persist(updated);
+  const addProspect = useCallback((p: Omit<Prospect, "id" | "addedAt">) => addProspects([p]), [addProspects]);
+
+  const update = useCallback((p: Prospect) => {
+    save(prospects.map(x => x.id === p.id ? p : x));
     if (selected?.id === p.id) setSelected(p);
-  };
+  }, [prospects, selected, save]);
 
-  const deleteProspect = (id: number) => {
-    if (!confirm("Remove this prospect?")) return;
-    persist(prospects.filter(p => p.id !== id));
-    if (selected?.id === id) { setSelected(null); setView("prospects"); }
-  };
+  const remove = useCallback((id: number) => {
+    save(prospects.filter(p => p.id !== id));
+    if (selected?.id === id) setSelected(null);
+  }, [prospects, selected, save]);
 
-  const openDetail = (p: Prospect) => {
-    setSelected(p);
-    setView("detail");
-  };
+  if (selected) {
+    return (
+      <div className="min-h-screen bg-background">
+        <div className="max-w-4xl mx-auto px-4 py-6">
+          <ProspectDetail
+            prospect={selected}
+            onUpdate={update}
+            onDelete={() => { remove(selected.id); }}
+            onBack={() => setSelected(null)}
+          />
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC]">
-      {/* Header */}
-      <div className="bg-gradient-to-r from-[#7C3AED] to-[#6366F1] text-white px-6 py-5">
-        <div className="max-w-6xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
-              <Sparkles className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <h1 className="text-xl font-extrabold">AI Client Hunter</h1>
-              <p className="text-purple-200 text-xs">Your private agency sales engine</p>
-            </div>
+    <div className="min-h-screen bg-background">
+      <div className="max-w-5xl mx-auto px-4 py-6">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h1 className="font-extrabold text-2xl flex items-center gap-2">
+              <Bot className="w-7 h-7 text-primary" />
+              AI Sales Engine
+            </h1>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              Hunts businesses automatically, analyzes them, writes outreach & sends emails
+            </p>
           </div>
           <div className="flex items-center gap-2">
-            <div className="text-right text-xs text-purple-200 mr-2 hidden sm:block">
-              <div className="font-bold text-white">{prospects.length} prospects</div>
-              <div>${prospects.filter(p => !["lost","archive"].includes(p.status)).reduce((s, p) => s + (p.expectedValue || 0), 0).toLocaleString()} pipeline</div>
-            </div>
             <AddProspectDialog onAdd={addProspect} />
           </div>
         </div>
-      </div>
 
-      {/* Nav */}
-      <div className="bg-white border-b border-border/50 sticky top-0 z-10">
-        <div className="max-w-6xl mx-auto px-6">
-          <div className="flex gap-0">
-            {[
-              { key: "dashboard", label: "Dashboard", icon: <LayoutDashboard className="w-4 h-4" /> },
-              { key: "prospects", label: `Prospects (${prospects.length})`, icon: <Users className="w-4 h-4" /> },
-            ].map(tab => (
-              <button key={tab.key} onClick={() => setView(tab.key as any)}
-                className={`flex items-center gap-2 px-4 py-3.5 text-sm font-semibold border-b-2 transition-colors ${
-                  view === tab.key || (view === "detail" && tab.key === "prospects")
-                    ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
-                }`}>
-                {tab.icon}{tab.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
+        <Tabs value={tab} onValueChange={setTab}>
+          <TabsList className="w-full mb-6">
+            <TabsTrigger value="hunter" className="flex-1 gap-1.5">
+              <Radar className="w-4 h-4" /> AI Hunter
+            </TabsTrigger>
+            <TabsTrigger value="dashboard" className="flex-1 gap-1.5">
+              <LayoutDashboard className="w-4 h-4" /> Dashboard
+            </TabsTrigger>
+            <TabsTrigger value="prospects" className="flex-1 gap-1.5">
+              <Users className="w-4 h-4" /> Prospects
+              {prospects.length > 0 && <span className="text-xs bg-primary/20 text-primary px-1.5 py-0.5 rounded-full font-bold">{prospects.length}</span>}
+            </TabsTrigger>
+            <TabsTrigger value="email-settings" className="flex-1 gap-1.5">
+              <Settings className="w-4 h-4" /> Email Settings
+            </TabsTrigger>
+          </TabsList>
 
-      {/* Content */}
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6">
-        <AnimatePresence mode="wait">
-          {view === "dashboard" && (
-            <motion.div key="dashboard" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-              <Dashboard prospects={prospects} />
-              {prospects.length > 0 && (
-                <div className="mt-6 text-center">
-                  <Button onClick={() => setView("prospects")} variant="outline" className="gap-2">
-                    View All Prospects <ArrowRight className="w-4 h-4" />
-                  </Button>
-                </div>
-              )}
-            </motion.div>
-          )}
-          {view === "prospects" && (
-            <motion.div key="prospects" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-              <ProspectList prospects={prospects} onSelect={openDetail} onDelete={deleteProspect} onUpdate={updateProspect} />
-            </motion.div>
-          )}
-          {view === "detail" && selected && (
-            <motion.div key="detail" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }}>
-              <ProspectDetail
-                prospect={prospects.find(p => p.id === selected.id) || selected}
-                onUpdate={updateProspect}
-                onDelete={() => deleteProspect(selected.id)}
-                onBack={() => setView("prospects")}
-              />
-            </motion.div>
-          )}
-        </AnimatePresence>
+          <TabsContent value="hunter">
+            <AIHunterPanel onImport={addProspects} />
+          </TabsContent>
+
+          <TabsContent value="dashboard">
+            <Dashboard prospects={prospects} />
+          </TabsContent>
+
+          <TabsContent value="prospects">
+            <ProspectList
+              prospects={prospects}
+              onSelect={setSelected}
+              onDelete={remove}
+              onUpdate={update}
+            />
+          </TabsContent>
+
+          <TabsContent value="email-settings">
+            <EmailSettingsPanel />
+          </TabsContent>
+        </Tabs>
       </div>
     </div>
   );
