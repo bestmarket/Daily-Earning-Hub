@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-import { Link } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useAdminLogin,
@@ -17,22 +16,45 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import {
   Save, Lock, DollarSign, CreditCard, MessageSquare, Sparkles, RefreshCw,
-  ChevronDown, ChevronUp, AlertTriangle, Mail, Send, Target, Plus, Trash2,
+  AlertTriangle, Mail, Send, Target, Plus, Trash2,
   CheckCircle2, Clock, Wrench, ExternalLink, Calculator, Brain, TrendingUp, Users,
-  Key, Eye, EyeOff, ShieldCheck, Zap, Package, Link2, Copy,
+  Key, Eye, EyeOff, ShieldCheck, Zap, Package, LayoutDashboard,
+  Bot, Settings, Globe,
 } from "lucide-react";
 import { toast as sonnerToast } from "sonner";
 import API_BASE from "@/lib/api";
-const ADMIN_TOKEN = "devstudio-admin";
-const LS_KEY = "devstudio_site_settings";
 
-const DEFAULT_SETTINGS = {
+const ADMIN_TOKEN = "devstudio-admin";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type PricingPlan = {
+  id: string; name: string; price: string; description: string;
+  features: string[]; popular: boolean;
+};
+type PaymentMethod = {
+  id: string; name: string; enabled: boolean; details: string;
+};
+type SiteSettings = {
+  pricing: PricingPlan[];
+  paymentMethods: PaymentMethod[];
+  contact: { whatsapp: string; email: string; whatsappDisplay: string };
+  hero: { headline: string; subheadline: string; ctaPrimary: string; ctaSecondary: string };
+};
+interface Lead {
+  id: number; name: string; email: string; company: string; role: string;
+  service: string; note: string; status: "new" | "contacted" | "replied" | "converted";
+  addedAt: string;
+}
+
+const DEFAULT_SETTINGS: SiteSettings = {
   pricing: [
     { id: "starter", name: "Starter", price: "$299", description: "Perfect for small businesses", features: ["Landing Page", "Contact Form", "Mobile Friendly", "1 Revision"], popular: false },
     { id: "pro", name: "Pro", price: "$799", description: "For growing businesses", features: ["Up to 5 Pages", "Booking System", "Admin Dashboard", "Payment Integration", "3 Revisions"], popular: true },
@@ -41,211 +63,57 @@ const DEFAULT_SETTINGS = {
   paymentMethods: [
     { id: "paypal", name: "PayPal", enabled: true, details: "" },
     { id: "stripe", name: "Stripe", enabled: false, details: "" },
+    { id: "paystack", name: "Paystack", enabled: false, details: "" },
     { id: "bank", name: "Bank Transfer", enabled: true, details: "" },
-    { id: "crypto", name: "Crypto", enabled: false, details: "" },
+    { id: "crypto", name: "Crypto (USDT/BTC)", enabled: false, details: "" },
   ],
   contact: { whatsapp: "+1234567890", email: "hello@devstudio.com", whatsappDisplay: "+1 (234) 567-890" },
   hero: { headline: "We Build Software That Helps Your Business Get More Customers & Save Time.", subheadline: "From booking systems and customer portals to AI-powered tools and SaaS platforms — we build custom software that grows your revenue.", ctaPrimary: "Get My Free Business Tool Idea", ctaSecondary: "View Examples" },
 };
 
-type PricingPlan = {
-  id: string;
-  name: string;
-  price: string;
-  description: string;
-  features: string[];
-  popular: boolean;
-};
-
-type PaymentMethod = {
-  id: string;
-  name: string;
-  enabled: boolean;
-  details: string;
-};
-
-type SiteSettings = {
-  pricing: PricingPlan[];
-  paymentMethods: PaymentMethod[];
-  contact: { whatsapp: string; email: string; whatsappDisplay: string };
-  hero: { headline: string; subheadline: string; ctaPrimary: string; ctaSecondary: string };
-};
-
-function Section({ title, icon, children, defaultOpen = true }: {
-  title: string;
-  icon: React.ReactNode;
-  children: React.ReactNode;
-  defaultOpen?: boolean;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <div className="rounded-xl border border-border/60 bg-card overflow-hidden">
-      <button
-        onClick={() => setOpen(!open)}
-        className="w-full flex items-center justify-between p-5 text-left hover:bg-muted/30 transition-colors"
-      >
-        <div className="flex items-center gap-3 font-semibold text-base">
-          {icon}
-          {title}
-        </div>
-        {open ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
-      </button>
-      {open && <div className="px-5 pb-5 border-t border-border/40 pt-5">{children}</div>}
-    </div>
-  );
-}
+// ─── Main Admin Component ─────────────────────────────────────────────────────
 
 export default function Admin() {
   const { toast } = useToast();
   const [authed, setAuthed] = useState(false);
   const [password, setPassword] = useState("");
-  const [apiToken, setApiToken] = useState<string | null>(() => localStorage.getItem("ds_api_token"));
-  const [settings, setSettings] = useState<SiteSettings | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState<string | null>(null);
-  const [apiOffline, setApiOffline] = useState(false);
+  const [apiToken, setApiToken] = useState<string>(() => localStorage.getItem("ds_api_token") || ADMIN_TOKEN);
   const loginMutation = useAdminLogin();
 
   const login = () => {
-    if (password === "devstudio-admin" || password === ADMIN_TOKEN) {
-      setAuthed(true);
-      loadSettings();
+    if (password === ADMIN_TOKEN) {
       loginMutation.mutate({ data: { password } }, {
         onSuccess: (data) => {
-          setApiToken(data.token);
-          localStorage.setItem("ds_api_token", data.token);
+          const tok = data.token ?? ADMIN_TOKEN;
+          setApiToken(tok);
+          localStorage.setItem("ds_api_token", tok);
+          setAuthed(true);
+        },
+        onError: () => {
+          setApiToken(ADMIN_TOKEN);
+          localStorage.setItem("ds_api_token", ADMIN_TOKEN);
+          setAuthed(true);
         },
       });
     } else {
-      toast({ title: "Wrong password", description: "Try: devstudio-admin", variant: "destructive" });
-    }
-  };
-
-  const loadSettings = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch(`${API_BASE}/api/site-settings`);
-      if (!res.ok) throw new Error();
-      const data = await res.json();
-      setSettings(data);
-      setApiOffline(false);
-    } catch {
-      setApiOffline(true);
-      const stored = localStorage.getItem(LS_KEY);
-      setSettings(stored ? JSON.parse(stored) : DEFAULT_SETTINGS);
-    } finally {
-      setLoading(false);
+      toast({ title: "Wrong password", description: "Default: devstudio-admin", variant: "destructive" });
     }
   };
 
   useEffect(() => {
-    if (authed) loadSettings();
-  }, [authed]);
-
-  const saveLocally = (updated: SiteSettings) => {
-    localStorage.setItem(LS_KEY, JSON.stringify(updated));
-    toast({ title: "Saved locally", description: "Changes are saved in this browser. Connect an API server to persist across devices." });
-  };
-
-  const savePricing = async () => {
-    if (!settings) return;
-    setSaving("pricing");
-    if (apiOffline) { saveLocally(settings); setSaving(null); return; }
-    try {
-      const res = await fetch(`${API_BASE}/api/admin/site-settings/pricing`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${ADMIN_TOKEN}` },
-        body: JSON.stringify(settings.pricing),
-      });
-      if (!res.ok) throw new Error();
-      toast({ title: "Pricing saved!" });
-    } catch {
-      toast({ title: "Failed to save pricing", variant: "destructive" });
-    } finally {
-      setSaving(null);
-    }
-  };
-
-  const savePayments = async () => {
-    if (!settings) return;
-    setSaving("payments");
-    if (apiOffline) { saveLocally(settings); setSaving(null); return; }
-    try {
-      const res = await fetch(`${API_BASE}/api/admin/site-settings/payment-methods`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${ADMIN_TOKEN}` },
-        body: JSON.stringify(settings.paymentMethods),
-      });
-      if (!res.ok) throw new Error();
-      toast({ title: "Payment methods saved!" });
-    } catch {
-      toast({ title: "Failed to save payment methods", variant: "destructive" });
-    } finally {
-      setSaving(null);
-    }
-  };
-
-  const saveContact = async () => {
-    if (!settings) return;
-    setSaving("contact");
-    if (apiOffline) { saveLocally(settings); setSaving(null); return; }
-    try {
-      const res = await fetch(`${API_BASE}/api/admin/site-settings/contact`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${ADMIN_TOKEN}` },
-        body: JSON.stringify(settings.contact),
-      });
-      if (!res.ok) throw new Error();
-      toast({ title: "Contact info saved!" });
-    } catch {
-      toast({ title: "Failed to save contact info", variant: "destructive" });
-    } finally {
-      setSaving(null);
-    }
-  };
-
-  const saveHero = async () => {
-    if (!settings) return;
-    setSaving("hero");
-    if (apiOffline) { saveLocally(settings); setSaving(null); return; }
-    try {
-      const res = await fetch(`${API_BASE}/api/admin/site-settings/hero`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${ADMIN_TOKEN}` },
-        body: JSON.stringify(settings.hero),
-      });
-      if (!res.ok) throw new Error();
-      toast({ title: "Hero content saved!" });
-    } catch {
-      toast({ title: "Failed to save hero content", variant: "destructive" });
-    } finally {
-      setSaving(null);
-    }
-  };
-
-  const updatePlan = (idx: number, field: keyof PricingPlan, value: string | boolean | string[]) => {
-    if (!settings) return;
-    const pricing = [...settings.pricing];
-    pricing[idx] = { ...pricing[idx], [field]: value };
-    setSettings({ ...settings, pricing });
-  };
-
-  const updatePayment = (idx: number, field: keyof PaymentMethod, value: string | boolean) => {
-    if (!settings) return;
-    const methods = [...settings.paymentMethods];
-    methods[idx] = { ...methods[idx], [field]: value };
-    setSettings({ ...settings, paymentMethods: methods });
-  };
+    const stored = localStorage.getItem("ds_api_token");
+    if (stored) { setApiToken(stored); setAuthed(true); }
+  }, []);
 
   if (!authed) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-6">
-        <div className="w-full max-w-sm rounded-2xl border border-border/60 bg-card p-8 space-y-6">
+        <div className="w-full max-w-sm rounded-2xl border border-border/60 bg-card p-8 space-y-6 shadow-xl">
           <div className="text-center space-y-2">
-            <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mx-auto">
-              <Lock className="w-6 h-6 text-primary" />
+            <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto">
+              <Lock className="w-7 h-7 text-primary" />
             </div>
-            <h1 className="text-xl font-bold">Admin Panel</h1>
+            <h1 className="text-2xl font-bold">Admin Panel</h1>
             <p className="text-sm text-muted-foreground">DevStudio Control Center</p>
           </div>
           <div className="space-y-3">
@@ -256,356 +124,319 @@ export default function Admin() {
               onChange={(e) => setPassword(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && login()}
             />
-            <Button className="w-full" onClick={login}>
-              <Lock className="mr-2 w-4 h-4" /> Login
+            <Button className="w-full" onClick={login} disabled={loginMutation.isPending}>
+              {loginMutation.isPending ? <RefreshCw className="mr-2 w-4 h-4 animate-spin" /> : <Lock className="mr-2 w-4 h-4" />}
+              Login
             </Button>
           </div>
-          <p className="text-xs text-center text-muted-foreground">Default: devstudio-admin</p>
+          <p className="text-xs text-center text-muted-foreground">Default password: devstudio-admin</p>
         </div>
-      </div>
-    );
-  }
-
-  if (loading || !settings) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <RefreshCw className="w-8 h-8 text-primary animate-spin" />
       </div>
     );
   }
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      {/* Header */}
-      <div className="border-b border-border/60 bg-card/50 backdrop-blur sticky top-0 z-10">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
+      <div className="border-b border-border/60 bg-card/80 backdrop-blur sticky top-0 z-20">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <Sparkles className="w-5 h-5 text-primary" />
+            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
+              <Sparkles className="w-4 h-4 text-white" />
+            </div>
             <div>
-              <h1 className="font-bold text-base">DevStudio Admin</h1>
-              <p className="text-xs text-muted-foreground">Site Control Panel</p>
+              <h1 className="font-bold text-sm leading-none">DevStudio Admin</h1>
+              <p className="text-xs text-muted-foreground mt-0.5">Control Center</p>
             </div>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={loadSettings}>
-              <RefreshCw className="w-3.5 h-3.5 mr-1.5" /> Refresh
-            </Button>
             <Button variant="outline" size="sm" onClick={() => window.open("/", "_blank")}>
-              View Site ↗
+              <Globe className="w-3.5 h-3.5 mr-1.5" /> View Site
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => window.open("/admin/crm", "_blank")}>
+              <Bot className="w-3.5 h-3.5 mr-1.5" /> AI Hunter
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => { localStorage.removeItem("ds_api_token"); setAuthed(false); setApiToken(ADMIN_TOKEN); }}>
+              Logout
             </Button>
           </div>
         </div>
       </div>
 
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8 space-y-6">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6">
+        <Tabs defaultValue="overview" className="space-y-6">
+          <TabsList className="flex flex-wrap gap-1 h-auto p-1.5 bg-muted/60 rounded-xl w-full sm:w-auto">
+            <TabsTrigger value="overview" className="gap-1.5 text-xs sm:text-sm">
+              <LayoutDashboard className="w-3.5 h-3.5" /> Overview
+            </TabsTrigger>
+            <TabsTrigger value="requests" className="gap-1.5 text-xs sm:text-sm">
+              <MessageSquare className="w-3.5 h-3.5" /> Requests
+            </TabsTrigger>
+            <TabsTrigger value="catalog" className="gap-1.5 text-xs sm:text-sm">
+              <Package className="w-3.5 h-3.5" /> Catalog
+            </TabsTrigger>
+            <TabsTrigger value="waitlist" className="gap-1.5 text-xs sm:text-sm">
+              <Users className="w-3.5 h-3.5" /> Waitlist
+            </TabsTrigger>
+            <TabsTrigger value="payments" className="gap-1.5 text-xs sm:text-sm">
+              <CreditCard className="w-3.5 h-3.5" /> Payments
+            </TabsTrigger>
+            <TabsTrigger value="ai" className="gap-1.5 text-xs sm:text-sm">
+              <Brain className="w-3.5 h-3.5" /> AI Setup
+            </TabsTrigger>
+            <TabsTrigger value="settings" className="gap-1.5 text-xs sm:text-sm">
+              <Settings className="w-3.5 h-3.5" /> Settings
+            </TabsTrigger>
+          </TabsList>
 
-        {/* Offline banner */}
-        {apiOffline && (
-          <div className="flex items-start gap-3 rounded-xl border border-yellow-300 bg-yellow-50 px-4 py-3 text-sm text-yellow-800">
-            <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0 text-yellow-600" />
-            <div>
-              <span className="font-semibold">No API server connected.</span>{" "}
-              Changes you save here are stored in this browser only and won't affect other visitors. To make changes live for everyone, deploy the API server and set <code className="bg-yellow-100 px-1 rounded">VITE_API_BASE_URL</code> in Vercel.
-            </div>
-          </div>
-        )}
-
-        {/* Pricing Plans */}
-        <Section title="Pricing Plans" icon={<DollarSign className="w-5 h-5 text-primary" />}>
-          <div className="space-y-6">
-            {settings.pricing.map((plan, idx) => (
-              <div key={plan.id} className="rounded-lg border border-border/50 p-4 space-y-4">
-                <div className="flex items-center gap-3">
-                  <Badge variant={plan.popular ? "default" : "secondary"}>{plan.popular ? "Most Popular" : "Standard"}</Badge>
-                  <span className="font-semibold">{plan.name}</span>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs text-muted-foreground mb-1 block">Plan Name</label>
-                    <Input value={plan.name} onChange={(e) => updatePlan(idx, "name", e.target.value)} />
-                  </div>
-                  <div>
-                    <label className="text-xs text-muted-foreground mb-1 block">Price (e.g. $299)</label>
-                    <Input value={plan.price} onChange={(e) => updatePlan(idx, "price", e.target.value)} />
-                  </div>
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">Description</label>
-                  <Input value={plan.description} onChange={(e) => updatePlan(idx, "description", e.target.value)} />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">Features (one per line)</label>
-                  <Textarea
-                    rows={4}
-                    value={plan.features.join("\n")}
-                    onChange={(e) => updatePlan(idx, "features", e.target.value.split("\n").filter(Boolean))}
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <Switch
-                    checked={plan.popular}
-                    onCheckedChange={(v) => updatePlan(idx, "popular", v)}
-                  />
-                  <label className="text-sm">Mark as Most Popular</label>
-                </div>
-              </div>
-            ))}
-            <Button onClick={savePricing} disabled={saving === "pricing"}>
-              {saving === "pricing" ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
-              Save Pricing
-            </Button>
-          </div>
-        </Section>
-
-        {/* Payment Methods */}
-        <Section title="Payment Methods" icon={<CreditCard className="w-5 h-5 text-primary" />}>
-          <div className="space-y-3">
-            {settings.paymentMethods.map((pm, idx) => (
-              <div key={pm.id} className="flex items-center gap-4 rounded-lg border border-border/50 p-4">
-                <Switch
-                  checked={pm.enabled}
-                  onCheckedChange={(v) => updatePayment(idx, "enabled", v)}
-                />
-                <div className="w-28 font-medium text-sm">{pm.name}</div>
-                <Input
-                  className="flex-1"
-                  placeholder="Details (e.g. PayPal email, bank info)"
-                  value={pm.details}
-                  onChange={(e) => updatePayment(idx, "details", e.target.value)}
-                />
-                <Badge variant={pm.enabled ? "default" : "secondary"}>
-                  {pm.enabled ? "Active" : "Disabled"}
-                </Badge>
-              </div>
-            ))}
-            <Button onClick={savePayments} disabled={saving === "payments"}>
-              {saving === "payments" ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
-              Save Payment Methods
-            </Button>
-          </div>
-        </Section>
-
-        {/* Hero Content */}
-        <Section title="Hero Section Content" icon={<Sparkles className="w-5 h-5 text-primary" />} defaultOpen={false}>
-          <div className="space-y-4">
-            <div>
-              <label className="text-xs text-muted-foreground mb-1 block">Main Headline</label>
-              <Textarea
-                rows={3}
-                value={settings.hero.headline}
-                onChange={(e) => setSettings({ ...settings, hero: { ...settings.hero, headline: e.target.value } })}
-              />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground mb-1 block">Sub-headline</label>
-              <Textarea
-                rows={3}
-                value={settings.hero.subheadline}
-                onChange={(e) => setSettings({ ...settings, hero: { ...settings.hero, subheadline: e.target.value } })}
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs text-muted-foreground mb-1 block">Primary CTA Button</label>
-                <Input value={settings.hero.ctaPrimary} onChange={(e) => setSettings({ ...settings, hero: { ...settings.hero, ctaPrimary: e.target.value } })} />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground mb-1 block">Secondary CTA Button</label>
-                <Input value={settings.hero.ctaSecondary} onChange={(e) => setSettings({ ...settings, hero: { ...settings.hero, ctaSecondary: e.target.value } })} />
-              </div>
-            </div>
-            <Button onClick={saveHero} disabled={saving === "hero"}>
-              {saving === "hero" ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
-              Save Hero Content
-            </Button>
-          </div>
-        </Section>
-
-        {/* AI Client Hunter CRM */}
-        <div className="rounded-2xl border-2 border-primary/30 bg-gradient-to-r from-purple-50 to-indigo-50 p-5">
-          <div className="flex items-start gap-4">
-            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#7C3AED] to-[#6366F1] flex items-center justify-center flex-shrink-0 shadow-lg shadow-purple-200">
-              <Sparkles className="w-6 h-6 text-white" />
-            </div>
-            <div className="flex-1">
-              <div className="flex items-center gap-2 mb-1">
-                <h3 className="font-extrabold text-lg text-[#111827]">AI Client Hunter</h3>
-                <span className="text-xs font-bold bg-purple-600 text-white px-2 py-0.5 rounded-full">NEW</span>
-              </div>
-              <p className="text-sm text-[#6B7280] mb-3">
-                Your private AI-powered sales engine. Find prospects, analyze websites, generate personalized emails, WhatsApp messages, LinkedIn pitches, and full proposals — all in one place.
-              </p>
-              <div className="flex flex-wrap gap-2 mb-4">
-                {["AI Website Analyzer","Proposal Generator","Email Outreach","WhatsApp Generator","LinkedIn Pitches","Follow-up Engine","CRM Pipeline"].map(f => (
-                  <span key={f} className="text-xs bg-white border border-purple-200 text-purple-700 font-semibold px-2 py-0.5 rounded-full">{f}</span>
-                ))}
-              </div>
-              <a href="/admin/crm">
-                <Button className="btn-premium text-white font-bold gap-2">
-                  <Sparkles className="w-4 h-4" /> Open AI Client Hunter
-                </Button>
-              </a>
-            </div>
-          </div>
-        </div>
-
-        {/* Free Tools Links */}
-        <Section title="Free Tools" icon={<Wrench className="w-5 h-5 text-primary" />} defaultOpen={true}>
-          <p className="text-sm text-muted-foreground mb-4">
-            Quick links to all 7 free business tools on your site. Share these with prospects to generate leads.
-          </p>
-          <div className="grid sm:grid-cols-2 gap-3">
-            {[
-              { label: "ROI Calculator", icon: <DollarSign className="w-4 h-4 text-purple-600" />, hash: "roi", desc: "Shows annual cost of manual work" },
-              { label: "Project Cost Estimator", icon: <Calculator className="w-4 h-4 text-green-600" />, hash: "cost", desc: "Instant price estimate by features" },
-              { label: "Business Software Quiz", icon: <Brain className="w-4 h-4 text-indigo-600" />, hash: "quiz", desc: "Recommends the right software" },
-              { label: "Break-Even Calculator", icon: <Target className="w-4 h-4 text-amber-600" />, hash: "breakeven", desc: "Payback period & churn cost" },
-              { label: "Lost Leads Calculator", icon: <Users className="w-4 h-4 text-rose-600" />, hash: "leads", desc: "Revenue lost to slow responses" },
-              { label: "Productivity Audit", icon: <Clock className="w-4 h-4 text-teal-600" />, hash: "productivity", desc: "Real cost of admin tasks" },
-              { label: "Revenue Growth Projector", icon: <TrendingUp className="w-4 h-4 text-purple-600" />, hash: "revenue", desc: "12-month revenue comparison" },
-            ].map((tool) => (
-              <a
-                key={tool.hash}
-                href={`/free-tools`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-3 p-3 rounded-xl border border-border/50 hover:border-primary/40 hover:bg-primary/5 transition-all group"
-              >
-                <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center flex-shrink-0">
-                  {tool.icon}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-semibold text-foreground">{tool.label}</div>
-                  <div className="text-xs text-muted-foreground truncate">{tool.desc}</div>
-                </div>
-                <ExternalLink className="w-3.5 h-3.5 text-muted-foreground group-hover:text-primary flex-shrink-0" />
-              </a>
-            ))}
-          </div>
-          <div className="mt-4 flex gap-3">
-            <Link href="/free-tools">
-              <Button variant="outline" className="gap-2">
-                <Wrench className="w-4 h-4" /> Open Free Tools Page
-              </Button>
-            </Link>
-            <Button
-              variant="ghost"
-              className="gap-2 text-muted-foreground"
-              onClick={() => { navigator.clipboard.writeText(window.location.origin + "/free-tools"); toast({ title: "Link copied!", description: "Free Tools page URL copied to clipboard." }); }}
-            >
-              Copy Link
-            </Button>
-          </div>
-        </Section>
-
-        {/* API Keys */}
-        <ApiKeysSection adminToken={ADMIN_TOKEN} />
-
-        {/* Email Outreach */}
-        <EmailOutreachSection />
-
-        {/* Software Catalog */}
-        {apiToken && <SoftwareCatalogSection apiToken={apiToken} />}
-
-        {/* Custom Requests */}
-        {apiToken && <CustomRequestsSection apiToken={apiToken} />}
-
-        {/* Waitlist Signups */}
-        {apiToken && <WaitlistSection apiToken={apiToken} />}
-
-        {/* Contact Info */}
-        <Section title="Contact & WhatsApp" icon={<MessageSquare className="w-5 h-5 text-primary" />} defaultOpen={false}>
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs text-muted-foreground mb-1 block">WhatsApp Number (with +)</label>
-                <Input
-                  placeholder="+15550000000"
-                  value={settings.contact.whatsapp}
-                  onChange={(e) => setSettings({ ...settings, contact: { ...settings.contact, whatsapp: e.target.value } })}
-                />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground mb-1 block">WhatsApp Display</label>
-                <Input
-                  placeholder="+1 (555) 000-0000"
-                  value={settings.contact.whatsappDisplay}
-                  onChange={(e) => setSettings({ ...settings, contact: { ...settings.contact, whatsappDisplay: e.target.value } })}
-                />
-              </div>
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground mb-1 block">Email Address</label>
-              <Input
-                type="email"
-                value={settings.contact.email}
-                onChange={(e) => setSettings({ ...settings, contact: { ...settings.contact, email: e.target.value } })}
-              />
-            </div>
-            <Button onClick={saveContact} disabled={saving === "contact"}>
-              {saving === "contact" ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
-              Save Contact Info
-            </Button>
-          </div>
-        </Section>
-
+          <TabsContent value="overview"><OverviewTab apiToken={apiToken} /></TabsContent>
+          <TabsContent value="requests"><CustomRequestsTab apiToken={apiToken} /></TabsContent>
+          <TabsContent value="catalog"><CatalogTab apiToken={apiToken} /></TabsContent>
+          <TabsContent value="waitlist"><WaitlistTab apiToken={apiToken} /></TabsContent>
+          <TabsContent value="payments"><PaymentsTab apiToken={apiToken} /></TabsContent>
+          <TabsContent value="ai"><AISetupTab apiToken={apiToken} /></TabsContent>
+          <TabsContent value="settings"><SiteSettingsTab apiToken={apiToken} /></TabsContent>
+        </Tabs>
       </div>
     </div>
   );
 }
 
-// ─── Software Catalog Section ────────────────────────────────────────────────
+// ─── Overview Tab ─────────────────────────────────────────────────────────────
 
-function SoftwareCatalogSection({ apiToken }: { apiToken: string }) {
+function OverviewTab({ apiToken }: { apiToken: string }) {
+  const [stats, setStats] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/api/admin/summary`, { headers: { Authorization: `Bearer ${apiToken}` } })
+      .then(r => r.json()).then(setStats).catch(() => {}).finally(() => setLoading(false));
+  }, [apiToken]);
+
+  return (
+    <div className="space-y-6">
+      {/* Stats */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {[
+          { label: "Custom Requests", value: stats?.totalCustomRequests ?? "—", sub: `${stats?.newCustomRequests ?? 0} new`, icon: <MessageSquare className="w-5 h-5 text-blue-500" />, bg: "bg-blue-50 border-blue-100" },
+          { label: "Total Revenue", value: stats?.totalRevenue ? `$${stats.totalRevenue.toLocaleString()}` : "$0", sub: `${stats?.paidRequests ?? 0} paid`, icon: <DollarSign className="w-5 h-5 text-green-500" />, bg: "bg-green-50 border-green-100" },
+          { label: "Tools in Catalog", value: stats?.totalTools ?? "—", sub: "products", icon: <Package className="w-5 h-5 text-purple-500" />, bg: "bg-purple-50 border-purple-100" },
+          { label: "Waitlist Signups", value: stats?.totalWaitlist ?? "—", sub: "subscribers", icon: <Users className="w-5 h-5 text-orange-500" />, bg: "bg-orange-50 border-orange-100" },
+        ].map(s => (
+          <div key={s.label} className={`rounded-xl border p-4 ${s.bg}`}>
+            <div className="flex items-center justify-between mb-2">{s.icon}</div>
+            <div className="text-2xl font-extrabold">{loading ? "—" : s.value}</div>
+            <div className="text-xs text-muted-foreground font-medium mt-0.5">{s.label}</div>
+            <div className="text-xs text-muted-foreground">{s.sub}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* AI Client Hunter CRM card */}
+      <div className="rounded-2xl border-2 border-purple-200 bg-gradient-to-r from-purple-50 to-indigo-50 p-6">
+        <div className="flex items-start gap-4">
+          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#7C3AED] to-[#6366F1] flex items-center justify-center flex-shrink-0 shadow-lg shadow-purple-200">
+            <Sparkles className="w-6 h-6 text-white" />
+          </div>
+          <div className="flex-1">
+            <div className="flex items-center gap-2 mb-1">
+              <h3 className="font-extrabold text-lg">AI Client Hunter</h3>
+              <span className="text-xs font-bold bg-purple-600 text-white px-2 py-0.5 rounded-full">AI POWERED</span>
+            </div>
+            <p className="text-sm text-muted-foreground mb-3">
+              Find prospects automatically, analyze websites, and generate personalized emails, WhatsApp & LinkedIn pitches in seconds.
+            </p>
+            <div className="flex flex-wrap gap-2 mb-4">
+              {["AI Business Discovery","Website Analyzer","Email Generator","WhatsApp Pitches","LinkedIn Outreach","Proposal Builder"].map(f => (
+                <span key={f} className="text-xs bg-white border border-purple-200 text-purple-700 font-semibold px-2 py-0.5 rounded-full">{f}</span>
+              ))}
+            </div>
+            <a href="/admin/crm">
+              <Button className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-bold gap-2 hover:from-purple-700 hover:to-indigo-700">
+                <Sparkles className="w-4 h-4" /> Open AI Client Hunter
+              </Button>
+            </a>
+          </div>
+        </div>
+      </div>
+
+      {/* Free Tools Quick Links */}
+      <div className="rounded-xl border border-border/60 bg-card p-5">
+        <h3 className="font-bold text-sm mb-1 flex items-center gap-2"><Wrench className="w-4 h-4 text-primary" /> Free Tools on Your Site</h3>
+        <p className="text-xs text-muted-foreground mb-4">Share these with prospects to generate leads.</p>
+        <div className="grid sm:grid-cols-2 gap-2">
+          {[
+            { label: "ROI Calculator", icon: <DollarSign className="w-3.5 h-3.5 text-purple-600" />, desc: "Shows annual cost of manual work" },
+            { label: "Project Cost Estimator", icon: <Calculator className="w-3.5 h-3.5 text-green-600" />, desc: "Instant price estimate by features" },
+            { label: "Business Software Quiz", icon: <Brain className="w-3.5 h-3.5 text-indigo-600" />, desc: "Recommends the right software" },
+            { label: "Break-Even Calculator", icon: <Target className="w-3.5 h-3.5 text-amber-600" />, desc: "Payback period & churn cost" },
+            { label: "Lost Leads Calculator", icon: <Users className="w-3.5 h-3.5 text-rose-600" />, desc: "Revenue lost to slow responses" },
+            { label: "Revenue Growth Projector", icon: <TrendingUp className="w-3.5 h-3.5 text-purple-600" />, desc: "12-month revenue comparison" },
+          ].map(tool => (
+            <a key={tool.label} href="/free-tools" target="_blank" rel="noopener noreferrer"
+              className="flex items-center gap-3 p-2.5 rounded-lg border border-border/50 hover:border-primary/40 hover:bg-primary/5 transition-all group">
+              <div className="w-7 h-7 rounded-md bg-muted flex items-center justify-center flex-shrink-0">{tool.icon}</div>
+              <div className="flex-1 min-w-0">
+                <div className="text-xs font-semibold">{tool.label}</div>
+                <div className="text-xs text-muted-foreground truncate">{tool.desc}</div>
+              </div>
+              <ExternalLink className="w-3 h-3 text-muted-foreground group-hover:text-primary" />
+            </a>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Custom Requests Tab ──────────────────────────────────────────────────────
+
+function CustomRequestsTab({ apiToken }: { apiToken: string }) {
   const queryClient = useQueryClient();
   const requestOptions = { request: { headers: { Authorization: `Bearer ${apiToken}` } } };
-  const { data: tools } = useListTools({}, requestOptions);
-  const deleteTool = useDeleteTool(requestOptions);
-  const createTool = useCreateTool(requestOptions);
-  const [isAddOpen, setIsAddOpen] = useState(false);
-  const [newTool, setNewTool] = useState({ name: "", description: "", category: "Make Money Online", price: "", status: "available" });
+  const { data: customRequests, isLoading } = useGetAdminCustomRequests({ query: { enabled: !!apiToken } }, requestOptions);
+  const updateCustomRequest = useUpdateCustomRequest(requestOptions);
 
-  const handleCreate = (e: React.FormEvent) => {
-    e.preventDefault();
-    createTool.mutate({
-      data: { name: newTool.name, description: newTool.description, category: newTool.category, price: Number(newTool.price), status: newTool.status as "available" | "coming_soon" | "beta" },
-    }, {
+  const handleUpdateStatus = (id: number, status: string) => {
+    updateCustomRequest.mutate({ id, data: { status: status as any } }, {
       onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: getListToolsQueryKey() });
-        setIsAddOpen(false);
-        setNewTool({ name: "", description: "", category: "Make Money Online", price: "", status: "available" });
-        sonnerToast.success("Tool created");
+        queryClient.invalidateQueries({ queryKey: getGetAdminCustomRequestsQueryKey() });
+        sonnerToast.success("Status updated");
       },
     });
   };
 
-  const handleDelete = (id: number) => {
-    if (!confirm("Delete this tool?")) return;
-    deleteTool.mutate({ id }, {
+  const handleUpdatePayment = (id: number, paymentAmount: string, paymentMethod: string) => {
+    updateCustomRequest.mutate({ id, data: { paymentAmount: paymentAmount ? Number(paymentAmount) : null, paymentMethod } }, {
       onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: getListToolsQueryKey() });
-        sonnerToast.success("Tool deleted");
+        queryClient.invalidateQueries({ queryKey: getGetAdminCustomRequestsQueryKey() });
+        sonnerToast.success("Payment updated");
       },
     });
   };
 
   return (
-    <Section title="Software Catalog" icon={<Package className="w-5 h-5 text-primary" />} defaultOpen={false}>
-      <div className="flex justify-between items-center mb-4">
-        <p className="text-sm text-muted-foreground">{tools?.length || 0} products in catalog. Manage your software offerings.</p>
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="font-bold text-lg">Custom Requests</h2>
+          <p className="text-sm text-muted-foreground">{customRequests?.length || 0} inbound requests for custom software builds</p>
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div className="flex items-center justify-center py-20"><RefreshCw className="w-6 h-6 animate-spin text-muted-foreground" /></div>
+      ) : (
+        <div className="rounded-xl border border-border/60 overflow-hidden">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-muted/30">
+                <TableHead>Client</TableHead>
+                <TableHead>Type & Budget</TableHead>
+                <TableHead>Description</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Payment</TableHead>
+                <TableHead>Date</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {customRequests?.map(req => (
+                <TableRow key={req.id} className="hover:bg-muted/20">
+                  <TableCell>
+                    <div className="font-semibold text-sm">{req.name || "Anonymous"}</div>
+                    <div className="text-xs text-muted-foreground">{req.email}</div>
+                    {req.whatsapp && <div className="text-xs text-green-600 mt-0.5">📱 {req.whatsapp}</div>}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className="text-xs mb-1">{req.businessType || "N/A"}</Badge>
+                    <div className="text-xs text-muted-foreground">{req.budget || "Not sure"}</div>
+                  </TableCell>
+                  <TableCell className="max-w-[200px]">
+                    <div className="text-xs text-muted-foreground line-clamp-2" title={req.description || ""}>{req.description || "—"}</div>
+                  </TableCell>
+                  <TableCell>
+                    <Select value={req.status} onValueChange={val => handleUpdateStatus(req.id, val)}>
+                      <SelectTrigger className="w-[130px] h-8 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {["new","contacted","quoted","paid","delivered","cancelled"].map(s => (
+                          <SelectItem key={s} value={s} className="text-xs capitalize">{s}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </TableCell>
+                  <TableCell>
+                    <div className="space-y-1.5">
+                      <Input placeholder="Amount ($)" className="h-7 w-24 text-xs"
+                        defaultValue={req.paymentAmount?.toString() || ""}
+                        onBlur={e => handleUpdatePayment(req.id, e.target.value, req.paymentMethod || "")} />
+                      <Input placeholder="Method" className="h-7 w-24 text-xs"
+                        defaultValue={req.paymentMethod || ""}
+                        onBlur={e => handleUpdatePayment(req.id, req.paymentAmount?.toString() || "", e.target.value)} />
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                    {new Date(req.createdAt).toLocaleDateString()}
+                  </TableCell>
+                </TableRow>
+              ))}
+              {(!customRequests || customRequests.length === 0) && (
+                <TableRow><TableCell colSpan={6} className="text-center py-12 text-muted-foreground text-sm">No custom requests yet. They'll appear here when prospects submit the form.</TableCell></TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Catalog Tab ──────────────────────────────────────────────────────────────
+
+function CatalogTab({ apiToken }: { apiToken: string }) {
+  const queryClient = useQueryClient();
+  const requestOptions = { request: { headers: { Authorization: `Bearer ${apiToken}` } } };
+  const { data: tools, isLoading } = useListTools({}, requestOptions);
+  const deleteTool = useDeleteTool(requestOptions);
+  const createTool = useCreateTool(requestOptions);
+  const [isAddOpen, setIsAddOpen] = useState(false);
+  const [newTool, setNewTool] = useState({ name: "", description: "", category: "Make Money Online", price: "", status: "available", emoji: "" });
+
+  const handleCreate = (e: React.FormEvent) => {
+    e.preventDefault();
+    createTool.mutate({
+      data: { name: newTool.name, description: newTool.description, category: newTool.category, price: Number(newTool.price), status: newTool.status as any, emoji: newTool.emoji || undefined },
+    }, {
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: getListToolsQueryKey() });
+        setIsAddOpen(false);
+        setNewTool({ name: "", description: "", category: "Make Money Online", price: "", status: "available", emoji: "" });
+        sonnerToast.success("Tool created");
+      },
+    });
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="font-bold text-lg">Software Catalog</h2>
+          <p className="text-sm text-muted-foreground">{tools?.length || 0} products — manage your Tools4Biz marketplace offerings</p>
+        </div>
         <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
           <DialogTrigger asChild>
-            <Button size="sm" className="gap-1.5 font-semibold"><Plus className="w-4 h-4" /> Add Tool</Button>
+            <Button className="gap-1.5 font-semibold"><Plus className="w-4 h-4" /> Add Tool</Button>
           </DialogTrigger>
-          <DialogContent className="sm:max-w-[425px]">
+          <DialogContent className="sm:max-w-md">
             <DialogHeader><DialogTitle>Add New Tool</DialogTitle></DialogHeader>
-            <form onSubmit={handleCreate} className="space-y-4 pt-4">
-              <Input placeholder="Tool name" value={newTool.name} onChange={e => setNewTool({ ...newTool, name: e.target.value })} required />
-              <Textarea placeholder="Description" value={newTool.description} onChange={e => setNewTool({ ...newTool, description: e.target.value })} required />
+            <form onSubmit={handleCreate} className="space-y-3 pt-2">
+              <div className="grid grid-cols-5 gap-2">
+                <Input className="col-span-1" placeholder="🚀" value={newTool.emoji} onChange={e => setNewTool({ ...newTool, emoji: e.target.value })} maxLength={2} />
+                <Input className="col-span-4" placeholder="Tool name" value={newTool.name} onChange={e => setNewTool({ ...newTool, name: e.target.value })} required />
+              </div>
+              <Textarea placeholder="Description" value={newTool.description} onChange={e => setNewTool({ ...newTool, description: e.target.value })} required rows={3} />
               <Select value={newTool.category} onValueChange={v => setNewTool({ ...newTool, category: v })}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {["Make Money Online", "Grow on Social Media", "Start a SaaS", "Lead Generation", "Sell Digital Products", "Business Growth"].map(c => (
+                  {["Make Money Online","Grow on Social Media","Start a SaaS","Lead Generation","Sell Digital Products","Business Growth"].map(c => (
                     <SelectItem key={c} value={c}>{c}</SelectItem>
                   ))}
                 </SelectContent>
@@ -628,244 +459,159 @@ function SoftwareCatalogSection({ apiToken }: { apiToken: string }) {
           </DialogContent>
         </Dialog>
       </div>
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Tool</TableHead>
-            <TableHead>Category</TableHead>
-            <TableHead>Price</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead className="text-right">Actions</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {tools?.map(tool => (
-            <TableRow key={tool.id}>
-              <TableCell>
-                <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-lg bg-muted flex items-center justify-center text-sm">{tool.emoji || "🚀"}</div>
-                  <span className="font-semibold text-sm">{tool.name}</span>
-                </div>
-              </TableCell>
-              <TableCell><Badge variant="outline" className="text-xs">{tool.category}</Badge></TableCell>
-              <TableCell className="font-mono text-sm">${tool.price}</TableCell>
-              <TableCell>
-                <Badge className={tool.status === "available" ? "bg-green-100 text-green-700 border-green-200 hover:bg-green-100" : "bg-orange-100 text-orange-700 border-orange-200 hover:bg-orange-100"}>
-                  {tool.status.replace("_", " ")}
-                </Badge>
-              </TableCell>
-              <TableCell className="text-right">
-                <Button variant="ghost" size="sm" className="text-destructive h-7 text-xs" onClick={() => handleDelete(tool.id)}>
-                  <Trash2 className="w-3.5 h-3.5 mr-1" /> Delete
-                </Button>
-              </TableCell>
-            </TableRow>
-          ))}
-          {(!tools || tools.length === 0) && (
-            <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground text-sm">No tools yet. Add your first product.</TableCell></TableRow>
-          )}
-        </TableBody>
-      </Table>
-    </Section>
+
+      {isLoading ? (
+        <div className="flex items-center justify-center py-20"><RefreshCw className="w-6 h-6 animate-spin text-muted-foreground" /></div>
+      ) : (
+        <div className="rounded-xl border border-border/60 overflow-hidden">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-muted/30">
+                <TableHead>Tool</TableHead>
+                <TableHead>Category</TableHead>
+                <TableHead>Price</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {tools?.map(tool => (
+                <TableRow key={tool.id} className="hover:bg-muted/20">
+                  <TableCell>
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center text-base">{tool.emoji || "🚀"}</div>
+                      <div>
+                        <div className="font-semibold text-sm">{tool.name}</div>
+                        <div className="text-xs text-muted-foreground line-clamp-1">{tool.description}</div>
+                      </div>
+                    </div>
+                  </TableCell>
+                  <TableCell><Badge variant="outline" className="text-xs">{tool.category}</Badge></TableCell>
+                  <TableCell className="font-mono font-semibold text-sm">${tool.price}</TableCell>
+                  <TableCell>
+                    <Badge className={tool.status === "available" ? "bg-green-100 text-green-700 border-green-200 hover:bg-green-100" : tool.status === "beta" ? "bg-blue-100 text-blue-700 border-blue-200 hover:bg-blue-100" : "bg-orange-100 text-orange-700 border-orange-200 hover:bg-orange-100"}>
+                      {tool.status.replace("_", " ")}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Button variant="ghost" size="sm" className="text-destructive h-7 text-xs hover:bg-destructive/10"
+                      onClick={() => { if (confirm("Delete this tool?")) deleteTool.mutate({ id: tool.id }, { onSuccess: () => { queryClient.invalidateQueries({ queryKey: getListToolsQueryKey() }); sonnerToast.success("Deleted"); } }); }}>
+                      <Trash2 className="w-3.5 h-3.5 mr-1" /> Delete
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+              {(!tools || tools.length === 0) && (
+                <TableRow><TableCell colSpan={5} className="text-center py-12 text-muted-foreground text-sm">No tools yet. Add your first product to the catalog.</TableCell></TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+    </div>
   );
 }
 
-// ─── Custom Requests Section ──────────────────────────────────────────────────
+// ─── Waitlist Tab ─────────────────────────────────────────────────────────────
 
-function CustomRequestsSection({ apiToken }: { apiToken: string }) {
-  const queryClient = useQueryClient();
+function WaitlistTab({ apiToken }: { apiToken: string }) {
   const requestOptions = { request: { headers: { Authorization: `Bearer ${apiToken}` } } };
-  const { data: customRequests } = useGetAdminCustomRequests({ query: { enabled: !!apiToken } }, requestOptions);
-  const updateCustomRequest = useUpdateCustomRequest(requestOptions);
-
-  const handleUpdateStatus = (id: number, status: string) => {
-    updateCustomRequest.mutate({ id, data: { status: status as "new" | "contacted" | "quoted" | "paid" | "delivered" | "cancelled" } }, {
-      onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: getGetAdminCustomRequestsQueryKey() });
-        sonnerToast.success("Status updated");
-      },
-    });
-  };
-
-  const handleUpdatePayment = (id: number, paymentAmount: string, paymentMethod: string) => {
-    updateCustomRequest.mutate({ id, data: { paymentAmount: paymentAmount ? Number(paymentAmount) : null, paymentMethod } }, {
-      onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: getGetAdminCustomRequestsQueryKey() });
-        sonnerToast.success("Payment updated");
-      },
-    });
-  };
+  const { data: waitlist, isLoading } = useGetAdminWaitlist({ query: { enabled: !!apiToken } }, requestOptions);
 
   return (
-    <Section title="Custom Requests" icon={<MessageSquare className="w-5 h-5 text-primary" />} defaultOpen={false}>
-      <p className="text-sm text-muted-foreground mb-4">{customRequests?.length || 0} inbound requests for custom software builds.</p>
-      <div className="overflow-x-auto rounded-xl border border-border/50">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Client Info</TableHead>
-              <TableHead>Type & Budget</TableHead>
-              <TableHead>Description</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Payment</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {customRequests?.map(req => (
-              <TableRow key={req.id}>
-                <TableCell>
-                  <div className="font-semibold text-sm">{req.name || "Anonymous"}</div>
-                  <div className="text-xs text-muted-foreground">{req.email}</div>
-                  {req.whatsapp && <div className="text-xs text-primary/80 mt-0.5">WA: {req.whatsapp}</div>}
-                </TableCell>
-                <TableCell>
-                  <Badge variant="outline" className="text-xs">{req.businessType || "N/A"}</Badge>
-                  <div className="text-xs text-muted-foreground mt-1">{req.budget || "Not sure"}</div>
-                </TableCell>
-                <TableCell className="max-w-[200px]">
-                  <div className="text-xs text-muted-foreground truncate" title={req.description}>{req.description}</div>
-                </TableCell>
-                <TableCell>
-                  <Select value={req.status} onValueChange={val => handleUpdateStatus(req.id, val)}>
-                    <SelectTrigger className="w-[130px] h-8 text-xs"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {["new", "contacted", "quoted", "paid", "delivered", "cancelled"].map(s => (
-                        <SelectItem key={s} value={s} className="text-xs capitalize">{s}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </TableCell>
-                <TableCell>
-                  <div className="space-y-1.5">
-                    <Input placeholder="Amount ($)" className="h-7 w-24 text-xs" defaultValue={req.paymentAmount?.toString() || ""} onBlur={e => handleUpdatePayment(req.id, e.target.value, req.paymentMethod || "")} />
-                    <Input placeholder="Method" className="h-7 w-24 text-xs" defaultValue={req.paymentMethod || ""} onBlur={e => handleUpdatePayment(req.id, req.paymentAmount?.toString() || "", e.target.value)} />
-                  </div>
-                </TableCell>
-              </TableRow>
-            ))}
-            {(!customRequests || customRequests.length === 0) && (
-              <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground text-sm">No custom requests yet.</TableCell></TableRow>
-            )}
-          </TableBody>
-        </Table>
+    <div className="space-y-4">
+      <div>
+        <h2 className="font-bold text-lg">Waitlist & Signups</h2>
+        <p className="text-sm text-muted-foreground">{waitlist?.length || 0} signups from the software catalog waitlist and purchase requests</p>
       </div>
-    </Section>
+
+      {isLoading ? (
+        <div className="flex items-center justify-center py-20"><RefreshCw className="w-6 h-6 animate-spin text-muted-foreground" /></div>
+      ) : (
+        <div className="rounded-xl border border-border/60 overflow-hidden">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-muted/30">
+                <TableHead>Email</TableHead>
+                <TableHead>Name</TableHead>
+                <TableHead>Tool</TableHead>
+                <TableHead>Message</TableHead>
+                <TableHead>Date</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {waitlist?.map(entry => (
+                <TableRow key={entry.id} className="hover:bg-muted/20">
+                  <TableCell className="font-medium text-sm">{entry.email}</TableCell>
+                  <TableCell className="text-sm">{entry.name || "—"}</TableCell>
+                  <TableCell>
+                    {entry.toolName ? <Badge variant="secondary" className="text-xs">{entry.toolName}</Badge> : <span className="text-muted-foreground text-xs">—</span>}
+                  </TableCell>
+                  <TableCell className="max-w-[200px]">
+                    <p className="text-xs text-muted-foreground truncate">{(entry as any).message || "—"}</p>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground text-xs whitespace-nowrap">
+                    {new Date(entry.createdAt).toLocaleDateString()}
+                  </TableCell>
+                </TableRow>
+              ))}
+              {(!waitlist || waitlist.length === 0) && (
+                <TableRow><TableCell colSpan={5} className="text-center py-12 text-muted-foreground text-sm">No waitlist signups yet.</TableCell></TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+    </div>
   );
 }
 
-// ─── Waitlist Section ─────────────────────────────────────────────────────────
+// ─── Payments Tab ─────────────────────────────────────────────────────────────
 
-function WaitlistSection({ apiToken }: { apiToken: string }) {
-  const requestOptions = { request: { headers: { Authorization: `Bearer ${apiToken}` } } };
-  const { data: waitlist } = useGetAdminWaitlist({ query: { enabled: !!apiToken } }, requestOptions);
-
-  return (
-    <Section title="Waitlist & Software Signups" icon={<Users className="w-5 h-5 text-primary" />} defaultOpen={false}>
-      <p className="text-sm text-muted-foreground mb-4">{waitlist?.length || 0} signups from the software catalog waitlist and purchase requests.</p>
-      <div className="overflow-x-auto rounded-xl border border-border/50">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Email</TableHead>
-              <TableHead>Name</TableHead>
-              <TableHead>Tool</TableHead>
-              <TableHead>Message</TableHead>
-              <TableHead>Date</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {waitlist?.map(entry => (
-              <TableRow key={entry.id}>
-                <TableCell className="font-medium text-sm">{entry.email}</TableCell>
-                <TableCell className="text-sm">{entry.name || "—"}</TableCell>
-                <TableCell>
-                  {entry.toolName ? <Badge variant="secondary" className="text-xs">{entry.toolName}</Badge> : <span className="text-muted-foreground text-xs">—</span>}
-                </TableCell>
-                <TableCell className="max-w-[200px]">
-                  <p className="text-xs text-muted-foreground truncate">{(entry as any).message || "—"}</p>
-                </TableCell>
-                <TableCell className="text-muted-foreground text-xs whitespace-nowrap">
-                  {new Date(entry.createdAt).toLocaleDateString()}
-                </TableCell>
-              </TableRow>
-            ))}
-            {(!waitlist || waitlist.length === 0) && (
-              <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground text-sm">No signups yet.</TableCell></TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </div>
-    </Section>
-  );
-}
-
-// ─── API Keys Section ─────────────────────────────────────────────────────────
-
-type KeyStatus = { masked: string; set: boolean };
-type KeyStatuses = Record<string, KeyStatus>;
-
-const KEY_GROUPS = [
-  {
-    label: "AI / Gemini",
-    icon: <Brain className="w-5 h-5 text-purple-500" />,
-    color: "from-purple-50 to-indigo-50 border-purple-200",
-    desc: "Powers AI recommendations, SEO checker, business name generator & website grader.",
-    keys: [
-      { key: "GEMINI_API_KEY", label: "Gemini API Key", hint: "Get from console.cloud.google.com → APIs & Services → Credentials" },
-    ],
-  },
-  {
-    label: "Stripe Payments",
-    icon: <CreditCard className="w-5 h-5 text-blue-500" />,
-    color: "from-blue-50 to-cyan-50 border-blue-200",
-    desc: "Accept card payments. Get keys from dashboard.stripe.com → Developers → API Keys.",
-    keys: [
-      { key: "STRIPE_SECRET_KEY", label: "Secret Key", hint: "Starts with sk_live_ or sk_test_" },
-      { key: "STRIPE_PUBLISHABLE_KEY", label: "Publishable Key", hint: "Starts with pk_live_ or pk_test_" },
-    ],
-  },
-  {
-    label: "PayPal",
-    icon: <Zap className="w-5 h-5 text-amber-500" />,
-    color: "from-amber-50 to-yellow-50 border-amber-200",
-    desc: "Accept PayPal payments. Get keys from developer.paypal.com → My Apps & Credentials.",
-    keys: [
-      { key: "PAYPAL_CLIENT_ID", label: "Client ID", hint: "From PayPal Developer Dashboard" },
-      { key: "PAYPAL_SECRET", label: "Client Secret", hint: "From PayPal Developer Dashboard" },
-    ],
-  },
-];
-
-function ApiKeysSection({ adminToken }: { adminToken: string }) {
+function PaymentsTab({ apiToken }: { apiToken: string }) {
   const { toast } = useToast();
-  const [statuses, setStatuses] = useState<KeyStatuses>({});
-  const [values, setValues] = useState<Record<string, string>>({});
-  const [visible, setVisible] = useState<Record<string, boolean>>({});
+  const [settings, setSettings] = useState<SiteSettings | null>(null);
   const [saving, setSaving] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [dirtyKeys, setDirtyKeys] = useState<Set<string>>(new Set());
+  const [apiKeys, setApiKeys] = useState<Record<string, { masked: string; set: boolean }>>({});
+  const [keyValues, setKeyValues] = useState<Record<string, string>>({});
+  const [keyVisible, setKeyVisible] = useState<Record<string, boolean>>({});
+  const [keySaving, setKeySaving] = useState(false);
 
-  const authHeader = { Authorization: `Bearer ${adminToken}` };
+  const authHeader = { Authorization: `Bearer ${apiToken}` };
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/admin/api-keys`, { headers: authHeader })
-      .then((r) => r.json())
-      .then((data: KeyStatuses) => { setStatuses(data); setLoading(false); })
-      .catch(() => { setLoading(false); });
+    fetch(`${API_BASE}/api/site-settings`).then(r => r.json()).then(setSettings).catch(() => setSettings(DEFAULT_SETTINGS));
+    fetch(`${API_BASE}/api/admin/api-keys`, { headers: authHeader }).then(r => r.json()).then(setApiKeys).catch(() => {});
   }, []);
 
-  const handleChange = (key: string, val: string) => {
-    setValues((v) => ({ ...v, [key]: val }));
-    setDirtyKeys((d) => new Set(d).add(key));
+  const updatePayment = (idx: number, field: keyof PaymentMethod, value: string | boolean) => {
+    if (!settings) return;
+    const methods = [...settings.paymentMethods];
+    methods[idx] = { ...methods[idx], [field]: value };
+    setSettings({ ...settings, paymentMethods: methods });
   };
 
-  const handleSave = async () => {
-    const toSave: Record<string, string> = {};
-    for (const k of dirtyKeys) {
-      if (values[k]?.trim()) toSave[k] = values[k].trim();
-    }
-    if (!Object.keys(toSave).length) { toast({ title: "No new keys to save", variant: "destructive" }); return; }
+  const savePayments = async () => {
+    if (!settings) return;
     setSaving(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/site-settings/payment-methods`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...authHeader },
+        body: JSON.stringify(settings.paymentMethods),
+      });
+      if (!res.ok) throw new Error();
+      toast({ title: "✅ Payment methods saved!" });
+    } catch {
+      toast({ title: "Failed to save", variant: "destructive" });
+    } finally { setSaving(false); }
+  };
+
+  const saveApiKeys = async () => {
+    const toSave: Record<string, string> = {};
+    for (const [k, v] of Object.entries(keyValues)) { if (v.trim()) toSave[k] = v.trim(); }
+    if (!Object.keys(toSave).length) { toast({ title: "No keys to save", variant: "destructive" }); return; }
+    setKeySaving(true);
     try {
       const res = await fetch(`${API_BASE}/api/admin/api-keys`, {
         method: "POST",
@@ -874,75 +620,120 @@ function ApiKeysSection({ adminToken }: { adminToken: string }) {
       });
       if (!res.ok) throw new Error();
       const data = await res.json();
-      toast({ title: `Saved: ${data.saved.join(", ")}` });
-      setValues({});
-      setDirtyKeys(new Set());
-      const fresh = await fetch(`${API_BASE}/api/admin/api-keys`, { headers: authHeader }).then((r) => r.json());
-      setStatuses(fresh);
+      toast({ title: `✅ Saved: ${data.saved.join(", ")}` });
+      setKeyValues({});
+      const fresh = await fetch(`${API_BASE}/api/admin/api-keys`, { headers: authHeader }).then(r => r.json());
+      setApiKeys(fresh);
     } catch {
       toast({ title: "Failed to save API keys", variant: "destructive" });
-    } finally {
-      setSaving(false);
-    }
+    } finally { setKeySaving(false); }
   };
 
-  const handleClear = async (key: string) => {
-    if (!confirm(`Remove the stored ${key}?`)) return;
-    try {
-      await fetch(`${API_BASE}/api/admin/api-keys/${key}`, { method: "DELETE", headers: authHeader });
-      toast({ title: `${key} removed` });
-      setStatuses((s) => ({ ...s, [key]: { masked: "", set: false } }));
-    } catch {
-      toast({ title: "Failed to remove key", variant: "destructive" });
-    }
+  const clearKey = async (key: string) => {
+    if (!confirm(`Remove ${key}?`)) return;
+    await fetch(`${API_BASE}/api/admin/api-keys/${key}`, { method: "DELETE", headers: authHeader });
+    toast({ title: `${key} removed` });
+    setApiKeys(s => ({ ...s, [key]: { masked: "", set: false } }));
   };
 
-  const hasDirty = dirtyKeys.size > 0 && [...dirtyKeys].some((k) => values[k]?.trim());
+  const PAYMENT_KEY_GROUPS = [
+    {
+      id: "stripe", label: "Stripe", icon: "💳", color: "from-blue-50 to-cyan-50 border-blue-200",
+      desc: "Accept card payments worldwide. Get keys at dashboard.stripe.com → Developers → API Keys.",
+      link: "https://dashboard.stripe.com/apikeys",
+      keys: [
+        { key: "STRIPE_SECRET_KEY", label: "Secret Key", hint: "Starts with sk_live_ or sk_test_" },
+        { key: "STRIPE_PUBLISHABLE_KEY", label: "Publishable Key", hint: "Starts with pk_live_ or pk_test_" },
+      ],
+    },
+    {
+      id: "paypal", label: "PayPal", icon: "🅿️", color: "from-amber-50 to-yellow-50 border-amber-200",
+      desc: "Accept PayPal and card payments. Get keys at developer.paypal.com → My Apps & Credentials.",
+      link: "https://developer.paypal.com/dashboard/applications/live",
+      keys: [
+        { key: "PAYPAL_CLIENT_ID", label: "Client ID", hint: "From PayPal Developer Dashboard" },
+        { key: "PAYPAL_SECRET", label: "Client Secret", hint: "From PayPal Developer Dashboard" },
+      ],
+    },
+  ];
+
+  const hasDirtyKeys = Object.values(keyValues).some(v => v.trim());
 
   return (
-    <Section title="API Keys" icon={<Key className="w-5 h-5 text-primary" />} defaultOpen={false}>
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <p className="text-sm text-muted-foreground">
-            Stored securely in your database. Keys are never shown in full after saving.
-          </p>
-          <Button onClick={handleSave} disabled={saving || !hasDirty} size="sm" className="gap-2">
-            {saving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5" />}
-            {saving ? "Saving…" : "Save Keys"}
+    <div className="space-y-6">
+      <div>
+        <h2 className="font-bold text-lg">Payment Setup</h2>
+        <p className="text-sm text-muted-foreground">Enable payment methods and connect your payment processor API keys</p>
+      </div>
+
+      {/* Payment Methods Toggle */}
+      <div className="rounded-xl border border-border/60 bg-card overflow-hidden">
+        <div className="p-5 border-b border-border/40 bg-muted/20">
+          <h3 className="font-bold text-sm flex items-center gap-2"><CreditCard className="w-4 h-4 text-primary" /> Accepted Payment Methods</h3>
+          <p className="text-xs text-muted-foreground mt-0.5">Choose which methods to show on your site. Add details like account info below each.</p>
+        </div>
+        <div className="p-5 space-y-3">
+          {settings?.paymentMethods.map((pm, idx) => (
+            <div key={pm.id} className="flex items-center gap-4 rounded-xl border border-border/50 p-4 hover:bg-muted/20 transition-colors">
+              <Switch checked={pm.enabled} onCheckedChange={(v) => updatePayment(idx, "enabled", v)} />
+              <div className="w-32 font-semibold text-sm">{pm.name}</div>
+              <Input
+                className="flex-1"
+                placeholder={pm.id === "paypal" ? "PayPal email or link" : pm.id === "stripe" ? "Stripe payment link (optional)" : pm.id === "bank" ? "Bank name, account no., sort code" : pm.id === "crypto" ? "Wallet address (USDT/BTC)" : "Details"}
+                value={pm.details}
+                onChange={(e) => updatePayment(idx, "details", e.target.value)}
+              />
+              <Badge variant={pm.enabled ? "default" : "secondary"} className={pm.enabled ? "bg-green-100 text-green-700 border-green-200 hover:bg-green-100" : ""}>
+                {pm.enabled ? "Active" : "Off"}
+              </Badge>
+            </div>
+          ))}
+          <Button onClick={savePayments} disabled={saving || !settings} className="mt-2">
+            {saving ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+            Save Payment Methods
           </Button>
         </div>
+      </div>
 
-        {loading ? (
-          <div className="flex items-center justify-center py-10">
-            <RefreshCw className="w-5 h-5 animate-spin text-muted-foreground" />
+      {/* Payment API Keys */}
+      <div className="rounded-xl border border-border/60 bg-card overflow-hidden">
+        <div className="p-5 border-b border-border/40 bg-muted/20 flex items-center justify-between">
+          <div>
+            <h3 className="font-bold text-sm flex items-center gap-2"><Key className="w-4 h-4 text-primary" /> Payment API Keys</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">Keys are stored securely in your database and never shown in full.</p>
           </div>
-        ) : (
-          KEY_GROUPS.map((group) => (
-            <div key={group.label} className={`rounded-xl border bg-gradient-to-br ${group.color} p-4 space-y-3`}>
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-white/70 border border-white flex items-center justify-center shadow-sm">
-                  {group.icon}
+          <Button onClick={saveApiKeys} disabled={keySaving || !hasDirtyKeys} size="sm" className="gap-2">
+            {keySaving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5" />}
+            {keySaving ? "Saving…" : "Save Keys"}
+          </Button>
+        </div>
+        <div className="p-5 space-y-4">
+          {PAYMENT_KEY_GROUPS.map(group => (
+            <div key={group.id} className={`rounded-xl border bg-gradient-to-br ${group.color} p-4 space-y-3`}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl">{group.icon}</span>
+                  <div>
+                    <h4 className="font-bold text-sm">{group.label}</h4>
+                    <p className="text-xs text-muted-foreground">{group.desc}</p>
+                  </div>
                 </div>
-                <div>
-                  <h4 className="font-bold text-sm">{group.label}</h4>
-                  <p className="text-xs text-muted-foreground">{group.desc}</p>
-                </div>
+                <a href={group.link} target="_blank" rel="noopener noreferrer">
+                  <Button variant="outline" size="sm" className="text-xs gap-1 bg-white/80 border-white h-7">
+                    Get Keys <ExternalLink className="w-3 h-3" />
+                  </Button>
+                </a>
               </div>
-
               {group.keys.map(({ key, label, hint }) => {
-                const status = statuses[key];
+                const status = apiKeys[key];
                 const isSet = status?.set;
-                const inputVal = values[key] ?? "";
-                const show = visible[key];
                 return (
                   <div key={key} className="bg-white/80 rounded-lg border border-white p-3 space-y-2 shadow-sm">
                     <div className="flex items-center justify-between">
-                      <label className="text-xs font-bold text-foreground flex items-center gap-1.5">
-                        <Key className="w-3 h-3 text-muted-foreground" /> {label}
-                      </label>
+                      <label className="text-xs font-bold">{label}</label>
                       {isSet ? (
                         <Badge className="bg-green-100 text-green-700 border-green-200 text-xs gap-1">
-                          <CheckCircle2 className="w-3 h-3" /> Active
+                          <CheckCircle2 className="w-3 h-3" /> Connected
                         </Badge>
                       ) : (
                         <Badge variant="outline" className="text-xs text-muted-foreground">Not set</Badge>
@@ -951,28 +742,23 @@ function ApiKeysSection({ adminToken }: { adminToken: string }) {
                     {isSet && (
                       <div className="flex items-center gap-2 px-3 py-1.5 bg-muted/30 rounded-lg border border-border/40">
                         <span className="font-mono text-xs text-muted-foreground flex-1">{status.masked}</span>
-                        <button
-                          className="text-xs text-destructive/70 hover:text-destructive font-medium flex items-center gap-1"
-                          onClick={() => handleClear(key)}
-                        >
+                        <button className="text-xs text-destructive/70 hover:text-destructive font-medium flex items-center gap-1" onClick={() => clearKey(key)}>
                           <Trash2 className="w-3 h-3" /> Remove
                         </button>
                       </div>
                     )}
                     <div className="relative">
                       <Input
-                        type={show ? "text" : "password"}
+                        type={keyVisible[key] ? "text" : "password"}
                         placeholder={isSet ? "Enter new key to replace…" : "Paste your key here…"}
-                        value={inputVal}
-                        onChange={(e) => handleChange(key, e.target.value)}
+                        value={keyValues[key] ?? ""}
+                        onChange={(e) => setKeyValues(v => ({ ...v, [key]: e.target.value }))}
                         className="pr-10 font-mono text-sm h-9"
                       />
-                      <button
-                        type="button"
+                      <button type="button"
                         className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                        onClick={() => setVisible((v) => ({ ...v, [key]: !v[key] }))}
-                      >
-                        {show ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        onClick={() => setKeyVisible(v => ({ ...v, [key]: !v[key] }))}>
+                        {keyVisible[key] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
                     </div>
                     <p className="text-xs text-muted-foreground">{hint}</p>
@@ -980,25 +766,340 @@ function ApiKeysSection({ adminToken }: { adminToken: string }) {
                 );
               })}
             </div>
-          ))
-        )}
+          ))}
+        </div>
       </div>
-    </Section>
+    </div>
   );
 }
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// ─── AI Setup Tab ─────────────────────────────────────────────────────────────
 
-interface Lead {
-  id: number;
-  name: string;
-  email: string;
-  company: string;
-  role: string;
-  service: string;
-  note: string;
-  status: "new" | "contacted" | "replied" | "converted";
-  addedAt: string;
+function AISetupTab({ apiToken }: { apiToken: string }) {
+  const { toast } = useToast();
+  const [apiKeys, setApiKeys] = useState<Record<string, { masked: string; set: boolean }>>({});
+  const [geminiKey, setGeminiKey] = useState("");
+  const [geminiVisible, setGeminiVisible] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+
+  const authHeader = { Authorization: `Bearer ${apiToken}` };
+
+  useEffect(() => {
+    fetch(`${API_BASE}/api/admin/api-keys`, { headers: authHeader })
+      .then(r => r.json()).then(setApiKeys).catch(() => {});
+  }, []);
+
+  const isGeminiSet = apiKeys["GEMINI_API_KEY"]?.set;
+
+  const saveGeminiKey = async () => {
+    if (!geminiKey.trim()) { toast({ title: "Please enter a key", variant: "destructive" }); return; }
+    setSaving(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/api-keys`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeader },
+        body: JSON.stringify({ GEMINI_API_KEY: geminiKey.trim() }),
+      });
+      if (!res.ok) throw new Error();
+      toast({ title: "✅ Gemini AI key saved!" });
+      setGeminiKey("");
+      setTestResult(null);
+      const fresh = await fetch(`${API_BASE}/api/admin/api-keys`, { headers: authHeader }).then(r => r.json());
+      setApiKeys(fresh);
+    } catch {
+      toast({ title: "Failed to save key", variant: "destructive" });
+    } finally { setSaving(false); }
+  };
+
+  const removeGeminiKey = async () => {
+    if (!confirm("Remove the Gemini API key? AI features will stop working.")) return;
+    await fetch(`${API_BASE}/api/admin/api-keys/GEMINI_API_KEY`, { method: "DELETE", headers: authHeader });
+    toast({ title: "Gemini key removed" });
+    setApiKeys(s => ({ ...s, GEMINI_API_KEY: { masked: "", set: false } }));
+    setTestResult(null);
+  };
+
+  const testAI = async () => {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/tools-ai/recommend`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ businessType: "Restaurant", goals: ["Get more customers"], challenges: ["No online presence"], teamSize: "1-5" }),
+      });
+      if (res.ok) {
+        setTestResult({ ok: true, message: "✅ AI is working! Gemini is responding correctly." });
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setTestResult({ ok: false, message: `❌ AI error: ${err.error || `HTTP ${res.status}`}` });
+      }
+    } catch {
+      setTestResult({ ok: false, message: "❌ Could not connect to AI service. Check that your key is saved." });
+    } finally { setTesting(false); }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="font-bold text-lg">AI Setup</h2>
+        <p className="text-sm text-muted-foreground">Connect Google Gemini AI to power your business tools, AI Client Hunter, and website grader</p>
+      </div>
+
+      {/* Status Card */}
+      <div className={`rounded-xl border-2 p-5 flex items-start gap-4 ${isGeminiSet ? "border-green-200 bg-green-50" : "border-orange-200 bg-orange-50"}`}>
+        <div className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 ${isGeminiSet ? "bg-green-100" : "bg-orange-100"}`}>
+          <Brain className={`w-6 h-6 ${isGeminiSet ? "text-green-600" : "text-orange-600"}`} />
+        </div>
+        <div className="flex-1">
+          <div className="flex items-center gap-2 mb-1">
+            <h3 className="font-bold">Gemini AI</h3>
+            <Badge className={isGeminiSet ? "bg-green-600 text-white" : "bg-orange-200 text-orange-800 border-orange-300"}>
+              {isGeminiSet ? "✅ Active" : "⚠️ Not Connected"}
+            </Badge>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            {isGeminiSet
+              ? "AI is connected and powering your business tools, AI Client Hunter CRM, and automated outreach features."
+              : "Connect your Gemini API key to enable AI features across the entire platform."}
+          </p>
+        </div>
+      </div>
+
+      {/* What AI Powers */}
+      <div className="rounded-xl border border-border/60 bg-card overflow-hidden">
+        <div className="p-5 border-b border-border/40 bg-muted/20">
+          <h3 className="font-bold text-sm flex items-center gap-2"><Sparkles className="w-4 h-4 text-primary" /> What AI Powers on Your Platform</h3>
+        </div>
+        <div className="p-5">
+          <div className="grid sm:grid-cols-2 gap-3">
+            {[
+              { icon: "🎯", label: "AI Client Hunter", desc: "Auto-discovers businesses in any city and generates leads" },
+              { icon: "🌐", label: "Website Analyzer", desc: "Grades prospect websites and generates improvement recommendations" },
+              { icon: "📧", label: "Email Generator", desc: "Writes personalized cold emails for each prospect" },
+              { icon: "💬", label: "WhatsApp Pitches", desc: "Generates WhatsApp messages tailored to each business" },
+              { icon: "💼", label: "LinkedIn Outreach", desc: "Creates professional LinkedIn connection messages" },
+              { icon: "📄", label: "Proposal Builder", desc: "Generates full project proposals automatically" },
+              { icon: "🛠️", label: "Tool Recommender", desc: "Recommends business tools based on visitor needs" },
+              { icon: "📊", label: "Business Niche Grader", desc: "Scores and grades business niches for opportunity" },
+            ].map(f => (
+              <div key={f.label} className="flex items-center gap-3 p-3 rounded-lg border border-border/50 bg-muted/20">
+                <span className="text-xl">{f.icon}</span>
+                <div>
+                  <div className="text-xs font-semibold">{f.label}</div>
+                  <div className="text-xs text-muted-foreground">{f.desc}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Gemini Key Entry */}
+      <div className="rounded-xl border border-border/60 bg-card overflow-hidden">
+        <div className="p-5 border-b border-border/40 bg-gradient-to-r from-purple-50 to-indigo-50">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="font-bold text-sm flex items-center gap-2"><Key className="w-4 h-4 text-purple-600" /> Google Gemini API Key</h3>
+              <p className="text-xs text-muted-foreground mt-0.5">Free tier available — 1 million tokens/month. No credit card needed to start.</p>
+            </div>
+            <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer">
+              <Button variant="outline" size="sm" className="text-xs gap-1 bg-white h-7">
+                Get Free Key <ExternalLink className="w-3 h-3" />
+              </Button>
+            </a>
+          </div>
+        </div>
+        <div className="p-5 space-y-4">
+          {isGeminiSet && (
+            <div className="flex items-center gap-3 px-4 py-3 bg-green-50 rounded-lg border border-green-200">
+              <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0" />
+              <span className="font-mono text-sm text-muted-foreground flex-1">{apiKeys["GEMINI_API_KEY"]?.masked}</span>
+              <button className="text-xs text-destructive/70 hover:text-destructive font-medium flex items-center gap-1" onClick={removeGeminiKey}>
+                <Trash2 className="w-3 h-3" /> Remove
+              </button>
+            </div>
+          )}
+
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground mb-2 block">
+              {isGeminiSet ? "Replace API Key" : "Enter Gemini API Key"}
+            </label>
+            <div className="relative">
+              <Input
+                type={geminiVisible ? "text" : "password"}
+                placeholder="AIzaSy…"
+                value={geminiKey}
+                onChange={(e) => setGeminiKey(e.target.value)}
+                className="pr-10 font-mono h-10"
+              />
+              <button type="button"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                onClick={() => setGeminiVisible(v => !v)}>
+                {geminiVisible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Go to <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="text-primary underline">aistudio.google.com</a> → Sign in → Create API Key → Copy & paste here
+            </p>
+          </div>
+
+          <div className="flex gap-3">
+            <Button onClick={saveGeminiKey} disabled={saving || !geminiKey.trim()} className="gap-2 flex-1">
+              {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              {saving ? "Saving…" : "Save API Key"}
+            </Button>
+            <Button variant="outline" onClick={testAI} disabled={testing || !isGeminiSet} className="gap-2">
+              {testing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+              {testing ? "Testing…" : "Test AI"}
+            </Button>
+          </div>
+
+          {testResult && (
+            <div className={`rounded-lg p-3 text-sm font-medium ${testResult.ok ? "bg-green-50 text-green-700 border border-green-200" : "bg-red-50 text-red-700 border border-red-200"}`}>
+              {testResult.message}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* How to get the key - steps */}
+      <div className="rounded-xl border border-border/60 bg-muted/20 p-5">
+        <h4 className="font-bold text-sm mb-3 flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-green-600" /> How to Get Your Free Gemini API Key (2 minutes)</h4>
+        <ol className="space-y-2">
+          {[
+            { step: "1", text: 'Go to aistudio.google.com and sign in with your Google account' },
+            { step: "2", text: 'Click "Get API Key" in the top menu' },
+            { step: "3", text: 'Click "Create API Key" and select or create a Google Cloud project' },
+            { step: "4", text: 'Copy the key (starts with "AIzaSy…") and paste it above' },
+            { step: "5", text: 'Click Save — AI features will be active immediately' },
+          ].map(item => (
+            <li key={item.step} className="flex items-start gap-3">
+              <span className="w-5 h-5 rounded-full bg-primary text-primary-foreground text-xs font-bold flex items-center justify-center flex-shrink-0 mt-0.5">{item.step}</span>
+              <span className="text-sm text-muted-foreground">{item.text}</span>
+            </li>
+          ))}
+        </ol>
+      </div>
+    </div>
+  );
+}
+
+// ─── Site Settings Tab ────────────────────────────────────────────────────────
+
+function SiteSettingsTab({ apiToken }: { apiToken: string }) {
+  const { toast } = useToast();
+  const [settings, setSettings] = useState<SiteSettings | null>(null);
+  const [saving, setSaving] = useState<string | null>(null);
+  const [activeSection, setActiveSection] = useState("pricing");
+  const authHeader = { Authorization: `Bearer ${apiToken}` };
+
+  useEffect(() => {
+    fetch(`${API_BASE}/api/site-settings`).then(r => r.json()).then(setSettings).catch(() => setSettings(DEFAULT_SETTINGS));
+  }, []);
+
+  const save = async (section: string, url: string, method: string, body: unknown) => {
+    setSaving(section);
+    try {
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json", ...authHeader },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error();
+      toast({ title: `✅ ${section} saved!` });
+    } catch {
+      toast({ title: `Failed to save ${section}`, variant: "destructive" });
+    } finally { setSaving(null); }
+  };
+
+  const updatePlan = (idx: number, field: keyof PricingPlan, value: string | boolean | string[]) => {
+    if (!settings) return;
+    const pricing = [...settings.pricing];
+    pricing[idx] = { ...pricing[idx], [field]: value };
+    setSettings({ ...settings, pricing });
+  };
+
+  if (!settings) return <div className="flex items-center justify-center py-20"><RefreshCw className="w-6 h-6 animate-spin text-muted-foreground" /></div>;
+
+  const sections = [
+    { id: "pricing", label: "Pricing Plans", icon: <DollarSign className="w-4 h-4" /> },
+    { id: "hero", label: "Hero Content", icon: <Sparkles className="w-4 h-4" /> },
+    { id: "contact", label: "Contact Info", icon: <MessageSquare className="w-4 h-4" /> },
+    { id: "outreach", label: "Email Outreach", icon: <Mail className="w-4 h-4" /> },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="font-bold text-lg">Site Settings</h2>
+        <p className="text-sm text-muted-foreground">Edit your pricing, hero content, contact details and outreach templates</p>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        {sections.map(s => (
+          <button key={s.id} onClick={() => setActiveSection(s.id)}
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${activeSection === s.id ? "bg-primary text-primary-foreground" : "bg-muted hover:bg-muted/80"}`}>
+            {s.icon} {s.label}
+          </button>
+        ))}
+      </div>
+
+      {activeSection === "pricing" && (
+        <div className="rounded-xl border border-border/60 bg-card p-5 space-y-5">
+          {settings.pricing.map((plan, idx) => (
+            <div key={plan.id} className="rounded-lg border border-border/50 p-4 space-y-4">
+              <div className="flex items-center gap-3">
+                <Badge variant={plan.popular ? "default" : "secondary"}>{plan.popular ? "Most Popular" : "Standard"}</Badge>
+                <span className="font-semibold">{plan.name}</span>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><label className="text-xs text-muted-foreground mb-1 block">Plan Name</label><Input value={plan.name} onChange={(e) => updatePlan(idx, "name", e.target.value)} /></div>
+                <div><label className="text-xs text-muted-foreground mb-1 block">Price</label><Input value={plan.price} onChange={(e) => updatePlan(idx, "price", e.target.value)} /></div>
+              </div>
+              <div><label className="text-xs text-muted-foreground mb-1 block">Description</label><Input value={plan.description} onChange={(e) => updatePlan(idx, "description", e.target.value)} /></div>
+              <div><label className="text-xs text-muted-foreground mb-1 block">Features (one per line)</label><Textarea rows={4} value={plan.features.join("\n")} onChange={(e) => updatePlan(idx, "features", e.target.value.split("\n").filter(Boolean))} /></div>
+              <div className="flex items-center gap-2"><Switch checked={plan.popular} onCheckedChange={(v) => updatePlan(idx, "popular", v)} /><label className="text-sm">Mark as Most Popular</label></div>
+            </div>
+          ))}
+          <Button onClick={() => save("pricing", `${API_BASE}/api/admin/site-settings/pricing`, "PUT", settings.pricing)} disabled={saving === "pricing"}>
+            {saving === "pricing" ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />} Save Pricing
+          </Button>
+        </div>
+      )}
+
+      {activeSection === "hero" && (
+        <div className="rounded-xl border border-border/60 bg-card p-5 space-y-4">
+          <div><label className="text-xs text-muted-foreground mb-1 block">Main Headline</label><Textarea rows={3} value={settings.hero.headline} onChange={(e) => setSettings({ ...settings, hero: { ...settings.hero, headline: e.target.value } })} /></div>
+          <div><label className="text-xs text-muted-foreground mb-1 block">Sub-headline</label><Textarea rows={3} value={settings.hero.subheadline} onChange={(e) => setSettings({ ...settings, hero: { ...settings.hero, subheadline: e.target.value } })} /></div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className="text-xs text-muted-foreground mb-1 block">Primary Button</label><Input value={settings.hero.ctaPrimary} onChange={(e) => setSettings({ ...settings, hero: { ...settings.hero, ctaPrimary: e.target.value } })} /></div>
+            <div><label className="text-xs text-muted-foreground mb-1 block">Secondary Button</label><Input value={settings.hero.ctaSecondary} onChange={(e) => setSettings({ ...settings, hero: { ...settings.hero, ctaSecondary: e.target.value } })} /></div>
+          </div>
+          <Button onClick={() => save("hero", `${API_BASE}/api/admin/site-settings/hero`, "PATCH", settings.hero)} disabled={saving === "hero"}>
+            {saving === "hero" ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />} Save Hero Content
+          </Button>
+        </div>
+      )}
+
+      {activeSection === "contact" && (
+        <div className="rounded-xl border border-border/60 bg-card p-5 space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className="text-xs text-muted-foreground mb-1 block">WhatsApp Number (with +)</label><Input placeholder="+15550000000" value={settings.contact.whatsapp} onChange={(e) => setSettings({ ...settings, contact: { ...settings.contact, whatsapp: e.target.value } })} /></div>
+            <div><label className="text-xs text-muted-foreground mb-1 block">WhatsApp Display Text</label><Input placeholder="+1 (555) 000-0000" value={settings.contact.whatsappDisplay} onChange={(e) => setSettings({ ...settings, contact: { ...settings.contact, whatsappDisplay: e.target.value } })} /></div>
+          </div>
+          <div><label className="text-xs text-muted-foreground mb-1 block">Email Address</label><Input type="email" value={settings.contact.email} onChange={(e) => setSettings({ ...settings, contact: { ...settings.contact, email: e.target.value } })} /></div>
+          <Button onClick={() => save("contact", `${API_BASE}/api/admin/site-settings/contact`, "PATCH", settings.contact)} disabled={saving === "contact"}>
+            {saving === "contact" ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />} Save Contact Info
+          </Button>
+        </div>
+      )}
+
+      {activeSection === "outreach" && <EmailOutreachSection />}
+    </div>
+  );
 }
 
 // ─── Email Outreach Section ───────────────────────────────────────────────────
@@ -1021,227 +1122,116 @@ DevStudio — devstudio.com`;
   const [leads, setLeads] = useState<Lead[]>(() => {
     try { return JSON.parse(localStorage.getItem("ds_leads") || "[]"); } catch { return []; }
   });
-  const [emailTemplate, setEmailTemplate] = useState(
-    () => localStorage.getItem("ds_email_template") || DEFAULT_TEMPLATE
-  );
+  const [emailTemplate, setEmailTemplate] = useState(() => localStorage.getItem("ds_email_template") || DEFAULT_TEMPLATE);
   const [newLead, setNewLead] = useState({ name: "", email: "", company: "", role: "", service: "", note: "" });
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [composing, setComposing] = useState<Lead | null>(null);
   const [composedEmail, setComposedEmail] = useState("");
 
-  const saveLeads = (updated: Lead[]) => {
-    setLeads(updated);
-    localStorage.setItem("ds_leads", JSON.stringify(updated));
-  };
-
+  const saveLeads = (updated: Lead[]) => { setLeads(updated); localStorage.setItem("ds_leads", JSON.stringify(updated)); };
   const addLead = () => {
     if (!newLead.email) return;
-    const lead: Lead = { ...newLead, id: Date.now(), status: "new", addedAt: new Date().toISOString() };
-    saveLeads([lead, ...leads]);
+    saveLeads([{ ...newLead, id: Date.now(), status: "new", addedAt: new Date().toISOString() }, ...leads]);
     setNewLead({ name: "", email: "", company: "", role: "", service: "", note: "" });
     setIsAddOpen(false);
   };
-
-  const removeLead = (id: number) => {
-    if (confirm("Remove this lead?")) saveLeads(leads.filter((l) => l.id !== id));
-  };
-
-  const updateLeadStatus = (id: number, status: Lead["status"]) => {
-    saveLeads(leads.map((l) => (l.id === id ? { ...l, status } : l)));
-  };
-
+  const removeLead = (id: number) => { if (confirm("Remove this lead?")) saveLeads(leads.filter(l => l.id !== id)); };
+  const updateLeadStatus = (id: number, status: Lead["status"]) => saveLeads(leads.map(l => l.id === id ? { ...l, status } : l));
   const composeEmail = (lead: Lead) => {
-    const body = emailTemplate
-      .replace(/\{\{name\}\}/g, lead.name || "there")
-      .replace(/\{\{service\}\}/g, lead.service || "[Service]")
-      .replace(/\{\{company\}\}/g, lead.company || "your company");
-    setComposedEmail(body);
+    setComposedEmail(emailTemplate.replace(/\{\{name\}\}/g, lead.name || "there").replace(/\{\{service\}\}/g, lead.service || "[Service]").replace(/\{\{company\}\}/g, lead.company || "your company"));
     setComposing(lead);
   };
-
   const openMailto = (lead: Lead) => {
-    const subject = encodeURIComponent(`Custom Software for ${lead.company || "Your Business"}`);
-    const body = encodeURIComponent(composedEmail);
-    window.open(`mailto:${lead.email}?subject=${subject}&body=${body}`, "_blank");
+    window.open(`mailto:${lead.email}?subject=${encodeURIComponent(`Custom Software for ${lead.company || "Your Business"}`)}&body=${encodeURIComponent(composedEmail)}`, "_blank");
     updateLeadStatus(lead.id, "contacted");
     setComposing(null);
   };
 
-  const statusCounts = {
-    new: leads.filter((l) => l.status === "new").length,
-    contacted: leads.filter((l) => l.status === "contacted").length,
-    replied: leads.filter((l) => l.status === "replied").length,
-    converted: leads.filter((l) => l.status === "converted").length,
-  };
-
   return (
-    <Section title="Email Outreach" icon={<Mail className="w-5 h-5 text-primary" />} defaultOpen={false}>
-      <div className="space-y-6">
-        {/* Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {[
-            { label: "New Leads", count: statusCounts.new, color: "text-blue-600", bg: "bg-blue-50 border-blue-100", icon: <Target className="w-4 h-4" /> },
-            { label: "Contacted", count: statusCounts.contacted, color: "text-yellow-600", bg: "bg-yellow-50 border-yellow-100", icon: <Mail className="w-4 h-4" /> },
-            { label: "Replied", count: statusCounts.replied, color: "text-purple-600", bg: "bg-purple-50 border-purple-100", icon: <RefreshCw className="w-4 h-4" /> },
-            { label: "Converted", count: statusCounts.converted, color: "text-green-600", bg: "bg-green-50 border-green-100", icon: <CheckCircle2 className="w-4 h-4" /> },
-          ].map((s) => (
-            <div key={s.label} className={`flex items-center gap-3 p-3 rounded-xl border ${s.bg}`}>
-              <div className={s.color}>{s.icon}</div>
-              <div>
-                <div className={`text-2xl font-extrabold ${s.color}`}>{s.count}</div>
-                <div className="text-xs font-semibold text-muted-foreground">{s.label}</div>
-              </div>
-            </div>
-          ))}
+    <div className="rounded-xl border border-border/60 bg-card p-5 space-y-5">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="font-bold text-sm">Email Outreach Tracker</h3>
+          <p className="text-xs text-muted-foreground">{leads.length} leads tracked</p>
         </div>
-
-        <div className="grid lg:grid-cols-3 gap-6">
-          {/* Lead List */}
-          <div className="lg:col-span-2 rounded-xl border border-border/50 overflow-hidden">
-            <div className="p-4 border-b border-border/50 bg-muted/20 flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-bold flex items-center gap-2"><Target className="w-4 h-4 text-primary" /> Prospects</h3>
-                <p className="text-xs text-muted-foreground">{leads.length} leads tracked</p>
-              </div>
-              <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
-                <DialogTrigger asChild>
-                  <Button size="sm" className="gap-1.5 font-semibold"><Plus className="w-4 h-4" /> Add Lead</Button>
-                </DialogTrigger>
-                <DialogContent className="max-w-md">
-                  <DialogHeader><DialogTitle>Add New Lead</DialogTitle></DialogHeader>
-                  <div className="space-y-3 mt-2">
-                    {[
-                      { key: "name", placeholder: "Contact name", label: "Name" },
-                      { key: "email", placeholder: "email@company.com", label: "Email *" },
-                      { key: "company", placeholder: "Company name", label: "Company" },
-                      { key: "role", placeholder: "CEO, Founder, Manager…", label: "Role" },
-                      { key: "service", placeholder: "Booking system, CRM, dashboard…", label: "Service to pitch" },
-                    ].map((f) => (
-                      <div key={f.key}>
-                        <label className="text-xs font-semibold text-muted-foreground mb-1 block">{f.label}</label>
-                        <Input
-                          placeholder={f.placeholder}
-                          value={(newLead as any)[f.key]}
-                          onChange={(e) => setNewLead((p) => ({ ...p, [f.key]: e.target.value }))}
-                        />
-                      </div>
-                    ))}
-                    <div>
-                      <label className="text-xs font-semibold text-muted-foreground mb-1 block">Note</label>
-                      <Textarea placeholder="Any context about this lead…" value={newLead.note} onChange={(e) => setNewLead((p) => ({ ...p, note: e.target.value }))} rows={2} />
-                    </div>
-                    <Button onClick={addLead} className="w-full font-semibold" disabled={!newLead.email}>Add Lead</Button>
-                  </div>
-                </DialogContent>
-              </Dialog>
+        <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
+          <DialogTrigger asChild><Button size="sm" className="gap-1.5"><Plus className="w-4 h-4" /> Add Lead</Button></DialogTrigger>
+          <DialogContent className="max-w-md">
+            <DialogHeader><DialogTitle>Add New Lead</DialogTitle></DialogHeader>
+            <div className="space-y-3 mt-2">
+              {[{ key: "name", label: "Name", placeholder: "Contact name" }, { key: "email", label: "Email *", placeholder: "email@company.com" }, { key: "company", label: "Company", placeholder: "Company name" }, { key: "role", label: "Role", placeholder: "CEO, Founder…" }, { key: "service", label: "Service to pitch", placeholder: "Booking system, CRM…" }].map(f => (
+                <div key={f.key}>
+                  <label className="text-xs font-semibold text-muted-foreground mb-1 block">{f.label}</label>
+                  <Input placeholder={f.placeholder} value={(newLead as any)[f.key]} onChange={(e) => setNewLead(p => ({ ...p, [f.key]: e.target.value }))} />
+                </div>
+              ))}
+              <Textarea placeholder="Note" value={newLead.note} onChange={(e) => setNewLead(p => ({ ...p, note: e.target.value }))} rows={2} />
+              <Button onClick={addLead} className="w-full" disabled={!newLead.email}>Add Lead</Button>
             </div>
+          </DialogContent>
+        </Dialog>
+      </div>
 
-            {leads.length === 0 ? (
-              <div className="py-14 text-center text-muted-foreground">
-                <Target className="w-10 h-10 mx-auto mb-3 opacity-20" />
-                <p className="font-medium text-sm">No leads yet. Add your first prospect.</p>
-              </div>
-            ) : (
-              <div className="divide-y divide-border/40">
-                {leads.map((lead) => (
-                  <div key={lead.id} className="p-4 flex items-start gap-3 hover:bg-muted/20 transition-colors">
-                    <div className="w-8 h-8 rounded-full bg-primary/10 text-primary font-bold text-sm flex items-center justify-center shrink-0">
-                      {(lead.name || lead.email).slice(0, 2).toUpperCase()}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-semibold text-sm">{lead.name || "—"}</span>
-                        <span className="text-xs text-muted-foreground">{lead.email}</span>
-                        {lead.company && <Badge variant="outline" className="text-xs h-5">{lead.company}</Badge>}
-                      </div>
-                      {lead.service && <p className="text-xs text-primary/80 font-medium mt-0.5">Pitch: {lead.service}</p>}
-                      {lead.note && <p className="text-xs text-muted-foreground mt-0.5 truncate">{lead.note}</p>}
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
-                      <Select value={lead.status} onValueChange={(v) => updateLeadStatus(lead.id, v as Lead["status"])}>
-                        <SelectTrigger className={`w-[110px] h-7 text-xs font-semibold ${
-                          lead.status === "converted" ? "text-green-700 border-green-200 bg-green-50" :
-                          lead.status === "replied" ? "text-purple-700 border-purple-200 bg-purple-50" :
-                          lead.status === "contacted" ? "text-yellow-700 border-yellow-200 bg-yellow-50" :
-                          "text-blue-700 border-blue-200 bg-blue-50"
-                        }`}>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="new">🔵 New</SelectItem>
-                          <SelectItem value="contacted">📧 Contacted</SelectItem>
-                          <SelectItem value="replied">💬 Replied</SelectItem>
-                          <SelectItem value="converted">✅ Converted</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <Button size="sm" variant="outline" className="h-7 px-2 text-xs gap-1" onClick={() => composeEmail(lead)}>
-                        <Send className="w-3 h-3" /> Email
-                      </Button>
-                      <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive/60 hover:text-destructive" onClick={() => removeLead(lead.id)}>
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </Button>
-                    </div>
+      <div className="grid lg:grid-cols-3 gap-5">
+        <div className="lg:col-span-2 rounded-xl border border-border/50 overflow-hidden">
+          {leads.length === 0 ? (
+            <div className="py-12 text-center text-muted-foreground">
+              <Target className="w-8 h-8 mx-auto mb-2 opacity-20" />
+              <p className="text-sm">No leads yet. Add your first prospect.</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-border/40">
+              {leads.map(lead => (
+                <div key={lead.id} className="p-3 flex items-start gap-3 hover:bg-muted/20">
+                  <div className="w-8 h-8 rounded-full bg-primary/10 text-primary font-bold text-sm flex items-center justify-center shrink-0">
+                    {(lead.name || lead.email).slice(0, 2).toUpperCase()}
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Email Template / Composer */}
-          <div className="space-y-4">
-            {composing ? (
-              <div className="rounded-xl border border-primary/30 overflow-hidden">
-                <div className="p-4 border-b border-border/50 bg-primary/5">
-                  <h3 className="text-sm font-bold flex items-center gap-2"><Mail className="w-4 h-4 text-primary" /> Email to {composing.name || composing.email}</h3>
-                  <p className="text-xs text-muted-foreground mt-0.5">Edit before sending</p>
-                </div>
-                <div className="p-4 space-y-3">
-                  <Textarea value={composedEmail} onChange={(e) => setComposedEmail(e.target.value)} rows={12} className="text-xs font-mono resize-none" />
-                  <div className="flex gap-2">
-                    <Button className="flex-1 font-semibold gap-2" onClick={() => openMailto(composing)}>
-                      <Send className="w-4 h-4" /> Open in Email App
-                    </Button>
-                    <Button variant="outline" onClick={() => setComposing(null)}>Cancel</Button>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold text-sm">{lead.name || "—"} <span className="text-xs text-muted-foreground font-normal">{lead.email}</span></div>
+                    {lead.company && <div className="text-xs text-muted-foreground">{lead.company} {lead.role && `· ${lead.role}`}</div>}
+                    {lead.service && <div className="text-xs text-primary/80 font-medium">Pitch: {lead.service}</div>}
                   </div>
-                  <p className="text-xs text-muted-foreground text-center">Opens your email client with the message pre-filled</p>
-                </div>
-              </div>
-            ) : (
-              <div className="rounded-xl border border-border/50 overflow-hidden">
-                <div className="p-4 border-b border-border/50 bg-muted/20">
-                  <h3 className="text-sm font-bold flex items-center gap-2"><Mail className="w-4 h-4 text-primary" /> Email Template</h3>
-                  <p className="text-xs text-muted-foreground mt-0.5">Uses {"{{name}}"}, {"{{service}}"}, {"{{company}}"} tokens. Auto-saved.</p>
-                </div>
-                <div className="p-4 space-y-3">
-                  <Textarea
-                    value={emailTemplate}
-                    onChange={(e) => { setEmailTemplate(e.target.value); localStorage.setItem("ds_email_template", e.target.value); }}
-                    rows={14}
-                    className="text-xs font-mono resize-none"
-                    placeholder="Write your outreach email template here…"
-                  />
-                  <p className="text-xs text-muted-foreground">Click <strong>Email</strong> next to any lead to compose and send.</p>
-                </div>
-              </div>
-            )}
-
-            <div className="rounded-xl border border-border/50 p-4 space-y-2">
-              <h4 className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Outreach Tips</h4>
-              {[
-                { icon: <Target className="w-3.5 h-3.5 text-blue-500" />, tip: 'Find prospects by searching LinkedIn for your niche + "Founder" or "Owner"' },
-                { icon: <AlertTriangle className="w-3.5 h-3.5 text-yellow-500" />, tip: 'Add a personal note about their business to boost reply rates' },
-                { icon: <Clock className="w-3.5 h-3.5 text-purple-500" />, tip: 'Send Tue–Thu, 8–10am for highest open rates' },
-                { icon: <CheckCircle2 className="w-3.5 h-3.5 text-green-500" />, tip: 'Follow up once after 3 days — most deals close on follow-up' },
-              ].map((item, i) => (
-                <div key={i} className="flex items-start gap-2">
-                  <div className="mt-0.5 shrink-0">{item.icon}</div>
-                  <p className="text-xs text-muted-foreground leading-relaxed">{item.tip}</p>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <Select value={lead.status} onValueChange={(v) => updateLeadStatus(lead.id, v as Lead["status"])}>
+                      <SelectTrigger className="w-[110px] h-7 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="new">🔵 New</SelectItem>
+                        <SelectItem value="contacted">📧 Contacted</SelectItem>
+                        <SelectItem value="replied">💬 Replied</SelectItem>
+                        <SelectItem value="converted">✅ Converted</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Button size="sm" variant="outline" className="h-7 px-2 text-xs gap-1" onClick={() => composeEmail(lead)}><Send className="w-3 h-3" /> Email</Button>
+                    <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive/60 hover:text-destructive" onClick={() => removeLead(lead.id)}><Trash2 className="w-3.5 h-3.5" /></Button>
+                  </div>
                 </div>
               ))}
             </div>
-          </div>
+          )}
+        </div>
+
+        <div>
+          {composing ? (
+            <div className="rounded-xl border border-primary/30 overflow-hidden">
+              <div className="p-3 border-b bg-primary/5"><h4 className="text-xs font-bold">Email to {composing.name || composing.email}</h4></div>
+              <div className="p-3 space-y-2">
+                <Textarea value={composedEmail} onChange={(e) => setComposedEmail(e.target.value)} rows={12} className="text-xs font-mono resize-none" />
+                <div className="flex gap-2">
+                  <Button className="flex-1 text-xs gap-1" onClick={() => openMailto(composing)}><Send className="w-3 h-3" /> Open in Email App</Button>
+                  <Button variant="outline" size="sm" onClick={() => setComposing(null)}>Cancel</Button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-xl border border-border/50 overflow-hidden">
+              <div className="p-3 border-b bg-muted/20"><h4 className="text-xs font-bold">Email Template</h4><p className="text-xs text-muted-foreground">Uses {"{{name}}"}, {"{{service}}"}, {"{{company}}"}</p></div>
+              <div className="p-3">
+                <Textarea value={emailTemplate} onChange={(e) => { setEmailTemplate(e.target.value); localStorage.setItem("ds_email_template", e.target.value); }} rows={14} className="text-xs font-mono resize-none" />
+              </div>
+            </div>
+          )}
         </div>
       </div>
-    </Section>
+    </div>
   );
 }

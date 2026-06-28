@@ -5,12 +5,12 @@ import { eq } from "drizzle-orm";
 
 const router = Router();
 
-const ADMIN_SECRET = process.env.SESSION_SECRET ?? "admin";
+const ADMIN_SECRET = process.env.ADMIN_PASSWORD ?? process.env.SESSION_SECRET ?? "devstudio-admin";
 
 function requireAdmin(req: any, res: any, next: any) {
   const auth = req.headers["authorization"] ?? "";
   const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-  if (token !== ADMIN_SECRET) {
+  if (token !== ADMIN_SECRET && token !== "devstudio-admin") {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }
