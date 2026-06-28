@@ -3,8 +3,8 @@ import nodemailer from "nodemailer";
 if (!process.env.BREVO_SMTP_USER) {
   throw new Error("BREVO_SMTP_USER is not set");
 }
-if (!process.env.BREVO_SMTP_PASSWORD) {
-  throw new Error("BREVO_SMTP_PASSWORD is not set");
+if (!process.env.BREVO_PASS) {
+  throw new Error("BREVO_PASS is not set");
 }
 
 export const brevoTransporter = nodemailer.createTransport({
@@ -13,13 +13,15 @@ export const brevoTransporter = nodemailer.createTransport({
   secure: false,
   requireTLS: true,
   auth: {
+    type: "LOGIN",
     user: process.env.BREVO_SMTP_USER,
-    pass: process.env.BREVO_SMTP_PASSWORD,
+    pass: process.env.BREVO_PASS,
   },
   tls: { rejectUnauthorized: false },
   connectionTimeout: 15000,
   greetingTimeout: 10000,
   socketTimeout: 15000,
+  authMethod: "PLAIN",
 } as any);
 
 export async function sendMail(opts: {
