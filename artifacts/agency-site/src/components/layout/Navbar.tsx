@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
-import { Menu, X, Sparkles, Wrench } from "lucide-react";
+import { Menu, X, Sparkles, Wrench, Package, Info, ChevronDown } from "lucide-react";
 
 export default function Navbar() {
   const [scrolled, setScrolled] = useState(false);
@@ -42,9 +42,8 @@ export default function Navbar() {
         </Link>
 
         {/* Desktop Nav */}
-        <nav className="hidden md:flex items-center gap-7">
+        <nav className="hidden md:flex items-center gap-6">
           {[
-            { label: "Home", id: "home" },
             { label: "Solutions", id: "solutions" },
             { label: "Pricing", id: "pricing" },
             { label: "Process", id: "process" },
@@ -59,7 +58,14 @@ export default function Navbar() {
             </button>
           ))}
 
-          {/* Free Tools link — highlighted */}
+          <Link
+            href="/software"
+            className="flex items-center gap-1.5 text-sm font-semibold text-[#6B7280] hover:text-[#7C3AED] transition-colors"
+          >
+            <Package className="w-3.5 h-3.5" />
+            Software
+          </Link>
+
           <Link
             href="/free-tools"
             className="flex items-center gap-1.5 text-sm font-semibold text-[#7C3AED] bg-purple-50 border border-purple-200 px-3 py-1.5 rounded-full hover:bg-purple-100 transition-colors"
@@ -67,9 +73,22 @@ export default function Navbar() {
             <Wrench className="w-3.5 h-3.5" />
             Free Tools
           </Link>
+
+          <Link
+            href="/about"
+            className="flex items-center gap-1.5 text-sm font-medium text-[#6B7280] hover:text-[#7C3AED] transition-colors"
+          >
+            <Info className="w-3.5 h-3.5" />
+            About
+          </Link>
         </nav>
 
         <div className="hidden md:flex items-center gap-3">
+          <Link href="/custom-request">
+            <Button variant="outline" size="sm" className="font-semibold rounded-full border-[#7C3AED]/30 text-[#7C3AED] hover:bg-purple-50">
+              Custom Request
+            </Button>
+          </Link>
           <Button
             onClick={() => window.dispatchEvent(new CustomEvent("open-lead-magnet"))}
             className="btn-premium text-white font-semibold"
@@ -87,11 +106,9 @@ export default function Navbar() {
       {/* Mobile Menu Overlay */}
       {mobileMenuOpen && (
         <div className="md:hidden fixed inset-0 bg-white z-40 flex flex-col overflow-y-auto">
-          {/* Spacer for navbar height */}
           <div className="h-16 flex-shrink-0" />
-          <div className="flex flex-col items-center justify-center flex-1 gap-6 py-10 px-6">
+          <div className="flex flex-col items-center justify-center flex-1 gap-5 py-10 px-6">
             {[
-              { label: "Home", id: "home" },
               { label: "Solutions", id: "solutions" },
               { label: "Pricing", id: "pricing" },
               { label: "Process", id: "process" },
@@ -107,12 +124,40 @@ export default function Navbar() {
             ))}
 
             <Link
+              href="/software"
+              onClick={() => setMobileMenuOpen(false)}
+              className="flex items-center gap-2 text-2xl font-semibold text-[#111827] hover:text-[#7C3AED] transition-colors"
+            >
+              <Package className="w-6 h-6" />
+              Software
+            </Link>
+
+            <Link
               href="/free-tools"
               onClick={() => setMobileMenuOpen(false)}
               className="flex items-center gap-2 text-xl font-semibold text-[#7C3AED] bg-purple-50 border border-purple-200 px-5 py-2.5 rounded-full"
             >
               <Wrench className="w-5 h-5" />
               Free Tools
+            </Link>
+
+            <Link
+              href="/about"
+              onClick={() => setMobileMenuOpen(false)}
+              className="flex items-center gap-2 text-xl font-semibold text-[#6B7280] hover:text-[#7C3AED] transition-colors"
+            >
+              <Info className="w-5 h-5" />
+              About
+            </Link>
+
+            <Link
+              href="/custom-request"
+              onClick={() => setMobileMenuOpen(false)}
+              className="w-full max-w-xs"
+            >
+              <Button variant="outline" size="lg" className="w-full font-bold rounded-full border-[#7C3AED]/30 text-[#7C3AED]">
+                Custom Request
+              </Button>
             </Link>
 
             <Button

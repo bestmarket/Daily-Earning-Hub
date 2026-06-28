@@ -1,5 +1,5 @@
 import { Link } from "wouter";
-import { MessageCircle, Mail, Twitter, Linkedin, Github, Sparkles, Globe, Search, FileText, TrendingUp, Lightbulb } from "lucide-react";
+import { MessageCircle, Mail, Twitter, Linkedin, Github, Sparkles, Globe, Search, FileText, TrendingUp, Lightbulb, Package, Info, Rocket } from "lucide-react";
 
 export default function Footer() {
   const scrollTo = (id: string) => {
@@ -70,11 +70,6 @@ export default function Footer() {
                   <TrendingUp className="w-3.5 h-3.5 flex-shrink-0" /> Profit Margin Calculator
                 </Link>
               </li>
-              <li>
-                <Link href="/free-tools" className="flex items-center gap-2 hover:text-[#8B5CF6] transition-colors">
-                  <Sparkles className="w-3.5 h-3.5 flex-shrink-0" /> All Free Tools →
-                </Link>
-              </li>
             </ul>
           </div>
 
@@ -94,6 +89,21 @@ export default function Footer() {
                   </button>
                 </li>
               ))}
+              <li>
+                <Link href="/about" className="flex items-center gap-2 hover:text-[#8B5CF6] transition-colors">
+                  <Info className="w-3.5 h-3.5 flex-shrink-0" /> About Us
+                </Link>
+              </li>
+              <li>
+                <Link href="/software" className="flex items-center gap-2 hover:text-[#8B5CF6] transition-colors">
+                  <Package className="w-3.5 h-3.5 flex-shrink-0" /> Software Catalog
+                </Link>
+              </li>
+              <li>
+                <Link href="/custom-request" className="flex items-center gap-2 hover:text-[#8B5CF6] transition-colors">
+                  <Rocket className="w-3.5 h-3.5 flex-shrink-0" /> Custom Request
+                </Link>
+              </li>
             </ul>
           </div>
 
@@ -126,8 +136,9 @@ export default function Footer() {
         <div className="border-t border-white/10 pt-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-gray-500">
           <span>© {new Date().getFullYear()} DevStudio. All rights reserved.</span>
           <div className="flex items-center gap-6">
-            <a href="#" className="hover:text-gray-300 transition-colors">Privacy Policy</a>
-            <a href="#" className="hover:text-gray-300 transition-colors">Terms of Service</a>
+            <Link href="/privacy-policy" className="hover:text-gray-300 transition-colors">Privacy Policy</Link>
+            <Link href="/terms" className="hover:text-gray-300 transition-colors">Terms of Service</Link>
+            <Link href="/refund" className="hover:text-gray-300 transition-colors">Refund Policy</Link>
           </div>
         </div>
       </div>

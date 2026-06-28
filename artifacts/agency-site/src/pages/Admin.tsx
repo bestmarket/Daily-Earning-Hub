@@ -1,5 +1,17 @@
 import { useState, useEffect } from "react";
 import { Link } from "wouter";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+  useAdminLogin,
+  useGetAdminCustomRequests,
+  useGetAdminWaitlist,
+  useListTools,
+  useUpdateCustomRequest,
+  useDeleteTool,
+  useCreateTool,
+  getGetAdminCustomRequestsQueryKey,
+  getListToolsQueryKey,
+} from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -7,13 +19,15 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import {
   Save, Lock, DollarSign, CreditCard, MessageSquare, Sparkles, RefreshCw,
   ChevronDown, ChevronUp, AlertTriangle, Mail, Send, Target, Plus, Trash2,
   CheckCircle2, Clock, Wrench, ExternalLink, Calculator, Brain, TrendingUp, Users,
-  Key, Eye, EyeOff, ShieldCheck, Zap,
+  Key, Eye, EyeOff, ShieldCheck, Zap, Package, Link2, Copy,
 } from "lucide-react";
+import { toast as sonnerToast } from "sonner";
 import API_BASE from "@/lib/api";
 const ADMIN_TOKEN = "devstudio-admin";
 const LS_KEY = "devstudio_site_settings";
@@ -85,15 +99,23 @@ export default function Admin() {
   const { toast } = useToast();
   const [authed, setAuthed] = useState(false);
   const [password, setPassword] = useState("");
+  const [apiToken, setApiToken] = useState<string | null>(() => localStorage.getItem("ds_api_token"));
   const [settings, setSettings] = useState<SiteSettings | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState<string | null>(null);
   const [apiOffline, setApiOffline] = useState(false);
+  const loginMutation = useAdminLogin();
 
   const login = () => {
     if (password === "devstudio-admin" || password === ADMIN_TOKEN) {
       setAuthed(true);
       loadSettings();
+      loginMutation.mutate({ data: { password } }, {
+        onSuccess: (data) => {
+          setApiToken(data.token);
+          localStorage.setItem("ds_api_token", data.token);
+        },
+      });
     } else {
       toast({ title: "Wrong password", description: "Try: devstudio-admin", variant: "destructive" });
     }
@@ -482,6 +504,15 @@ export default function Admin() {
         {/* Email Outreach */}
         <EmailOutreachSection />
 
+        {/* Software Catalog */}
+        {apiToken && <SoftwareCatalogSection apiToken={apiToken} />}
+
+        {/* Custom Requests */}
+        {apiToken && <CustomRequestsSection apiToken={apiToken} />}
+
+        {/* Waitlist Signups */}
+        {apiToken && <WaitlistSection apiToken={apiToken} />}
+
         {/* Contact Info */}
         <Section title="Contact & WhatsApp" icon={<MessageSquare className="w-5 h-5 text-primary" />} defaultOpen={false}>
           <div className="space-y-4">
@@ -520,6 +551,251 @@ export default function Admin() {
 
       </div>
     </div>
+  );
+}
+
+// ─── Software Catalog Section ────────────────────────────────────────────────
+
+function SoftwareCatalogSection({ apiToken }: { apiToken: string }) {
+  const queryClient = useQueryClient();
+  const requestOptions = { request: { headers: { Authorization: `Bearer ${apiToken}` } } };
+  const { data: tools } = useListTools({}, requestOptions);
+  const deleteTool = useDeleteTool(requestOptions);
+  const createTool = useCreateTool(requestOptions);
+  const [isAddOpen, setIsAddOpen] = useState(false);
+  const [newTool, setNewTool] = useState({ name: "", description: "", category: "Make Money Online", price: "", status: "available" });
+
+  const handleCreate = (e: React.FormEvent) => {
+    e.preventDefault();
+    createTool.mutate({
+      data: { name: newTool.name, description: newTool.description, category: newTool.category, price: Number(newTool.price), status: newTool.status as "available" | "coming_soon" | "beta" },
+    }, {
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: getListToolsQueryKey() });
+        setIsAddOpen(false);
+        setNewTool({ name: "", description: "", category: "Make Money Online", price: "", status: "available" });
+        sonnerToast.success("Tool created");
+      },
+    });
+  };
+
+  const handleDelete = (id: number) => {
+    if (!confirm("Delete this tool?")) return;
+    deleteTool.mutate({ id }, {
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: getListToolsQueryKey() });
+        sonnerToast.success("Tool deleted");
+      },
+    });
+  };
+
+  return (
+    <Section title="Software Catalog" icon={<Package className="w-5 h-5 text-primary" />} defaultOpen={false}>
+      <div className="flex justify-between items-center mb-4">
+        <p className="text-sm text-muted-foreground">{tools?.length || 0} products in catalog. Manage your software offerings.</p>
+        <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
+          <DialogTrigger asChild>
+            <Button size="sm" className="gap-1.5 font-semibold"><Plus className="w-4 h-4" /> Add Tool</Button>
+          </DialogTrigger>
+          <DialogContent className="sm:max-w-[425px]">
+            <DialogHeader><DialogTitle>Add New Tool</DialogTitle></DialogHeader>
+            <form onSubmit={handleCreate} className="space-y-4 pt-4">
+              <Input placeholder="Tool name" value={newTool.name} onChange={e => setNewTool({ ...newTool, name: e.target.value })} required />
+              <Textarea placeholder="Description" value={newTool.description} onChange={e => setNewTool({ ...newTool, description: e.target.value })} required />
+              <Select value={newTool.category} onValueChange={v => setNewTool({ ...newTool, category: v })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {["Make Money Online", "Grow on Social Media", "Start a SaaS", "Lead Generation", "Sell Digital Products", "Business Growth"].map(c => (
+                    <SelectItem key={c} value={c}>{c}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <div className="grid grid-cols-2 gap-3">
+                <Input type="number" placeholder="Price ($)" value={newTool.price} onChange={e => setNewTool({ ...newTool, price: e.target.value })} required />
+                <Select value={newTool.status} onValueChange={v => setNewTool({ ...newTool, status: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="available">Available</SelectItem>
+                    <SelectItem value="coming_soon">Coming Soon</SelectItem>
+                    <SelectItem value="beta">Beta</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button type="submit" className="w-full" disabled={createTool.isPending}>
+                {createTool.isPending ? "Creating…" : "Create Tool"}
+              </Button>
+            </form>
+          </DialogContent>
+        </Dialog>
+      </div>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Tool</TableHead>
+            <TableHead>Category</TableHead>
+            <TableHead>Price</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead className="text-right">Actions</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {tools?.map(tool => (
+            <TableRow key={tool.id}>
+              <TableCell>
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg bg-muted flex items-center justify-center text-sm">{tool.emoji || "🚀"}</div>
+                  <span className="font-semibold text-sm">{tool.name}</span>
+                </div>
+              </TableCell>
+              <TableCell><Badge variant="outline" className="text-xs">{tool.category}</Badge></TableCell>
+              <TableCell className="font-mono text-sm">${tool.price}</TableCell>
+              <TableCell>
+                <Badge className={tool.status === "available" ? "bg-green-100 text-green-700 border-green-200 hover:bg-green-100" : "bg-orange-100 text-orange-700 border-orange-200 hover:bg-orange-100"}>
+                  {tool.status.replace("_", " ")}
+                </Badge>
+              </TableCell>
+              <TableCell className="text-right">
+                <Button variant="ghost" size="sm" className="text-destructive h-7 text-xs" onClick={() => handleDelete(tool.id)}>
+                  <Trash2 className="w-3.5 h-3.5 mr-1" /> Delete
+                </Button>
+              </TableCell>
+            </TableRow>
+          ))}
+          {(!tools || tools.length === 0) && (
+            <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground text-sm">No tools yet. Add your first product.</TableCell></TableRow>
+          )}
+        </TableBody>
+      </Table>
+    </Section>
+  );
+}
+
+// ─── Custom Requests Section ──────────────────────────────────────────────────
+
+function CustomRequestsSection({ apiToken }: { apiToken: string }) {
+  const queryClient = useQueryClient();
+  const requestOptions = { request: { headers: { Authorization: `Bearer ${apiToken}` } } };
+  const { data: customRequests } = useGetAdminCustomRequests({ query: { enabled: !!apiToken } }, requestOptions);
+  const updateCustomRequest = useUpdateCustomRequest(requestOptions);
+
+  const handleUpdateStatus = (id: number, status: string) => {
+    updateCustomRequest.mutate({ id, data: { status: status as "new" | "contacted" | "quoted" | "paid" | "delivered" | "cancelled" } }, {
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: getGetAdminCustomRequestsQueryKey() });
+        sonnerToast.success("Status updated");
+      },
+    });
+  };
+
+  const handleUpdatePayment = (id: number, paymentAmount: string, paymentMethod: string) => {
+    updateCustomRequest.mutate({ id, data: { paymentAmount: paymentAmount ? Number(paymentAmount) : null, paymentMethod } }, {
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: getGetAdminCustomRequestsQueryKey() });
+        sonnerToast.success("Payment updated");
+      },
+    });
+  };
+
+  return (
+    <Section title="Custom Requests" icon={<MessageSquare className="w-5 h-5 text-primary" />} defaultOpen={false}>
+      <p className="text-sm text-muted-foreground mb-4">{customRequests?.length || 0} inbound requests for custom software builds.</p>
+      <div className="overflow-x-auto rounded-xl border border-border/50">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Client Info</TableHead>
+              <TableHead>Type & Budget</TableHead>
+              <TableHead>Description</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Payment</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {customRequests?.map(req => (
+              <TableRow key={req.id}>
+                <TableCell>
+                  <div className="font-semibold text-sm">{req.name || "Anonymous"}</div>
+                  <div className="text-xs text-muted-foreground">{req.email}</div>
+                  {req.whatsapp && <div className="text-xs text-primary/80 mt-0.5">WA: {req.whatsapp}</div>}
+                </TableCell>
+                <TableCell>
+                  <Badge variant="outline" className="text-xs">{req.businessType || "N/A"}</Badge>
+                  <div className="text-xs text-muted-foreground mt-1">{req.budget || "Not sure"}</div>
+                </TableCell>
+                <TableCell className="max-w-[200px]">
+                  <div className="text-xs text-muted-foreground truncate" title={req.description}>{req.description}</div>
+                </TableCell>
+                <TableCell>
+                  <Select value={req.status} onValueChange={val => handleUpdateStatus(req.id, val)}>
+                    <SelectTrigger className="w-[130px] h-8 text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {["new", "contacted", "quoted", "paid", "delivered", "cancelled"].map(s => (
+                        <SelectItem key={s} value={s} className="text-xs capitalize">{s}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </TableCell>
+                <TableCell>
+                  <div className="space-y-1.5">
+                    <Input placeholder="Amount ($)" className="h-7 w-24 text-xs" defaultValue={req.paymentAmount?.toString() || ""} onBlur={e => handleUpdatePayment(req.id, e.target.value, req.paymentMethod || "")} />
+                    <Input placeholder="Method" className="h-7 w-24 text-xs" defaultValue={req.paymentMethod || ""} onBlur={e => handleUpdatePayment(req.id, req.paymentAmount?.toString() || "", e.target.value)} />
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+            {(!customRequests || customRequests.length === 0) && (
+              <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground text-sm">No custom requests yet.</TableCell></TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </div>
+    </Section>
+  );
+}
+
+// ─── Waitlist Section ─────────────────────────────────────────────────────────
+
+function WaitlistSection({ apiToken }: { apiToken: string }) {
+  const requestOptions = { request: { headers: { Authorization: `Bearer ${apiToken}` } } };
+  const { data: waitlist } = useGetAdminWaitlist({ query: { enabled: !!apiToken } }, requestOptions);
+
+  return (
+    <Section title="Waitlist & Software Signups" icon={<Users className="w-5 h-5 text-primary" />} defaultOpen={false}>
+      <p className="text-sm text-muted-foreground mb-4">{waitlist?.length || 0} signups from the software catalog waitlist and purchase requests.</p>
+      <div className="overflow-x-auto rounded-xl border border-border/50">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Email</TableHead>
+              <TableHead>Name</TableHead>
+              <TableHead>Tool</TableHead>
+              <TableHead>Message</TableHead>
+              <TableHead>Date</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {waitlist?.map(entry => (
+              <TableRow key={entry.id}>
+                <TableCell className="font-medium text-sm">{entry.email}</TableCell>
+                <TableCell className="text-sm">{entry.name || "—"}</TableCell>
+                <TableCell>
+                  {entry.toolName ? <Badge variant="secondary" className="text-xs">{entry.toolName}</Badge> : <span className="text-muted-foreground text-xs">—</span>}
+                </TableCell>
+                <TableCell className="max-w-[200px]">
+                  <p className="text-xs text-muted-foreground truncate">{(entry as any).message || "—"}</p>
+                </TableCell>
+                <TableCell className="text-muted-foreground text-xs whitespace-nowrap">
+                  {new Date(entry.createdAt).toLocaleDateString()}
+                </TableCell>
+              </TableRow>
+            ))}
+            {(!waitlist || waitlist.length === 0) && (
+              <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground text-sm">No signups yet.</TableCell></TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </div>
+    </Section>
   );
 }
 
