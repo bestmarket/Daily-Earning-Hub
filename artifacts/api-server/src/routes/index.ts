@@ -10,6 +10,7 @@ import crmAiRouter from "./crm-ai";
 import toolsAiRouter from "./tools-ai";
 import apiKeysRouter from "./api-keys";
 import automationRouter, { startScheduler } from "./automation";
+import brevoRouter from "./brevo";
 
 const router: IRouter = Router();
 
@@ -24,6 +25,7 @@ router.use(crmAiRouter);
 router.use(toolsAiRouter);
 router.use(apiKeysRouter);
 router.use(automationRouter);
+router.use(brevoRouter);
 
 // Start the automation scheduler (no-op if auto mode is off)
 startScheduler();

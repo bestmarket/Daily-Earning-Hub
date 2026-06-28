@@ -3,6 +3,7 @@ import nodemailer from "nodemailer";
 import { db, emailAccountsTable, automationSettingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { getGeminiAI } from "./api-keys";
+import { brevoTransporter } from "../lib/brevo-mailer";
 
 const router = Router();
 
@@ -126,6 +127,7 @@ router.post("/automation/email-accounts/:id/test", async (req, res) => {
   if (!acct.user || !acct.password) { res.status(400).json({ error: "Account has no credentials saved" }); return; }
   try {
     const transporter = makeTransporter(acct);
+    await transporter.verify();
     await transporter.sendMail({
       from: `"${acct.fromName}" <${acct.fromEmail || acct.user}>`,
       to: req.body.to || acct.user,
@@ -135,6 +137,25 @@ router.post("/automation/email-accounts/:id/test", async (req, res) => {
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Brevo fallback test (uses server-level Brevo credentials) ────────────────
+
+router.post("/automation/brevo-test", async (req, res) => {
+  const to = req.body.to;
+  if (!to) { res.status(400).json({ error: "Missing 'to' email address" }); return; }
+  try {
+    await brevoTransporter.verify();
+    await brevoTransporter.sendMail({
+      from: `"DevStudio" <${process.env.BREVO_SMTP_USER}>`,
+      to,
+      subject: "DevStudio — Brevo SMTP Test",
+      html: `<div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:24px;"><h2 style="color:#6d28d9;">✓ Brevo SMTP is working</h2><p>Your outreach emails will be sent via Brevo (smtp-relay.brevo.com:587).</p><p style="color:#6b7280;font-size:13px;">Sent at: ${new Date().toISOString()}</p></div>`,
+    });
+    res.json({ success: true, message: "Test email sent via Brevo" });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
@@ -259,20 +280,32 @@ Return ONLY JSON: { "analysis": { "websiteScore":<0-100>,"leadScore":<0-100>,"co
       score: biz.softwareNeedScore, scored: !!analysis, emailed: false,
     });
 
-    // 3. Send email if autoEmail is on AND business has an email AND we have accounts
-    if (settings.autoEmail && biz.email && accounts.length > 0 && emailContent) {
-      const acct = accounts[accountIndex % accounts.length];
-      accountIndex++;
+    // 3. Send email — use DB accounts if available, otherwise fall back to Brevo
+    const canSend = settings.autoEmail && biz.email && emailContent;
+    if (canSend) {
+      const html = emailContent!.body.split("\n").map(l => l.trim() ? `<p style="margin:0 0 12px;line-height:1.6;">${l}</p>` : "<br/>").join("");
       try {
-        const transporter = makeTransporter(acct);
-        const html = emailContent.body.split("\n").map(l => l.trim() ? `<p style="margin:0 0 12px;line-height:1.6;">${l}</p>` : "<br/>").join("");
-        await transporter.sendMail({
-          from: `"${acct.fromName}" <${acct.fromEmail || acct.user}>`,
-          to: biz.email,
-          subject: emailContent.subject,
-          text: emailContent.body,
-          html: `<div style="font-family:Georgia,serif;max-width:600px;margin:0 auto;padding:24px;color:#1a1a2e;">${html}<hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0;"/><p style="color:#6b7280;font-size:13px;">${acct.fromName}</p></div>`,
-        });
+        if (accounts.length > 0) {
+          const acct = accounts[accountIndex % accounts.length];
+          accountIndex++;
+          const transporter = makeTransporter(acct);
+          await transporter.sendMail({
+            from: `"${acct.fromName}" <${acct.fromEmail || acct.user}>`,
+            to: biz.email,
+            subject: emailContent!.subject,
+            text: emailContent!.body,
+            html: `<div style="font-family:Georgia,serif;max-width:600px;margin:0 auto;padding:24px;color:#1a1a2e;">${html}<hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0;"/><p style="color:#6b7280;font-size:13px;">${acct.fromName}</p></div>`,
+          });
+        } else {
+          // Brevo fallback — uses server-level credentials from env
+          await brevoTransporter.sendMail({
+            from: `"DevStudio" <${process.env.BREVO_SMTP_USER}>`,
+            to: biz.email,
+            subject: emailContent!.subject,
+            text: emailContent!.body,
+            html: `<div style="font-family:Georgia,serif;max-width:600px;margin:0 auto;padding:24px;color:#1a1a2e;">${html}<hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0;"/><p style="color:#6b7280;font-size:13px;">DevStudio</p></div>`,
+          });
+        }
         runStats.emailed++;
         prospectsSummary[prospectsSummary.length - 1].emailed = true;
         // Delay before next email (convert minutes to ms)
