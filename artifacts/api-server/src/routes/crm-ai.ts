@@ -8,6 +8,22 @@ const router = Router();
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+function makeTransporter(acct: { host: string; port: number; secure: boolean; user: string; password: string }) {
+  const port = acct.port || 587;
+  const secure = port === 465;
+  return nodemailer.createTransport({
+    host: acct.host,
+    port,
+    secure,
+    requireTLS: !secure,
+    auth: { user: acct.user, pass: acct.password },
+    tls: { rejectUnauthorized: false },
+    connectionTimeout: 15000,
+    greetingTimeout: 10000,
+    socketTimeout: 15000,
+  } as any);
+}
+
 async function generateText(prompt: string, systemInstruction?: string): Promise<string> {
   const ai = await getGeminiAI();
   const response = await ai.models.generateContent({
@@ -97,7 +113,7 @@ router.post("/crm/test-email", async (req, res) => {
     return;
   }
   try {
-    const transporter = nodemailer.createTransport({ host: acct.host, port: acct.port, secure: acct.secure, auth: { user: acct.user, pass: acct.password } });
+    const transporter = makeTransporter(acct);
     await transporter.sendMail({
       from: `"${acct.fromName}" <${acct.fromEmail || acct.user}>`,
       to: to || acct.user,
@@ -142,7 +158,7 @@ router.post("/crm/send-email", async (req, res) => {
   }
 
   try {
-    const transporter = nodemailer.createTransport({ host: acct.host, port: acct.port, secure: acct.secure, auth: { user: acct.user, pass: acct.password } });
+    const transporter = makeTransporter(acct);
     const html = body.split("\n").map((line) => (line.trim() ? `<p style="margin:0 0 12px;line-height:1.6;">${line}</p>` : "<br/>")).join("");
     await transporter.sendMail({
       from: `"${acct.fromName}" <${acct.fromEmail || acct.user}>`,
@@ -239,7 +255,7 @@ router.post("/crm/send-proposal-email", async (req, res) => {
 </html>`;
 
   try {
-    const transporter = nodemailer.createTransport({ host: acct.host, port: acct.port, secure: acct.secure, auth: { user: acct.user, pass: acct.password } });
+    const transporter = makeTransporter(acct);
     await transporter.sendMail({
       from: `"${acct.fromName}" <${acct.fromEmail || acct.user}>`,
       to,

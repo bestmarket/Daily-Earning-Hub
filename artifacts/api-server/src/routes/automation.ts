@@ -8,6 +8,22 @@ const router = Router();
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+function makeTransporter(acct: { host: string; port: number; secure: boolean; user: string; password: string }) {
+  const port = acct.port || 587;
+  const secure = port === 465;
+  return nodemailer.createTransport({
+    host: acct.host,
+    port,
+    secure,
+    requireTLS: !secure,
+    auth: { user: acct.user, pass: acct.password },
+    tls: { rejectUnauthorized: false },
+    connectionTimeout: 15000,
+    greetingTimeout: 10000,
+    socketTimeout: 15000,
+  } as any);
+}
+
 async function generateText(prompt: string): Promise<string> {
   const ai = await getGeminiAI();
   const response = await ai.models.generateContent({
@@ -102,7 +118,7 @@ router.post("/automation/email-accounts/:id/test", async (req, res) => {
   const acct = rows[0];
   if (!acct.user || !acct.password) { res.status(400).json({ error: "Account has no credentials saved" }); return; }
   try {
-    const transporter = nodemailer.createTransport({ host: acct.host, port: acct.port, secure: acct.secure, auth: { user: acct.user, pass: acct.password } });
+    const transporter = makeTransporter(acct);
     await transporter.sendMail({
       from: `"${acct.fromName}" <${acct.fromEmail || acct.user}>`,
       to: req.body.to || acct.user,
@@ -241,7 +257,7 @@ Return ONLY JSON: { "analysis": { "websiteScore":<0-100>,"leadScore":<0-100>,"co
       const acct = accounts[accountIndex % accounts.length];
       accountIndex++;
       try {
-        const transporter = nodemailer.createTransport({ host: acct.host, port: acct.port, secure: acct.secure, auth: { user: acct.user, pass: acct.password } });
+        const transporter = makeTransporter(acct);
         const html = emailContent.body.split("\n").map(l => l.trim() ? `<p style="margin:0 0 12px;line-height:1.6;">${l}</p>` : "<br/>").join("");
         await transporter.sendMail({
           from: `"${acct.fromName}" <${acct.fromEmail || acct.user}>`,
