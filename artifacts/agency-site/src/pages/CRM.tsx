@@ -691,7 +691,7 @@ function Dashboard({ prospects }: { prospects: Prospect[] }) {
   ];
 
   const pipeline = Object.entries(STATUS_CONFIG).map(([key, cfg]) => ({
-    key, label: cfg.label, count: prospects.filter(p => p.status === key).length,
+    key, pipelineLabel: cfg.label, count: prospects.filter(p => p.status === key).length,
     value: prospects.filter(p => p.status === key).reduce((s, p) => s + (p.expectedValue || 0), 0),
     ...cfg,
   })).filter(s => !["archive"].includes(s.key));
@@ -717,7 +717,7 @@ function Dashboard({ prospects }: { prospects: Prospect[] }) {
         <div className="p-4 grid grid-cols-2 md:grid-cols-4 gap-3">
           {pipeline.map(s => (
             <div key={s.key} className={`rounded-xl p-3 border ${s.border} ${s.bg}`}>
-              <div className={`text-xs font-bold uppercase tracking-wide mb-1 ${s.color}`}>{s.label}</div>
+              <div className={`text-xs font-bold uppercase tracking-wide mb-1 ${s.color}`}>{s.pipelineLabel}</div>
               <div className={`text-2xl font-extrabold ${s.color}`}>{s.count}</div>
               {s.value > 0 && <div className={`text-xs mt-0.5 ${s.color} opacity-70`}>${s.value.toLocaleString()}</div>}
             </div>
@@ -997,10 +997,28 @@ function OutreachPanel({ prospect, onUpdate }: { prospect: Prospect; onUpdate: (
   const [loadingLI, setLoadingLI] = useState(false);
   const [loadingFollowup, setLoadingFollowup] = useState(false);
   const [sendingEmail, setSendingEmail] = useState(false);
+  const [sendingProposal, setSendingProposal] = useState(false);
   const [followupDay, setFollowupDay] = useState("3");
   const [followup, setFollowup] = useState<{ subject: string; body: string } | null>(null);
   const [error, setError] = useState("");
   const [sendStatus, setSendStatus] = useState<{ type: "success" | "error"; msg: string } | null>(null);
+
+  const sendProposalEmail = async () => {
+    if (!prospect.email || !prospect.proposal) return;
+    setSendingProposal(true); setSendStatus(null);
+    try {
+      const r = await fetch(`${apiBase()}/api/crm/send-proposal-email`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to: prospect.email, prospectName: prospect.businessName, proposal: prospect.proposal, agencyName: AGENCY_NAME }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error);
+      onUpdate({ ...prospect, status: "proposal_sent" });
+      setSendStatus({ type: "success", msg: `Proposal emailed to ${prospect.email}` });
+    } catch (e: any) { setSendStatus({ type: "error", msg: e.message }); }
+    finally { setSendingProposal(false); }
+  };
 
   const issues = prospect.analysis?.issues.slice(0, 3).map(i => i.title).join(", ") || "";
   const opportunities = prospect.analysis?.opportunities.slice(0, 2).map(o => o.title).join(", ") || "";
@@ -1221,7 +1239,26 @@ function OutreachPanel({ prospect, onUpdate }: { prospect: Prospect; onUpdate: (
 
 function ProposalPanel({ prospect, onUpdate }: { prospect: Prospect; onUpdate: (p: Prospect) => void }) {
   const [loading, setLoading] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [sendStatus, setSendStatus] = useState<{ type: "success" | "error"; msg: string } | null>(null);
   const [error, setError] = useState("");
+
+  const sendProposal = async () => {
+    if (!prospect.email || !prospect.proposal) return;
+    setSending(true); setSendStatus(null);
+    try {
+      const r = await fetch(`${apiBase()}/api/crm/send-proposal-email`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to: prospect.email, prospectName: prospect.businessName, proposal: prospect.proposal, agencyName: AGENCY_NAME }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error);
+      onUpdate({ ...prospect, status: "proposal_sent" });
+      setSendStatus({ type: "success", msg: `HTML proposal sent to ${prospect.email}` });
+    } catch (e: any) { setSendStatus({ type: "error", msg: e.message }); }
+    finally { setSending(false); }
+  };
 
   const generate = async () => {
     setLoading(true); setError("");
@@ -1259,11 +1296,22 @@ function ProposalPanel({ prospect, onUpdate }: { prospect: Prospect; onUpdate: (
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between">
+      {sendStatus && (
+        <div className={`flex items-center gap-2 text-sm px-4 py-3 rounded-lg border ${sendStatus.type === "success" ? "bg-green-50 text-green-800 border-green-200" : "bg-red-50 text-red-700 border-red-200"}`}>
+          {sendStatus.type === "success" ? <CheckCircle2 className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
+          {sendStatus.msg}
+        </div>
+      )}
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <h3 className="font-bold text-lg">Proposal — {prospect.businessName}</h3>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <Button size="sm" variant="outline" onClick={generate} className="gap-1.5"><RefreshCw className="w-3.5 h-3.5" /> Regenerate</Button>
-          <Button size="sm" onClick={() => window.print()} className="gap-1.5"><Download className="w-3.5 h-3.5" /> Print/PDF</Button>
+          <Button size="sm" variant="outline" onClick={() => window.print()} className="gap-1.5"><Download className="w-3.5 h-3.5" /> Print/PDF</Button>
+          {prospect.email && (
+            <Button size="sm" onClick={sendProposal} disabled={sending} className="gap-1.5 bg-primary text-white">
+              {sending ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Sending…</> : <><Mail className="w-3.5 h-3.5" /> Email Proposal</>}
+            </Button>
+          )}
         </div>
       </div>
 

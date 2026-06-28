@@ -27,7 +27,7 @@ import {
   AlertTriangle, Mail, Send, Target, Plus, Trash2,
   CheckCircle2, Clock, Wrench, ExternalLink, Calculator, Brain, TrendingUp, Users,
   Key, Eye, EyeOff, ShieldCheck, Zap, Package, LayoutDashboard,
-  Bot, Settings, Globe,
+  Bot, Settings, Globe, Radar, PlayCircle, StopCircle, MailCheck, X,
 } from "lucide-react";
 import { toast as sonnerToast } from "sonner";
 import API_BASE from "@/lib/api";
@@ -187,6 +187,9 @@ export default function Admin() {
             <TabsTrigger value="ai" className="gap-1.5 text-xs sm:text-sm">
               <Brain className="w-3.5 h-3.5" /> AI Setup
             </TabsTrigger>
+            <TabsTrigger value="automation" className="gap-1.5 text-xs sm:text-sm">
+              <Radar className="w-3.5 h-3.5" /> Automation
+            </TabsTrigger>
             <TabsTrigger value="settings" className="gap-1.5 text-xs sm:text-sm">
               <Settings className="w-3.5 h-3.5" /> Settings
             </TabsTrigger>
@@ -198,6 +201,7 @@ export default function Admin() {
           <TabsContent value="waitlist"><WaitlistTab apiToken={apiToken} /></TabsContent>
           <TabsContent value="payments"><PaymentsTab apiToken={apiToken} /></TabsContent>
           <TabsContent value="ai"><AISetupTab apiToken={apiToken} /></TabsContent>
+          <TabsContent value="automation"><AutomationTab /></TabsContent>
           <TabsContent value="settings"><SiteSettingsTab apiToken={apiToken} /></TabsContent>
         </Tabs>
       </div>
@@ -1338,6 +1342,501 @@ DevStudio — devstudio.com`;
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── Automation Tab ───────────────────────────────────────────────────────────
+
+const CATEGORIES = [
+  "Restaurant", "School", "Church", "Hospital", "Real Estate", "Hotel",
+  "Salon", "Lawyer", "Accountant", "Construction", "Supermarket",
+  "Pharmacy", "Gym", "Car Dealer", "Bakery", "Clinic", "Dentist",
+  "Auto Repair", "Travel Agency", "Insurance", "Consultant",
+  "Spa & Wellness", "Photography Studio", "Event Planner", "Florist",
+  "Catering", "Vet Clinic", "Optician", "Tutoring Center", "Other",
+];
+
+interface EmailAccount {
+  id: number; label: string; provider: string; host: string; port: number;
+  secure: boolean; user: string; password: string; fromName: string;
+  fromEmail: string; imapEnabled: boolean; imapHost: string; imapPort: number;
+  active: boolean;
+}
+
+interface AutoSettings {
+  id: number; autoHuntEnabled: boolean; huntCategory: string; huntCity: string;
+  huntCountry: string; huntCount: number; huntExtraContext: string;
+  huntIntervalHours: number; autoScore: boolean; autoEmail: boolean;
+  emailDelayMinutes: number; autoReply: boolean;
+  lastRunAt: string | null; nextRunAt: string | null;
+  runStats: any;
+}
+
+function apiBase() { return API_BASE.replace("/agency-site", ""); }
+
+function AutomationTab() {
+  const [accounts, setAccounts] = useState<EmailAccount[]>([]);
+  const [settings, setSettings] = useState<AutoSettings | null>(null);
+  const [status, setStatus] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [runningNow, setRunningNow] = useState(false);
+  const [msg, setMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
+  // New account form
+  const [showAddAccount, setShowAddAccount] = useState(false);
+  const [newAcct, setNewAcct] = useState({ label: "", provider: "gmail", host: "smtp.gmail.com", port: 587, secure: false, user: "", password: "", fromName: "DevStudio", fromEmail: "", imapEnabled: false });
+  const [addingAcct, setAddingAcct] = useState(false);
+  const [testingId, setTestingId] = useState<number | null>(null);
+  const [showPassId, setShowPassId] = useState<number | null>(null);
+  const [editAcct, setEditAcct] = useState<EmailAccount | null>(null);
+  const [editPass, setEditPass] = useState("");
+  const [savingAcct, setSavingAcct] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [accts, setts, stat] = await Promise.all([
+        fetch(`${apiBase()}/api/automation/email-accounts`).then(r => r.json()),
+        fetch(`${apiBase()}/api/automation/settings`).then(r => r.json()),
+        fetch(`${apiBase()}/api/automation/status`).then(r => r.json()),
+      ]);
+      setAccounts(accts);
+      setSettings(setts);
+      setStatus(stat);
+    } catch { setMsg({ type: "error", text: "Failed to load automation settings" }); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const saveSettings = async (patch: Partial<AutoSettings>) => {
+    if (!settings) return;
+    setSavingSettings(true); setMsg(null);
+    try {
+      const r = await fetch(`${apiBase()}/api/automation/settings`, {
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch),
+      });
+      if (!r.ok) throw new Error("Save failed");
+      const updated = await r.json();
+      setSettings(updated);
+      setMsg({ type: "success", text: "Settings saved." });
+    } catch (e: any) { setMsg({ type: "error", text: e.message }); }
+    finally { setSavingSettings(false); }
+  };
+
+  const toggleAuto = async () => {
+    if (!settings) return;
+    const newVal = !settings.autoHuntEnabled;
+    setSettings(s => s ? { ...s, autoHuntEnabled: newVal } : s);
+    await saveSettings({ autoHuntEnabled: newVal });
+    await load();
+  };
+
+  const runNow = async () => {
+    setRunningNow(true); setMsg(null);
+    try {
+      await fetch(`${apiBase()}/api/automation/run-now`, { method: "POST" });
+      setMsg({ type: "success", text: "Automation run started! Check back in a few minutes for results." });
+      setTimeout(load, 3000);
+    } catch { setMsg({ type: "error", text: "Failed to trigger run" }); }
+    finally { setRunningNow(false); }
+  };
+
+  const addAccount = async () => {
+    if (!newAcct.user) return;
+    setAddingAcct(true); setMsg(null);
+    try {
+      const r = await fetch(`${apiBase()}/api/automation/email-accounts`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(newAcct),
+      });
+      if (!r.ok) { const d = await r.json(); throw new Error(d.error); }
+      setShowAddAccount(false);
+      setNewAcct({ label: "", provider: "gmail", host: "smtp.gmail.com", port: 587, secure: false, user: "", password: "", fromName: "DevStudio", fromEmail: "", imapEnabled: false });
+      setMsg({ type: "success", text: "Email account added." });
+      await load();
+    } catch (e: any) { setMsg({ type: "error", text: e.message }); }
+    finally { setAddingAcct(false); }
+  };
+
+  const testAccount = async (id: number) => {
+    setTestingId(id); setMsg(null);
+    try {
+      const r = await fetch(`${apiBase()}/api/automation/email-accounts/${id}/test`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error);
+      setMsg({ type: "success", text: "Test email sent successfully!" });
+    } catch (e: any) { setMsg({ type: "error", text: `Test failed: ${e.message}` }); }
+    finally { setTestingId(null); }
+  };
+
+  const deleteAccount = async (id: number) => {
+    await fetch(`${apiBase()}/api/automation/email-accounts/${id}`, { method: "DELETE" });
+    await load();
+  };
+
+  const saveEditAccount = async () => {
+    if (!editAcct) return;
+    setSavingAcct(true);
+    try {
+      const body: any = { label: editAcct.label, fromName: editAcct.fromName, fromEmail: editAcct.fromEmail, active: editAcct.active, imapEnabled: editAcct.imapEnabled };
+      if (editPass && editPass !== "••••••••") body.password = editPass;
+      await fetch(`${apiBase()}/api/automation/email-accounts/${editAcct.id}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+      setEditAcct(null); setEditPass("");
+      setMsg({ type: "success", text: "Account updated." });
+      await load();
+    } finally { setSavingAcct(false); }
+  };
+
+  const applyProviderPreset = (provider: string) => {
+    const presets: Record<string, any> = {
+      gmail: { provider: "gmail", host: "smtp.gmail.com", port: 587, secure: false },
+      outlook: { provider: "outlook", host: "smtp-mail.outlook.com", port: 587, secure: false },
+      smtp: { provider: "smtp", host: "", port: 587, secure: false },
+    };
+    setNewAcct(p => ({ ...p, ...presets[provider] }));
+  };
+
+  if (loading) return (
+    <div className="flex items-center justify-center py-16"><div className="w-8 h-8 rounded-full border-2 border-primary border-t-transparent animate-spin" /></div>
+  );
+
+  const s = settings;
+
+  return (
+    <div className="space-y-6 max-w-4xl">
+
+      {/* Header */}
+      <div className="bg-gradient-to-r from-purple-600 to-indigo-600 rounded-2xl p-6 text-white">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center">
+            <Radar className="w-6 h-6" />
+          </div>
+          <div>
+            <h2 className="font-extrabold text-xl">AI Hunter Automation</h2>
+            <p className="text-white/80 text-sm">Hunt → Score → Email — fully automatic or on-demand</p>
+          </div>
+          <div className="ml-auto flex items-center gap-3">
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-bold ${s?.autoHuntEnabled ? "bg-green-400/20 text-green-200" : "bg-white/10 text-white/60"}`}>
+              {s?.autoHuntEnabled ? <><span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />Auto ON</> : <><span className="w-2 h-2 rounded-full bg-white/30" />Manual</>}
+            </div>
+          </div>
+        </div>
+        <div className="grid grid-cols-3 gap-3 text-center">
+          {[
+            { v: status?.activeAccounts ?? 0, l: "Email Accounts" },
+            { v: status?.stats?.hunted ?? 0, l: "Last Run Hunted" },
+            { v: status?.stats?.emailed ?? 0, l: "Last Run Sent" },
+          ].map(s => (
+            <div key={s.l} className="bg-white/10 rounded-xl p-3">
+              <div className="font-extrabold text-xl">{s.v}</div>
+              <div className="text-white/70 text-xs mt-0.5">{s.l}</div>
+            </div>
+          ))}
+        </div>
+        {status?.lastRunAt && (
+          <p className="text-white/60 text-xs mt-3">Last run: {new Date(status.lastRunAt).toLocaleString()}{status?.nextRunAt ? ` · Next: ${new Date(status.nextRunAt).toLocaleString()}` : ""}</p>
+        )}
+      </div>
+
+      {msg && (
+        <div className={`flex items-center gap-2 text-sm px-4 py-3 rounded-xl border ${msg.type === "success" ? "bg-green-50 text-green-800 border-green-200" : "bg-red-50 text-red-700 border-red-200"}`}>
+          {msg.type === "success" ? <CheckCircle2 className="w-4 h-4 flex-shrink-0" /> : <AlertTriangle className="w-4 h-4 flex-shrink-0" />}
+          <span className="flex-1">{msg.text}</span>
+          <button onClick={() => setMsg(null)}><X className="w-4 h-4" /></button>
+        </div>
+      )}
+
+      {/* Auto / Manual toggle */}
+      <div className="rounded-xl border border-border/50 overflow-hidden">
+        <div className="p-4 bg-muted/20 border-b border-border/50 flex items-center justify-between">
+          <div>
+            <h3 className="font-bold">Automation Mode</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">Switch between fully automatic hunting or manual control in the CRM</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-medium text-muted-foreground">Manual</span>
+            <Switch checked={s?.autoHuntEnabled ?? false} onCheckedChange={toggleAuto} />
+            <span className="text-sm font-medium text-green-700">Auto</span>
+          </div>
+        </div>
+        <div className="p-4 flex gap-3">
+          <Button onClick={runNow} disabled={runningNow} variant="outline" className="gap-2 font-semibold">
+            {runningNow ? <RefreshCw className="w-4 h-4 animate-spin" /> : <PlayCircle className="w-4 h-4 text-green-600" />}
+            {runningNow ? "Running…" : "Run Once Now"}
+          </Button>
+          <p className="text-xs text-muted-foreground self-center">Runs a full Hunt → Score → Email cycle immediately, regardless of mode.</p>
+        </div>
+      </div>
+
+      {/* Hunt settings */}
+      {s && (
+        <div className="rounded-xl border border-border/50 overflow-hidden">
+          <div className="p-4 bg-muted/20 border-b border-border/50">
+            <h3 className="font-bold flex items-center gap-2"><Radar className="w-4 h-4 text-purple-600" /> Hunt Settings</h3>
+          </div>
+          <div className="p-4 grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs font-semibold text-muted-foreground mb-1 block">Business Category</label>
+              <Select value={s.huntCategory} onValueChange={v => setSettings(p => p ? { ...p, huntCategory: v } : p)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>{CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-muted-foreground mb-1 block">Businesses per Run</label>
+              <Select value={String(s.huntCount)} onValueChange={v => setSettings(p => p ? { ...p, huntCount: Number(v) } : p)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>{["5","10","15","20"].map(n => <SelectItem key={n} value={n}>{n} businesses</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-muted-foreground mb-1 block">City *</label>
+              <Input value={s.huntCity} onChange={e => setSettings(p => p ? { ...p, huntCity: e.target.value } : p)} placeholder="e.g. Lagos, London, Miami" />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-muted-foreground mb-1 block">Country</label>
+              <Input value={s.huntCountry} onChange={e => setSettings(p => p ? { ...p, huntCountry: e.target.value } : p)} placeholder="e.g. Nigeria, UK, USA" />
+            </div>
+            <div className="col-span-2">
+              <label className="text-xs font-semibold text-muted-foreground mb-1 block">Extra Context (optional)</label>
+              <Input value={s.huntExtraContext} onChange={e => setSettings(p => p ? { ...p, huntExtraContext: e.target.value } : p)} placeholder="e.g. focus on mid-size businesses, luxury segment…" />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-muted-foreground mb-1 block">Run Interval (hours)</label>
+              <Select value={String(s.huntIntervalHours)} onValueChange={v => setSettings(p => p ? { ...p, huntIntervalHours: Number(v) } : p)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {[["6","Every 6 hours"],["12","Every 12 hours"],["24","Every day"],["48","Every 2 days"],["168","Every week"]].map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          {/* Auto-pipeline toggles */}
+          <div className="p-4 border-t border-border/50 space-y-3">
+            <h4 className="text-sm font-bold text-muted-foreground uppercase tracking-wide">Automation Pipeline</h4>
+            {[
+              { key: "autoScore", label: "Auto-Score & Analyze", desc: "AI scores every hunted business and writes analysis automatically", icon: <Brain className="w-4 h-4 text-indigo-600" /> },
+              { key: "autoEmail", label: "Auto-Send Cold Emails", desc: "Generates and sends personalized cold emails to each hunted business", icon: <Send className="w-4 h-4 text-purple-600" /> },
+              { key: "autoReply", label: "Auto-Reply with Proposal", desc: "When a business replies, AI sends a full HTML proposal email automatically", icon: <MailCheck className="w-4 h-4 text-green-600" /> },
+            ].map(({ key, label, desc, icon }) => (
+              <div key={key} className={`flex items-center justify-between p-3 rounded-xl border ${(s as any)[key] ? "bg-purple-50 border-purple-200" : "bg-muted/20 border-border/40"}`}>
+                <div className="flex items-center gap-3">
+                  {icon}
+                  <div>
+                    <div className="text-sm font-bold">{label}</div>
+                    <div className="text-xs text-muted-foreground">{desc}</div>
+                  </div>
+                </div>
+                <Switch checked={(s as any)[key]} onCheckedChange={v => setSettings(p => p ? { ...p, [key]: v } : p)} />
+              </div>
+            ))}
+          </div>
+
+          {s.autoEmail && (
+            <div className="p-4 border-t border-border/50">
+              <label className="text-xs font-semibold text-muted-foreground mb-2 block">Delay Between Emails</label>
+              <Select value={String(s.emailDelayMinutes)} onValueChange={v => setSettings(p => p ? { ...p, emailDelayMinutes: Number(v) } : p)}>
+                <SelectTrigger className="w-48"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {[["5","5 minutes"],["10","10 minutes"],["15","15 minutes"],["20","20 minutes"],["30","30 minutes"],["60","1 hour"]].map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground mt-1.5">Emails rotate through your active accounts with this gap between each send.</p>
+            </div>
+          )}
+
+          {s.autoReply && (
+            <div className="p-4 border-t border-orange-200 bg-orange-50">
+              <div className="flex items-start gap-2 text-orange-800">
+                <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                <div className="text-xs">
+                  <strong>IMAP required for auto-reply.</strong> Enable IMAP access in your Gmail settings (Settings → Forwarding and POP/IMAP → Enable IMAP), then toggle "IMAP Enabled" on each email account below. The system checks for replies every 30 minutes.
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="p-4 border-t border-border/50">
+            <Button onClick={() => saveSettings({ ...s })} disabled={savingSettings} className="gap-2 font-semibold">
+              {savingSettings ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              {savingSettings ? "Saving…" : "Save Hunt Settings"}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Email Accounts */}
+      <div className="rounded-xl border border-border/50 overflow-hidden">
+        <div className="p-4 bg-muted/20 border-b border-border/50 flex items-center justify-between">
+          <div>
+            <h3 className="font-bold flex items-center gap-2"><Mail className="w-4 h-4 text-blue-600" /> Email Accounts</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">Add multiple Gmail/Outlook accounts. Emails rotate through active accounts with your configured delay.</p>
+          </div>
+          <Button size="sm" onClick={() => setShowAddAccount(v => !v)} className="gap-1.5 font-semibold">
+            <Plus className="w-3.5 h-3.5" /> Add Account
+          </Button>
+        </div>
+
+        {showAddAccount && (
+          <div className="p-4 border-b border-border/50 bg-blue-50/50 space-y-3">
+            <h4 className="text-sm font-bold">Add New Email Account</h4>
+            <div className="grid grid-cols-3 gap-2 mb-3">
+              {[{ id: "gmail", label: "Gmail", hint: "App Password" }, { id: "outlook", label: "Outlook", hint: "Microsoft account" }, { id: "smtp", label: "Custom SMTP", hint: "Any provider" }].map(p => (
+                <button key={p.id} onClick={() => applyProviderPreset(p.id)}
+                  className={`flex flex-col items-center gap-1 p-2 rounded-xl border-2 text-sm font-semibold transition-all ${newAcct.provider === p.id ? "border-primary bg-primary/5 text-primary" : "border-border/50 hover:border-primary/40 bg-white"}`}>
+                  <span>{p.label}</span>
+                  <span className="text-xs font-normal text-muted-foreground">{p.hint}</span>
+                </button>
+              ))}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1 block">Label (nickname)</label>
+                <Input value={newAcct.label} onChange={e => setNewAcct(p => ({ ...p, label: e.target.value }))} placeholder="e.g. Main Account, Backup 1" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1 block">Sender Name</label>
+                <Input value={newAcct.fromName} onChange={e => setNewAcct(p => ({ ...p, fromName: e.target.value }))} placeholder="DevStudio" />
+              </div>
+              <div className="col-span-2">
+                <label className="text-xs font-semibold text-muted-foreground mb-1 block">Email Address</label>
+                <Input type="email" value={newAcct.user} onChange={e => setNewAcct(p => ({ ...p, user: e.target.value }))} placeholder="you@gmail.com" />
+              </div>
+              <div className="col-span-2">
+                <label className="text-xs font-semibold text-muted-foreground mb-1 block">
+                  Password / App Password
+                  {newAcct.provider === "gmail" && <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener noreferrer" className="text-primary ml-2 underline text-xs">Generate Gmail App Password →</a>}
+                </label>
+                <Input type="password" value={newAcct.password} onChange={e => setNewAcct(p => ({ ...p, password: e.target.value }))} placeholder={newAcct.provider === "gmail" ? "16-char App Password" : "your password"} />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1 block">SMTP Host</label>
+                <Input value={newAcct.host} onChange={e => setNewAcct(p => ({ ...p, host: e.target.value }))} />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-1 block">Port</label>
+                <Input type="number" value={newAcct.port} onChange={e => setNewAcct(p => ({ ...p, port: Number(e.target.value) }))} />
+              </div>
+            </div>
+            <div className="flex gap-2 mt-2">
+              <Button onClick={addAccount} disabled={addingAcct || !newAcct.user} className="gap-2 font-semibold">
+                {addingAcct ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                {addingAcct ? "Adding…" : "Add Account"}
+              </Button>
+              <Button variant="outline" onClick={() => setShowAddAccount(false)}>Cancel</Button>
+            </div>
+          </div>
+        )}
+
+        {accounts.length === 0 ? (
+          <div className="py-10 text-center text-muted-foreground">
+            <Mail className="w-8 h-8 mx-auto mb-2 opacity-20" />
+            <p className="text-sm">No email accounts yet. Add your first Gmail account above.</p>
+          </div>
+        ) : (
+          <div className="divide-y divide-border/30">
+            {accounts.map(acct => (
+              <div key={acct.id}>
+                <div className="p-4 flex items-center gap-3">
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0 ${acct.active ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>
+                    {(acct.label || acct.user).slice(0, 2).toUpperCase()}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold text-sm flex items-center gap-2">
+                      {acct.label || acct.user}
+                      {acct.active ? <span className="text-xs text-green-700 bg-green-100 px-2 py-0.5 rounded-full font-semibold">Active</span> : <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">Inactive</span>}
+                      {acct.imapEnabled && <span className="text-xs text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full">IMAP ON</span>}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-0.5">{acct.user} · {acct.provider} · {acct.fromName}</div>
+                  </div>
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                    <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => testAccount(acct.id)} disabled={testingId === acct.id}>
+                      {testingId === acct.id ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+                      Test
+                    </Button>
+                    <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => { setEditAcct(acct); setEditPass(""); }}>
+                      <Settings className="w-3 h-3" /> Edit
+                    </Button>
+                    <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive/60 hover:text-destructive" onClick={() => deleteAccount(acct.id)}>
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
+                </div>
+                {editAcct?.id === acct.id && (
+                  <div className="p-4 border-t border-blue-100 bg-blue-50/40 space-y-3">
+                    <h4 className="text-sm font-bold">Edit Account</h4>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-xs font-semibold text-muted-foreground mb-1 block">Label</label>
+                        <Input value={editAcct.label} onChange={e => setEditAcct(p => p ? { ...p, label: e.target.value } : p)} />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-muted-foreground mb-1 block">Sender Name</label>
+                        <Input value={editAcct.fromName} onChange={e => setEditAcct(p => p ? { ...p, fromName: e.target.value } : p)} />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-muted-foreground mb-1 block">From Email (optional)</label>
+                        <Input value={editAcct.fromEmail} onChange={e => setEditAcct(p => p ? { ...p, fromEmail: e.target.value } : p)} placeholder="same as login if empty" />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-muted-foreground mb-1 block">New Password (leave blank to keep)</label>
+                        <Input type="password" value={editPass} onChange={e => setEditPass(e.target.value)} placeholder="••••••••" />
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <div className="flex items-center gap-2">
+                        <Switch checked={editAcct.active} onCheckedChange={v => setEditAcct(p => p ? { ...p, active: v } : p)} />
+                        <label className="text-sm font-medium">Active</label>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Switch checked={editAcct.imapEnabled} onCheckedChange={v => setEditAcct(p => p ? { ...p, imapEnabled: v } : p)} />
+                        <label className="text-sm font-medium">IMAP Enabled (for auto-reply)</label>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button onClick={saveEditAccount} disabled={savingAcct} className="gap-2 font-semibold">
+                        {savingAcct ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                        Save
+                      </Button>
+                      <Button variant="outline" onClick={() => setEditAcct(null)}>Cancel</Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Last Run Summary */}
+      {status?.stats?.lastProspects?.length > 0 && (
+        <div className="rounded-xl border border-border/50 overflow-hidden">
+          <div className="p-4 bg-muted/20 border-b border-border/50">
+            <h3 className="font-bold text-sm">Last Run Results</h3>
+            <p className="text-xs text-muted-foreground">Hunted: {status.stats.hunted} · Scored: {status.stats.scored} · Emailed: {status.stats.emailed} · Errors: {status.stats.errors ?? 0}</p>
+          </div>
+          <div className="divide-y divide-border/30 max-h-60 overflow-y-auto">
+            {status.stats.lastProspects.map((p: any, i: number) => (
+              <div key={i} className="p-3 flex items-center gap-3 text-sm">
+                <div className="w-7 h-7 rounded-full bg-primary/10 text-primary font-bold text-xs flex items-center justify-center flex-shrink-0">{(p.businessName || "?").slice(0, 2).toUpperCase()}</div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-semibold truncate">{p.businessName}</div>
+                  <div className="text-xs text-muted-foreground">{p.city} · Score {p.score}/10</div>
+                </div>
+                <div className="flex gap-1 flex-shrink-0">
+                  {p.scored && <span className="text-xs text-indigo-700 bg-indigo-100 px-2 py-0.5 rounded-full">Scored</span>}
+                  {p.emailed && <span className="text-xs text-green-700 bg-green-100 px-2 py-0.5 rounded-full">Emailed</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

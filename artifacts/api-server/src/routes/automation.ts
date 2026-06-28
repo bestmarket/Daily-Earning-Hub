@@ -1,0 +1,305 @@
+import { Router } from "express";
+import nodemailer from "nodemailer";
+import { db, emailAccountsTable, automationSettingsTable } from "@workspace/db";
+import { eq } from "drizzle-orm";
+import { getGeminiAI } from "./api-keys";
+
+const router = Router();
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+async function generateText(prompt: string): Promise<string> {
+  const ai = await getGeminiAI();
+  const response = await ai.models.generateContent({
+    model: "gemini-2.5-flash",
+    contents: [{ role: "user", parts: [{ text: prompt }] }],
+    config: { maxOutputTokens: 8192 },
+  });
+  return response.text ?? "";
+}
+
+function parseJSON(text: string): any {
+  const cleaned = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+  try { return JSON.parse(cleaned); } catch {
+    const match = cleaned.match(/[\[\{][\s\S]*[\]\}]/);
+    if (match) return JSON.parse(match[0]);
+    throw new Error("Failed to parse AI response as JSON");
+  }
+}
+
+function maskPassword(acct: any) {
+  return { ...acct, password: acct.password ? "••••••••" : "" };
+}
+
+async function getOrCreateSettings(): Promise<typeof automationSettingsTable.$inferSelect> {
+  const rows = await db.select().from(automationSettingsTable).limit(1);
+  if (rows.length > 0) return rows[0];
+  const inserted = await db.insert(automationSettingsTable).values({}).returning();
+  return inserted[0];
+}
+
+// ─── Email Accounts ───────────────────────────────────────────────────────────
+
+router.get("/automation/email-accounts", async (_req, res) => {
+  const accounts = await db.select().from(emailAccountsTable).orderBy(emailAccountsTable.id);
+  res.json(accounts.map(maskPassword));
+});
+
+router.post("/automation/email-accounts", async (req, res) => {
+  const { label, provider, host, port, secure, user, password, fromName, fromEmail, imapEnabled, imapHost, imapPort } = req.body;
+  if (!user) { res.status(400).json({ error: "user (email address) is required" }); return; }
+  const inserted = await db.insert(emailAccountsTable).values({
+    label: label || user,
+    provider: provider || "gmail",
+    host: host || "smtp.gmail.com",
+    port: port || 587,
+    secure: secure ?? false,
+    user,
+    password: password || "",
+    fromName: fromName || "DevStudio",
+    fromEmail: fromEmail || "",
+    imapEnabled: imapEnabled ?? false,
+    imapHost: imapHost || "imap.gmail.com",
+    imapPort: imapPort || 993,
+    active: true,
+  }).returning();
+  res.json(maskPassword(inserted[0]));
+});
+
+router.put("/automation/email-accounts/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  const { label, provider, host, port, secure, user, password, fromName, fromEmail, imapEnabled, imapHost, imapPort, active } = req.body;
+  const existing = await db.select().from(emailAccountsTable).where(eq(emailAccountsTable.id, id)).limit(1);
+  if (!existing.length) { res.status(404).json({ error: "Account not found" }); return; }
+  const updated = await db.update(emailAccountsTable).set({
+    ...(label !== undefined && { label }),
+    ...(provider !== undefined && { provider }),
+    ...(host !== undefined && { host }),
+    ...(port !== undefined && { port }),
+    ...(secure !== undefined && { secure }),
+    ...(user !== undefined && { user }),
+    ...(password && password !== "••••••••" ? { password } : {}),
+    ...(fromName !== undefined && { fromName }),
+    ...(fromEmail !== undefined && { fromEmail }),
+    ...(imapEnabled !== undefined && { imapEnabled }),
+    ...(imapHost !== undefined && { imapHost }),
+    ...(imapPort !== undefined && { imapPort }),
+    ...(active !== undefined && { active }),
+  }).where(eq(emailAccountsTable.id, id)).returning();
+  res.json(maskPassword(updated[0]));
+});
+
+router.delete("/automation/email-accounts/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  await db.delete(emailAccountsTable).where(eq(emailAccountsTable.id, id));
+  res.json({ success: true });
+});
+
+router.post("/automation/email-accounts/:id/test", async (req, res) => {
+  const id = Number(req.params.id);
+  const rows = await db.select().from(emailAccountsTable).where(eq(emailAccountsTable.id, id)).limit(1);
+  if (!rows.length) { res.status(404).json({ error: "Account not found" }); return; }
+  const acct = rows[0];
+  if (!acct.user || !acct.password) { res.status(400).json({ error: "Account has no credentials saved" }); return; }
+  try {
+    const transporter = nodemailer.createTransport({ host: acct.host, port: acct.port, secure: acct.secure, auth: { user: acct.user, pass: acct.password } });
+    await transporter.sendMail({
+      from: `"${acct.fromName}" <${acct.fromEmail || acct.user}>`,
+      to: req.body.to || acct.user,
+      subject: "DevStudio — Email Account Test",
+      html: `<div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:24px;"><h2 style="color:#6d28d9;">✓ ${acct.label || acct.user} is working</h2><p>This account is correctly configured for automated outreach.</p></div>`,
+    });
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Automation Settings ──────────────────────────────────────────────────────
+
+router.get("/automation/settings", async (_req, res) => {
+  const settings = await getOrCreateSettings();
+  res.json(settings);
+});
+
+router.put("/automation/settings", async (req, res) => {
+  const current = await getOrCreateSettings();
+  const {
+    autoHuntEnabled, huntCategory, huntCity, huntCountry, huntCount,
+    huntExtraContext, huntIntervalHours, autoScore, autoEmail,
+    emailDelayMinutes, autoReply,
+  } = req.body;
+
+  const updated = await db.update(automationSettingsTable).set({
+    ...(autoHuntEnabled !== undefined && { autoHuntEnabled }),
+    ...(huntCategory !== undefined && { huntCategory }),
+    ...(huntCity !== undefined && { huntCity }),
+    ...(huntCountry !== undefined && { huntCountry }),
+    ...(huntCount !== undefined && { huntCount }),
+    ...(huntExtraContext !== undefined && { huntExtraContext }),
+    ...(huntIntervalHours !== undefined && { huntIntervalHours }),
+    ...(autoScore !== undefined && { autoScore }),
+    ...(autoEmail !== undefined && { autoEmail }),
+    ...(emailDelayMinutes !== undefined && { emailDelayMinutes }),
+    ...(autoReply !== undefined && { autoReply }),
+    updatedAt: new Date(),
+    // recalculate nextRunAt if interval changed
+    ...(autoHuntEnabled === true ? {
+      nextRunAt: new Date(Date.now() + ((huntIntervalHours ?? current.huntIntervalHours) * 60 * 60 * 1000)),
+    } : {}),
+    ...(autoHuntEnabled === false ? { nextRunAt: null } : {}),
+  }).where(eq(automationSettingsTable.id, current.id)).returning();
+  res.json(updated[0]);
+});
+
+// ─── Automation Status (live run info) ───────────────────────────────────────
+
+router.get("/automation/status", async (_req, res) => {
+  const settings = await getOrCreateSettings();
+  const accounts = await db.select().from(emailAccountsTable).where(eq(emailAccountsTable.active, true));
+  res.json({
+    enabled: settings.autoHuntEnabled,
+    lastRunAt: settings.lastRunAt,
+    nextRunAt: settings.nextRunAt,
+    activeAccounts: accounts.length,
+    stats: settings.runStats,
+  });
+});
+
+// ─── Manual trigger ───────────────────────────────────────────────────────────
+
+router.post("/automation/run-now", async (req, res) => {
+  // Kick off without awaiting — respond immediately
+  res.json({ success: true, message: "Automation run started" });
+  runAutomationCycle().catch(() => {});
+});
+
+// ─── Core automation engine ───────────────────────────────────────────────────
+
+export async function runAutomationCycle(overrides?: {
+  category?: string; city?: string; country?: string; count?: number; extraContext?: string;
+}) {
+  const settings = await getOrCreateSettings();
+  const cfg = {
+    category: overrides?.category ?? settings.huntCategory,
+    city: overrides?.city ?? settings.huntCity,
+    country: overrides?.country ?? settings.huntCountry,
+    count: overrides?.count ?? settings.huntCount,
+    extraContext: overrides?.extraContext ?? settings.huntExtraContext,
+  };
+
+  if (!cfg.city) return;
+
+  const runStats: Record<string, number> = { hunted: 0, scored: 0, emailed: 0, errors: 0 };
+
+  // 1. Hunt businesses
+  let businesses: any[] = [];
+  try {
+    const huntPrompt = `You are a business intelligence researcher. Generate a list of ${Math.min(cfg.count, 20)} realistic ${cfg.category} businesses in ${cfg.city}, ${cfg.country || ""}.
+${cfg.extraContext ? `Additional context: ${cfg.extraContext}` : ""}
+Return ONLY a JSON array. Each object:
+{ "businessName":"string","ownerName":"string","category":"${cfg.category}","email":"string","phone":"string","website":"string","city":"${cfg.city}","country":"${cfg.country || ""}","instagram":"string","facebook":"string","linkedin":"string","softwareNeedScore":<1-10>,"painPoint":"string","estimatedValue":<number>,"notes":"string" }`;
+    const text = await generateText(huntPrompt);
+    businesses = parseJSON(text);
+    if (!Array.isArray(businesses)) businesses = [];
+    runStats.hunted = businesses.length;
+  } catch { runStats.errors++; }
+
+  // 2. Auto-score + generate email content for each, then send
+  const accounts = await db.select().from(emailAccountsTable).where(eq(emailAccountsTable.active, true));
+  let accountIndex = 0;
+
+  // Store prospects as JSON in runStats for display
+  const prospectsSummary: any[] = [];
+
+  for (let i = 0; i < businesses.length; i++) {
+    const biz = businesses[i];
+    let analysis: any = null;
+    let emailContent: { subject: string; body: string } | null = null;
+
+    if (settings.autoScore) {
+      try {
+        const autoPrompt = `You are a senior business analyst at DevStudio, a custom software agency.
+Analyze this ${biz.category} business and generate analysis + cold email.
+Business: ${biz.businessName}, Location: ${biz.city} ${biz.country}, Owner: ${biz.ownerName || "Owner"}, Website: ${biz.website || "No website"}, Pain Point: ${biz.painPoint || "manual processes"}
+Return ONLY JSON: { "analysis": { "websiteScore":<0-100>,"leadScore":<0-100>,"conversionScore":<0-100>,"mobileScore":<0-100>,"seoScore":<0-100>,"growthPotential":<0-100>,"summary":"string","projectType":"string","estimatedValue":{"min":<n>,"max":<n>},"deliveryWeeks":{"min":<n>,"max":<n>},"recommendedFeatures":["string"],"issues":[{"title":"string","description":"string","priority":"high|medium|low"}],"opportunities":[{"title":"string","impact":"string","effort":"low|medium|high"}],"checks":{"responsiveDesign":false,"sslCertificate":false,"modernUI":false,"whatsappButton":false,"contactForm":false,"bookingSystem":false,"onlineOrdering":false,"paymentIntegration":false,"customerPortal":false,"membershipArea":false,"blog":false,"seoBasics":false,"analytics":false,"socialMedia":false,"emailCapture":false,"liveChat":false,"aiChatbot":false,"callToAction":false,"trustElements":false}}, "email":{"subject":"string","body":"string"} }`;
+        const genText = await generateText(autoPrompt);
+        const genData = parseJSON(genText);
+        analysis = genData.analysis;
+        emailContent = genData.email;
+        runStats.scored++;
+      } catch { runStats.errors++; }
+    }
+
+    prospectsSummary.push({
+      businessName: biz.businessName, email: biz.email, city: biz.city,
+      score: biz.softwareNeedScore, scored: !!analysis, emailed: false,
+    });
+
+    // 3. Send email if autoEmail is on AND business has an email AND we have accounts
+    if (settings.autoEmail && biz.email && accounts.length > 0 && emailContent) {
+      const acct = accounts[accountIndex % accounts.length];
+      accountIndex++;
+      try {
+        const transporter = nodemailer.createTransport({ host: acct.host, port: acct.port, secure: acct.secure, auth: { user: acct.user, pass: acct.password } });
+        const html = emailContent.body.split("\n").map(l => l.trim() ? `<p style="margin:0 0 12px;line-height:1.6;">${l}</p>` : "<br/>").join("");
+        await transporter.sendMail({
+          from: `"${acct.fromName}" <${acct.fromEmail || acct.user}>`,
+          to: biz.email,
+          subject: emailContent.subject,
+          text: emailContent.body,
+          html: `<div style="font-family:Georgia,serif;max-width:600px;margin:0 auto;padding:24px;color:#1a1a2e;">${html}<hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0;"/><p style="color:#6b7280;font-size:13px;">${acct.fromName}</p></div>`,
+        });
+        runStats.emailed++;
+        prospectsSummary[prospectsSummary.length - 1].emailed = true;
+        // Delay before next email (convert minutes to ms)
+        if (i < businesses.length - 1 && settings.emailDelayMinutes > 0) {
+          await new Promise(r => setTimeout(r, settings.emailDelayMinutes * 60 * 1000));
+        }
+      } catch { runStats.errors++; }
+    }
+  }
+
+  // Update settings with run stats + timestamps
+  const now = new Date();
+  const nextRun = settings.autoHuntEnabled
+    ? new Date(now.getTime() + settings.huntIntervalHours * 60 * 60 * 1000)
+    : null;
+
+  await db.update(automationSettingsTable).set({
+    lastRunAt: now,
+    nextRunAt: nextRun,
+    runStats: { ...runStats, lastProspects: prospectsSummary.slice(0, 20), lastRunAt: now.toISOString() },
+  }).where(eq(automationSettingsTable.id, settings.id));
+}
+
+// ─── IMAP reply checker ───────────────────────────────────────────────────────
+
+router.post("/automation/check-replies", async (_req, res) => {
+  res.json({ checked: 0, replied: 0, message: "Reply checking requires IMAP — enable it on your email accounts and ensure IMAP access is enabled in Gmail settings." });
+});
+
+// ─── Scheduler (runs in-process) ─────────────────────────────────────────────
+
+let schedulerTimer: ReturnType<typeof setTimeout> | null = null;
+
+async function scheduleNext() {
+  if (schedulerTimer) clearTimeout(schedulerTimer);
+  const settings = await getOrCreateSettings().catch(() => null);
+  if (!settings?.autoHuntEnabled || !settings.huntCity) return;
+  const now = Date.now();
+  const nextRun = settings.nextRunAt ? new Date(settings.nextRunAt).getTime() : now;
+  const delay = Math.max(nextRun - now, 60_000); // at least 1 minute
+  schedulerTimer = setTimeout(async () => {
+    await runAutomationCycle().catch(() => {});
+    scheduleNext();
+  }, delay);
+}
+
+export function startScheduler() {
+  scheduleNext().catch(() => {});
+  // Re-check every 5 minutes in case settings changed
+  setInterval(() => scheduleNext().catch(() => {}), 5 * 60 * 1000);
+}
+
+export default router;

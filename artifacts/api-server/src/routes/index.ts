@@ -9,6 +9,7 @@ import ogRouter from "./og";
 import crmAiRouter from "./crm-ai";
 import toolsAiRouter from "./tools-ai";
 import apiKeysRouter from "./api-keys";
+import automationRouter, { startScheduler } from "./automation";
 
 const router: IRouter = Router();
 
@@ -22,5 +23,9 @@ router.use(ogRouter);
 router.use(crmAiRouter);
 router.use(toolsAiRouter);
 router.use(apiKeysRouter);
+router.use(automationRouter);
+
+// Start the automation scheduler (no-op if auto mode is off)
+startScheduler();
 
 export default router;
