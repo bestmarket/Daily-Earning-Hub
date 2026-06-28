@@ -1,6 +1,6 @@
 import { Router } from "express";
-import { GoogleGenAI } from "@google/genai";
 import nodemailer from "nodemailer";
+import { getGeminiAI } from "./api-keys";
 
 const router = Router();
 
@@ -25,14 +25,8 @@ let emailConfig: {
   fromEmail: "",
 };
 
-function getAI() {
-  const key = process.env.GEMINI_API_KEY;
-  if (!key) throw new Error("GEMINI_API_KEY not set");
-  return new GoogleGenAI({ apiKey: key });
-}
-
 async function generateText(prompt: string, systemInstruction?: string): Promise<string> {
-  const ai = getAI();
+  const ai = await getGeminiAI();
   const response = await ai.models.generateContent({
     model: "gemini-2.5-flash",
     contents: [{ role: "user", parts: [{ text: prompt }] }],

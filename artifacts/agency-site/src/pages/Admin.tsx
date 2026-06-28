@@ -777,7 +777,7 @@ function PaymentsTab({ apiToken }: { apiToken: string }) {
 
 function AISetupTab({ apiToken }: { apiToken: string }) {
   const { toast } = useToast();
-  const [apiKeys, setApiKeys] = useState<Record<string, { masked: string; set: boolean }>>({});
+  const [apiKeys, setApiKeys] = useState<Record<string, { masked: string; set: boolean; viaIntegration?: boolean }>>({});
   const [geminiKey, setGeminiKey] = useState("");
   const [geminiVisible, setGeminiVisible] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -792,6 +792,7 @@ function AISetupTab({ apiToken }: { apiToken: string }) {
   }, []);
 
   const isGeminiSet = apiKeys["GEMINI_API_KEY"]?.set;
+  const isViaIntegration = apiKeys["GEMINI_API_KEY"]?.viaIntegration;
 
   const saveGeminiKey = async () => {
     if (!geminiKey.trim()) { toast({ title: "Please enter a key", variant: "destructive" }); return; }
@@ -854,14 +855,21 @@ function AISetupTab({ apiToken }: { apiToken: string }) {
           <Brain className={`w-6 h-6 ${isGeminiSet ? "text-green-600" : "text-orange-600"}`} />
         </div>
         <div className="flex-1">
-          <div className="flex items-center gap-2 mb-1">
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
             <h3 className="font-bold">Gemini AI</h3>
             <Badge className={isGeminiSet ? "bg-green-600 text-white" : "bg-orange-200 text-orange-800 border-orange-300"}>
               {isGeminiSet ? "✅ Active" : "⚠️ Not Connected"}
             </Badge>
+            {isViaIntegration && (
+              <Badge className="bg-purple-100 text-purple-700 border-purple-200">
+                🔌 Auto-connected by Replit
+              </Badge>
+            )}
           </div>
           <p className="text-sm text-muted-foreground">
-            {isGeminiSet
+            {isViaIntegration
+              ? "Gemini is automatically connected via the Replit AI integration — no manual key needed. All AI features are ready to use."
+              : isGeminiSet
               ? "AI is connected and powering your business tools, AI Client Hunter CRM, and automated outreach features."
               : "Connect your Gemini API key to enable AI features across the entire platform."}
           </p>
@@ -913,47 +921,62 @@ function AISetupTab({ apiToken }: { apiToken: string }) {
           </div>
         </div>
         <div className="p-5 space-y-4">
-          {isGeminiSet && (
-            <div className="flex items-center gap-3 px-4 py-3 bg-green-50 rounded-lg border border-green-200">
-              <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0" />
-              <span className="font-mono text-sm text-muted-foreground flex-1">{apiKeys["GEMINI_API_KEY"]?.masked}</span>
-              <button className="text-xs text-destructive/70 hover:text-destructive font-medium flex items-center gap-1" onClick={removeGeminiKey}>
-                <Trash2 className="w-3 h-3" /> Remove
-              </button>
+          {isViaIntegration ? (
+            /* Auto-connected via Replit integration — no manual key needed */
+            <div className="rounded-lg border border-purple-200 bg-purple-50 p-4 flex items-start gap-3">
+              <CheckCircle2 className="w-5 h-5 text-purple-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-semibold text-purple-800">Managed automatically by Replit</p>
+                <p className="text-xs text-purple-700 mt-0.5">Your API key is securely provided by the Replit Gemini integration. You don't need to enter anything here.</p>
+                <p className="font-mono text-xs text-purple-600 mt-1">{apiKeys["GEMINI_API_KEY"]?.masked}</p>
+              </div>
             </div>
+          ) : (
+            <>
+              {isGeminiSet && (
+                <div className="flex items-center gap-3 px-4 py-3 bg-green-50 rounded-lg border border-green-200">
+                  <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0" />
+                  <span className="font-mono text-sm text-muted-foreground flex-1">{apiKeys["GEMINI_API_KEY"]?.masked}</span>
+                  <button className="text-xs text-destructive/70 hover:text-destructive font-medium flex items-center gap-1" onClick={removeGeminiKey}>
+                    <Trash2 className="w-3 h-3" /> Remove
+                  </button>
+                </div>
+              )}
+
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">
+                  {isGeminiSet ? "Replace API Key" : "Enter Gemini API Key"}
+                </label>
+                <div className="relative">
+                  <Input
+                    type={geminiVisible ? "text" : "password"}
+                    placeholder="AIzaSy…"
+                    value={geminiKey}
+                    onChange={(e) => setGeminiKey(e.target.value)}
+                    className="pr-10 font-mono h-10"
+                  />
+                  <button type="button"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    onClick={() => setGeminiVisible(v => !v)}>
+                    {geminiVisible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Go to <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="text-primary underline">aistudio.google.com</a> → Sign in → Create API Key → Copy & paste here
+                </p>
+              </div>
+
+              <Button onClick={saveGeminiKey} disabled={saving || !geminiKey.trim()} className="gap-2 w-full">
+                {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                {saving ? "Saving…" : "Save API Key"}
+              </Button>
+            </>
           )}
 
-          <div>
-            <label className="text-xs font-semibold text-muted-foreground mb-2 block">
-              {isGeminiSet ? "Replace API Key" : "Enter Gemini API Key"}
-            </label>
-            <div className="relative">
-              <Input
-                type={geminiVisible ? "text" : "password"}
-                placeholder="AIzaSy…"
-                value={geminiKey}
-                onChange={(e) => setGeminiKey(e.target.value)}
-                className="pr-10 font-mono h-10"
-              />
-              <button type="button"
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                onClick={() => setGeminiVisible(v => !v)}>
-                {geminiVisible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              Go to <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="text-primary underline">aistudio.google.com</a> → Sign in → Create API Key → Copy & paste here
-            </p>
-          </div>
-
           <div className="flex gap-3">
-            <Button onClick={saveGeminiKey} disabled={saving || !geminiKey.trim()} className="gap-2 flex-1">
-              {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-              {saving ? "Saving…" : "Save API Key"}
-            </Button>
-            <Button variant="outline" onClick={testAI} disabled={testing || !isGeminiSet} className="gap-2">
+            <Button variant="outline" onClick={testAI} disabled={testing || !isGeminiSet} className="gap-2 flex-1">
               {testing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
-              {testing ? "Testing…" : "Test AI"}
+              {testing ? "Testing AI…" : "Test AI Connection"}
             </Button>
           </div>
 

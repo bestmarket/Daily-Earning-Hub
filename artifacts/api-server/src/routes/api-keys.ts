@@ -37,7 +37,7 @@ router.get("/admin/api-keys", requireAdmin, async (req, res) => {
       .from(siteConfigTable)
       .then((r) => r.filter((x) => API_KEY_NAMES.includes(x.key)));
 
-    const result: Record<string, { masked: string; set: boolean }> = {};
+    const result: Record<string, { masked: string; set: boolean; viaIntegration?: boolean }> = {};
     for (const name of API_KEY_NAMES) {
       const envVal = process.env[name];
       const dbRow = rows.find((r) => r.key === name);
@@ -47,6 +47,17 @@ router.get("/admin/api-keys", requireAdmin, async (req, res) => {
         set: !!effectiveVal,
       };
     }
+
+    // Report Replit Gemini integration status
+    const integrationKey = process.env.AI_INTEGRATIONS_GEMINI_API_KEY;
+    if (integrationKey) {
+      result["GEMINI_API_KEY"] = {
+        masked: maskKey(integrationKey),
+        set: true,
+        viaIntegration: true,
+      };
+    }
+
     res.json(result);
   } catch (err) {
     req.log.error({ err }, "Get api-keys error");
@@ -106,6 +117,10 @@ router.delete("/admin/api-keys/:key", requireAdmin, async (req, res) => {
 });
 
 export async function getConfigKey(key: string): Promise<string | undefined> {
+  // For Gemini, check the Replit integration env var first
+  if (key === "GEMINI_API_KEY" && process.env.AI_INTEGRATIONS_GEMINI_API_KEY) {
+    return process.env.AI_INTEGRATIONS_GEMINI_API_KEY;
+  }
   if (process.env[key]) return process.env[key];
   try {
     const rows = await db
@@ -119,6 +134,26 @@ export async function getConfigKey(key: string): Promise<string | undefined> {
     }
   } catch {}
   return undefined;
+}
+
+// Returns a ready GoogleGenAI instance using the best available key + base URL
+export async function getGeminiAI() {
+  const { GoogleGenAI } = await import("@google/genai");
+  // Prefer Replit integration (has managed base URL)
+  const integrationKey = process.env.AI_INTEGRATIONS_GEMINI_API_KEY;
+  const integrationBase = process.env.AI_INTEGRATIONS_GEMINI_BASE_URL;
+  if (integrationKey) {
+    return new GoogleGenAI({
+      apiKey: integrationKey,
+      ...(integrationBase ? { httpOptions: { apiVersion: "", baseUrl: integrationBase } } : {}),
+    });
+  }
+  // Fall back to manually saved key
+  const manualKey = await getConfigKey("GEMINI_API_KEY");
+  if (manualKey) {
+    return new GoogleGenAI({ apiKey: manualKey });
+  }
+  throw new Error("Gemini AI not configured. Add your API key in Admin → AI Setup.");
 }
 
 export default router;
