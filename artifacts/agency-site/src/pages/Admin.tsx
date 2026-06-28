@@ -1504,11 +1504,25 @@ function AutomationTab() {
 
   const applyProviderPreset = (provider: string) => {
     const presets: Record<string, any> = {
-      gmail: { provider: "gmail", host: "smtp.gmail.com", port: 587, secure: false },
-      outlook: { provider: "outlook", host: "smtp-mail.outlook.com", port: 587, secure: false },
-      smtp: { provider: "smtp", host: "", port: 587, secure: false },
+      brevo:    { provider: "brevo",    host: "smtp-relay.brevo.com",      port: 587, secure: false },
+      resend:   { provider: "resend",   host: "smtp.resend.com",           port: 587, secure: false },
+      sendgrid: { provider: "sendgrid", host: "smtp.sendgrid.net",         port: 587, secure: false },
+      mailjet:  { provider: "mailjet",  host: "in-v3.mailjet.com",         port: 587, secure: false },
+      gmail:    { provider: "gmail",    host: "smtp.gmail.com",            port: 587, secure: false },
+      outlook:  { provider: "outlook",  host: "smtp-mail.outlook.com",     port: 587, secure: false },
+      smtp:     { provider: "smtp",     host: "",                          port: 587, secure: false },
     };
     setNewAcct(p => ({ ...p, ...presets[provider] }));
+  };
+
+  const PROVIDER_INFO: Record<string, { label: string; free: string; userHint: string; passHint: string; signupUrl: string; passLabel: string }> = {
+    brevo:    { label: "Brevo",     free: "300/day free", userHint: "your Brevo login email",        passHint: "SMTP key from Brevo dashboard",          signupUrl: "https://app.brevo.com/settings/keys/smtp", passLabel: "SMTP Key (from Brevo → SMTP & API)" },
+    resend:   { label: "Resend",    free: "100/day free", userHint: "use: resend",                   passHint: "API key from Resend dashboard",           signupUrl: "https://resend.com/api-keys",              passLabel: "API Key (from Resend dashboard)" },
+    sendgrid: { label: "SendGrid",  free: "100/day free", userHint: "use: apikey",                   passHint: "API key from SendGrid dashboard",         signupUrl: "https://app.sendgrid.com/settings/api_keys", passLabel: "API Key (from SendGrid → API Keys)" },
+    mailjet:  { label: "Mailjet",   free: "200/day free", userHint: "Mailjet API Key (public key)",  passHint: "Mailjet Secret Key",                     signupUrl: "https://app.mailjet.com/account/apikeys",  passLabel: "Secret Key (from Mailjet → API Keys)" },
+    gmail:    { label: "Gmail",     free: "~500/day",     userHint: "your Gmail address",            passHint: "16-char App Password (NOT your password)",signupUrl: "https://myaccount.google.com/apppasswords", passLabel: "App Password (16-char code from Google)" },
+    outlook:  { label: "Outlook",   free: "~300/day",     userHint: "your Outlook/Hotmail address",  passHint: "your Microsoft account password",         signupUrl: "",                                         passLabel: "Password" },
+    smtp:     { label: "Custom",    free: "varies",       userHint: "SMTP username",                 passHint: "SMTP password",                           signupUrl: "",                                         passLabel: "Password" },
   };
 
   if (loading) return (
@@ -1693,18 +1707,87 @@ function AutomationTab() {
           </Button>
         </div>
 
-        {showAddAccount && (
-          <div className="p-4 border-b border-border/50 bg-blue-50/50 space-y-3">
+        {showAddAccount && (() => {
+          const pi = PROVIDER_INFO[newAcct.provider] || PROVIDER_INFO.smtp;
+          return (
+          <div className="p-4 border-b border-border/50 bg-blue-50/50 space-y-4">
             <h4 className="text-sm font-bold">Add New Email Account</h4>
-            <div className="grid grid-cols-3 gap-2 mb-3">
-              {[{ id: "gmail", label: "Gmail", hint: "App Password" }, { id: "outlook", label: "Outlook", hint: "Microsoft account" }, { id: "smtp", label: "Custom SMTP", hint: "Any provider" }].map(p => (
-                <button key={p.id} onClick={() => applyProviderPreset(p.id)}
-                  className={`flex flex-col items-center gap-1 p-2 rounded-xl border-2 text-sm font-semibold transition-all ${newAcct.provider === p.id ? "border-primary bg-primary/5 text-primary" : "border-border/50 hover:border-primary/40 bg-white"}`}>
-                  <span>{p.label}</span>
-                  <span className="text-xs font-normal text-muted-foreground">{p.hint}</span>
-                </button>
-              ))}
+
+            {/* Free providers row */}
+            <div>
+              <p className="text-xs font-semibold text-green-700 mb-2">✦ Free providers (recommended — no App Password needed)</p>
+              <div className="grid grid-cols-4 gap-2">
+                {(["brevo","resend","sendgrid","mailjet"] as const).map(id => {
+                  const info = PROVIDER_INFO[id];
+                  return (
+                    <button key={id} onClick={() => applyProviderPreset(id)}
+                      className={`flex flex-col items-center gap-0.5 p-2.5 rounded-xl border-2 text-sm font-bold transition-all ${newAcct.provider === id ? "border-green-500 bg-green-50 text-green-700" : "border-border/50 hover:border-green-400/60 bg-white"}`}>
+                      <span>{info.label}</span>
+                      <span className="text-xs font-normal text-green-600">{info.free}</span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
+
+            {/* Other providers row */}
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground mb-2">Other options</p>
+              <div className="grid grid-cols-3 gap-2">
+                {(["gmail","outlook","smtp"] as const).map(id => {
+                  const info = PROVIDER_INFO[id];
+                  return (
+                    <button key={id} onClick={() => applyProviderPreset(id)}
+                      className={`flex flex-col items-center gap-0.5 p-2 rounded-xl border-2 text-sm font-semibold transition-all ${newAcct.provider === id ? "border-primary bg-primary/5 text-primary" : "border-border/50 hover:border-primary/40 bg-white"}`}>
+                      <span>{info.label}</span>
+                      <span className="text-xs font-normal text-muted-foreground">{info.free}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Provider-specific setup card */}
+            {["brevo","resend","sendgrid","mailjet"].includes(newAcct.provider) && (
+              <div className="rounded-xl border-2 border-green-400 bg-green-50 p-4 space-y-2">
+                <div className="flex items-center gap-2 font-bold text-green-900 text-sm">
+                  <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+                  {pi.label} — {pi.free}, no credit card required
+                </div>
+                <ol className="text-xs text-green-800 space-y-1 ml-6 list-decimal">
+                  {newAcct.provider === "brevo" && <>
+                    <li>Sign up free at <a href="https://www.brevo.com" target="_blank" rel="noopener noreferrer" className="underline font-bold">brevo.com</a></li>
+                    <li>Go to <strong>SMTP & API → Generate a new SMTP key</strong></li>
+                    <li>Use your <strong>Brevo login email</strong> as the username</li>
+                    <li>Paste the SMTP key as the password below</li>
+                  </>}
+                  {newAcct.provider === "resend" && <>
+                    <li>Sign up free at <a href="https://resend.com" target="_blank" rel="noopener noreferrer" className="underline font-bold">resend.com</a></li>
+                    <li>Go to <strong>API Keys → Create API Key</strong></li>
+                    <li>Set username to exactly: <strong>resend</strong></li>
+                    <li>Paste your API key as the password below</li>
+                    <li>You must verify a sending domain (free)</li>
+                  </>}
+                  {newAcct.provider === "sendgrid" && <>
+                    <li>Sign up free at <a href="https://sendgrid.com" target="_blank" rel="noopener noreferrer" className="underline font-bold">sendgrid.com</a></li>
+                    <li>Go to <strong>Settings → API Keys → Create API Key</strong></li>
+                    <li>Set username to exactly: <strong>apikey</strong></li>
+                    <li>Paste your API key as the password below</li>
+                  </>}
+                  {newAcct.provider === "mailjet" && <>
+                    <li>Sign up free at <a href="https://mailjet.com" target="_blank" rel="noopener noreferrer" className="underline font-bold">mailjet.com</a></li>
+                    <li>Go to <strong>Account → API Keys</strong></li>
+                    <li>Use the <strong>API Key</strong> as username and <strong>Secret Key</strong> as password</li>
+                  </>}
+                </ol>
+                {pi.signupUrl && (
+                  <a href={pi.signupUrl} target="_blank" rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 mt-1 px-3 py-1.5 bg-green-600 text-white text-xs font-bold rounded-lg hover:bg-green-700 transition-colors">
+                    Open {pi.label} Dashboard →
+                  </a>
+                )}
+              </div>
+            )}
 
             {newAcct.provider === "gmail" && (
               <div className="rounded-xl border-2 border-amber-400 bg-amber-50 p-4 space-y-2">
@@ -1714,10 +1797,9 @@ function AutomationTab() {
                 </div>
                 <ol className="text-xs text-amber-800 space-y-1 ml-6 list-decimal">
                   <li>Go to your Google Account → <strong>Security</strong></li>
-                  <li>Under "How you sign in", make sure <strong>2-Step Verification is ON</strong></li>
-                  <li>Search for <strong>"App passwords"</strong> at <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener noreferrer" className="underline font-bold text-amber-900">myaccount.google.com/apppasswords</a></li>
-                  <li>Create a new app password → name it "DevStudio CRM"</li>
-                  <li>Copy the <strong>16-character code</strong> (no spaces) and paste it below</li>
+                  <li>Make sure <strong>2-Step Verification is ON</strong></li>
+                  <li>Go to <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener noreferrer" className="underline font-bold text-amber-900">myaccount.google.com/apppasswords</a></li>
+                  <li>Create one named "DevStudio CRM" → copy the <strong>16-character code</strong></li>
                 </ol>
                 <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener noreferrer"
                   className="inline-flex items-center gap-1.5 mt-1 px-3 py-1.5 bg-amber-600 text-white text-xs font-bold rounded-lg hover:bg-amber-700 transition-colors">
@@ -1726,36 +1808,38 @@ function AutomationTab() {
               </div>
             )}
 
+            {/* Fields */}
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs font-semibold text-muted-foreground mb-1 block">Label (nickname)</label>
-                <Input value={newAcct.label} onChange={e => setNewAcct(p => ({ ...p, label: e.target.value }))} placeholder="e.g. Main Account, Backup 1" />
+                <Input value={newAcct.label} onChange={e => setNewAcct(p => ({ ...p, label: e.target.value }))} placeholder={`e.g. ${pi.label} Main`} />
               </div>
               <div>
                 <label className="text-xs font-semibold text-muted-foreground mb-1 block">Sender Name</label>
                 <Input value={newAcct.fromName} onChange={e => setNewAcct(p => ({ ...p, fromName: e.target.value }))} placeholder="DevStudio" />
               </div>
               <div className="col-span-2">
-                <label className="text-xs font-semibold text-muted-foreground mb-1 block">Gmail Address</label>
-                <Input type="email" value={newAcct.user} onChange={e => setNewAcct(p => ({ ...p, user: e.target.value }))} placeholder="you@gmail.com" />
+                <label className="text-xs font-semibold text-muted-foreground mb-1 block">
+                  Username / Email
+                  {pi.userHint && <span className="ml-1.5 text-muted-foreground font-normal">({pi.userHint})</span>}
+                </label>
+                <Input type={["resend","sendgrid"].includes(newAcct.provider) ? "text" : "email"}
+                  value={newAcct.user} onChange={e => setNewAcct(p => ({ ...p, user: e.target.value }))}
+                  placeholder={newAcct.provider === "resend" ? "resend" : newAcct.provider === "sendgrid" ? "apikey" : newAcct.provider === "mailjet" ? "your-api-key" : "you@gmail.com"} />
               </div>
               <div className="col-span-2">
-                <label className="text-xs font-semibold text-muted-foreground mb-1 block">
-                  {newAcct.provider === "gmail" ? (
-                    <span className="text-amber-700 font-bold">App Password (16-char code from Google — NOT your Gmail password)</span>
-                  ) : "Password"}
-                </label>
+                <label className="text-xs font-semibold text-muted-foreground mb-1 block font-bold">{pi.passLabel}</label>
                 <Input type="password" value={newAcct.password} onChange={e => setNewAcct(p => ({ ...p, password: e.target.value }))}
-                  placeholder={newAcct.provider === "gmail" ? "Paste 16-character App Password here" : "your password"} />
+                  placeholder={pi.passHint} />
                 {newAcct.provider === "gmail" && newAcct.password.replace(/\s/g, "").length > 0 && newAcct.password.replace(/\s/g, "").length !== 16 && (
-                  <p className="text-xs text-red-600 mt-1">⚠ App Passwords are exactly 16 characters. You have {newAcct.password.replace(/\s/g, "").length}.</p>
+                  <p className="text-xs text-red-600 mt-1">⚠ App Passwords are exactly 16 characters. You entered {newAcct.password.replace(/\s/g, "").length}.</p>
                 )}
               </div>
               {newAcct.provider === "smtp" && (
                 <>
                   <div>
                     <label className="text-xs font-semibold text-muted-foreground mb-1 block">SMTP Host</label>
-                    <Input value={newAcct.host} onChange={e => setNewAcct(p => ({ ...p, host: e.target.value }))} />
+                    <Input value={newAcct.host} onChange={e => setNewAcct(p => ({ ...p, host: e.target.value }))} placeholder="smtp.example.com" />
                   </div>
                   <div>
                     <label className="text-xs font-semibold text-muted-foreground mb-1 block">Port</label>
@@ -1772,7 +1856,8 @@ function AutomationTab() {
               <Button variant="outline" onClick={() => setShowAddAccount(false)}>Cancel</Button>
             </div>
           </div>
-        )}
+          );
+        })()}
 
         {accounts.length === 0 ? (
           <div className="py-10 text-center text-muted-foreground">
