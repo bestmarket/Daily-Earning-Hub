@@ -1,5 +1,5 @@
 import { Link } from "wouter";
-import { MessageCircle, Mail, Twitter, Linkedin, Github, Sparkles } from "lucide-react";
+import { MessageCircle, Mail, Twitter, Linkedin, Github, Sparkles, Globe, Search, FileText, TrendingUp, Lightbulb } from "lucide-react";
 
 export default function Footer() {
   const scrollTo = (id: string) => {
@@ -41,17 +41,40 @@ export default function Footer() {
             </div>
           </div>
 
-          {/* Services */}
+          {/* Free Tools */}
           <div>
-            <h4 className="font-semibold text-sm mb-5 text-white">Services</h4>
+            <h4 className="font-semibold text-sm mb-5 text-white">Free Tools</h4>
             <ul className="space-y-3 text-sm text-gray-400">
-              {["Booking Systems", "Customer Portals", "AI Assistants", "SaaS Development", "Membership Platforms", "CRM Dashboards"].map((s) => (
-                <li key={s}>
-                  <button onClick={() => scrollTo("solutions")} className="hover:text-[#8B5CF6] transition-colors text-left">
-                    {s}
-                  </button>
-                </li>
-              ))}
+              <li>
+                <Link href="/tools/website-grader" className="flex items-center gap-2 hover:text-[#8B5CF6] transition-colors">
+                  <Globe className="w-3.5 h-3.5 flex-shrink-0" /> Website Grader
+                </Link>
+              </li>
+              <li>
+                <Link href="/tools/seo-checker" className="flex items-center gap-2 hover:text-[#8B5CF6] transition-colors">
+                  <Search className="w-3.5 h-3.5 flex-shrink-0" /> SEO Checker
+                </Link>
+              </li>
+              <li>
+                <Link href="/tools/business-name-generator" className="flex items-center gap-2 hover:text-[#8B5CF6] transition-colors">
+                  <Lightbulb className="w-3.5 h-3.5 flex-shrink-0" /> Business Name Generator
+                </Link>
+              </li>
+              <li>
+                <Link href="/tools/invoice-generator" className="flex items-center gap-2 hover:text-[#8B5CF6] transition-colors">
+                  <FileText className="w-3.5 h-3.5 flex-shrink-0" /> Invoice Generator
+                </Link>
+              </li>
+              <li>
+                <Link href="/tools/profit-margin-calculator" className="flex items-center gap-2 hover:text-[#8B5CF6] transition-colors">
+                  <TrendingUp className="w-3.5 h-3.5 flex-shrink-0" /> Profit Margin Calculator
+                </Link>
+              </li>
+              <li>
+                <Link href="/free-tools" className="flex items-center gap-2 hover:text-[#8B5CF6] transition-colors">
+                  <Sparkles className="w-3.5 h-3.5 flex-shrink-0" /> All Free Tools →
+                </Link>
+              </li>
             </ul>
           </div>
 
