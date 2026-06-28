@@ -1502,17 +1502,21 @@ function AutomationTab() {
     } finally { setSavingAcct(false); }
   };
 
+  const BLANK_ACCT = { label: "", user: "", password: "", fromName: "DevStudio", fromEmail: "", imapEnabled: false };
+
   const applyProviderPreset = (provider: string) => {
-    const presets: Record<string, any> = {
-      brevo:    { provider: "brevo",    host: "smtp-relay.brevo.com",      port: 587, secure: false },
-      resend:   { provider: "resend",   host: "smtp.resend.com",           port: 587, secure: false },
-      sendgrid: { provider: "sendgrid", host: "smtp.sendgrid.net",         port: 587, secure: false },
-      mailjet:  { provider: "mailjet",  host: "in-v3.mailjet.com",         port: 587, secure: false },
-      gmail:    { provider: "gmail",    host: "smtp.gmail.com",            port: 587, secure: false },
-      outlook:  { provider: "outlook",  host: "smtp-mail.outlook.com",     port: 587, secure: false },
-      smtp:     { provider: "smtp",     host: "",                          port: 587, secure: false },
+    const presets: Record<string, { provider: string; host: string; port: number; secure: boolean; user: string }> = {
+      brevo:    { provider: "brevo",    host: "smtp-relay.brevo.com",      port: 587, secure: false, user: "" },
+      resend:   { provider: "resend",   host: "smtp.resend.com",           port: 587, secure: false, user: "resend" },
+      sendgrid: { provider: "sendgrid", host: "smtp.sendgrid.net",         port: 587, secure: false, user: "apikey" },
+      mailjet:  { provider: "mailjet",  host: "in-v3.mailjet.com",         port: 587, secure: false, user: "" },
+      gmail:    { provider: "gmail",    host: "smtp.gmail.com",            port: 587, secure: false, user: "" },
+      outlook:  { provider: "outlook",  host: "smtp-mail.outlook.com",     port: 587, secure: false, user: "" },
+      smtp:     { provider: "smtp",     host: "",                          port: 587, secure: false, user: "" },
     };
-    setNewAcct(p => ({ ...p, ...presets[provider] }));
+    const preset = presets[provider];
+    if (!preset) return;
+    setNewAcct({ ...BLANK_ACCT, ...preset, password: "" });
   };
 
   const PROVIDER_INFO: Record<string, { label: string; free: string; userHint: string; passHint: string; signupUrl: string; passLabel: string }> = {
@@ -1702,7 +1706,10 @@ function AutomationTab() {
             <h3 className="font-bold flex items-center gap-2"><Mail className="w-4 h-4 text-blue-600" /> Email Accounts</h3>
             <p className="text-xs text-muted-foreground mt-0.5">Add multiple Gmail/Outlook accounts. Emails rotate through active accounts with your configured delay.</p>
           </div>
-          <Button size="sm" onClick={() => setShowAddAccount(v => !v)} className="gap-1.5 font-semibold">
+          <Button size="sm" onClick={() => {
+            setNewAcct({ ...BLANK_ACCT, provider: "gmail", host: "smtp.gmail.com", port: 587, secure: false });
+            setShowAddAccount(v => !v);
+          }} className="gap-1.5 font-semibold">
             <Plus className="w-3.5 h-3.5" /> Add Account
           </Button>
         </div>
