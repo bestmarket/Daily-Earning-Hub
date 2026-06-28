@@ -1466,8 +1466,19 @@ function AutomationTab() {
       const r = await fetch(`${apiBase()}/api/automation/email-accounts/${id}/test`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error);
-      setMsg({ type: "success", text: "Test email sent successfully!" });
-    } catch (e: any) { setMsg({ type: "error", text: `Test failed: ${e.message}` }); }
+      setMsg({ type: "success", text: "✓ Test email sent successfully! Check your inbox." });
+    } catch (e: any) {
+      const raw = e.message || "";
+      let friendly = `Test failed: ${raw}`;
+      if (raw.includes("534") || raw.includes("Application-specific password") || raw.includes("InvalidSecondFactor")) {
+        friendly = "❌ Gmail rejected your password. You must use a 16-character App Password (not your regular Gmail password). Go to myaccount.google.com/apppasswords to generate one.";
+      } else if (raw.includes("535") || raw.includes("Username and Password not accepted")) {
+        friendly = "❌ Wrong email or password. Double-check your Gmail address and App Password.";
+      } else if (raw.includes("ECONNREFUSED") || raw.includes("ETIMEDOUT")) {
+        friendly = "❌ Cannot connect to SMTP server. Check your host/port settings.";
+      }
+      setMsg({ type: "error", text: friendly });
+    }
     finally { setTestingId(null); }
   };
 
@@ -1694,6 +1705,27 @@ function AutomationTab() {
                 </button>
               ))}
             </div>
+
+            {newAcct.provider === "gmail" && (
+              <div className="rounded-xl border-2 border-amber-400 bg-amber-50 p-4 space-y-2">
+                <div className="flex items-center gap-2 font-bold text-amber-900 text-sm">
+                  <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                  Gmail requires an App Password — your regular password will NOT work
+                </div>
+                <ol className="text-xs text-amber-800 space-y-1 ml-6 list-decimal">
+                  <li>Go to your Google Account → <strong>Security</strong></li>
+                  <li>Under "How you sign in", make sure <strong>2-Step Verification is ON</strong></li>
+                  <li>Search for <strong>"App passwords"</strong> at <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener noreferrer" className="underline font-bold text-amber-900">myaccount.google.com/apppasswords</a></li>
+                  <li>Create a new app password → name it "DevStudio CRM"</li>
+                  <li>Copy the <strong>16-character code</strong> (no spaces) and paste it below</li>
+                </ol>
+                <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 mt-1 px-3 py-1.5 bg-amber-600 text-white text-xs font-bold rounded-lg hover:bg-amber-700 transition-colors">
+                  Open Google App Passwords →
+                </a>
+              </div>
+            )}
+
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs font-semibold text-muted-foreground mb-1 block">Label (nickname)</label>
@@ -1704,24 +1736,33 @@ function AutomationTab() {
                 <Input value={newAcct.fromName} onChange={e => setNewAcct(p => ({ ...p, fromName: e.target.value }))} placeholder="DevStudio" />
               </div>
               <div className="col-span-2">
-                <label className="text-xs font-semibold text-muted-foreground mb-1 block">Email Address</label>
+                <label className="text-xs font-semibold text-muted-foreground mb-1 block">Gmail Address</label>
                 <Input type="email" value={newAcct.user} onChange={e => setNewAcct(p => ({ ...p, user: e.target.value }))} placeholder="you@gmail.com" />
               </div>
               <div className="col-span-2">
                 <label className="text-xs font-semibold text-muted-foreground mb-1 block">
-                  Password / App Password
-                  {newAcct.provider === "gmail" && <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener noreferrer" className="text-primary ml-2 underline text-xs">Generate Gmail App Password →</a>}
+                  {newAcct.provider === "gmail" ? (
+                    <span className="text-amber-700 font-bold">App Password (16-char code from Google — NOT your Gmail password)</span>
+                  ) : "Password"}
                 </label>
-                <Input type="password" value={newAcct.password} onChange={e => setNewAcct(p => ({ ...p, password: e.target.value }))} placeholder={newAcct.provider === "gmail" ? "16-char App Password" : "your password"} />
+                <Input type="password" value={newAcct.password} onChange={e => setNewAcct(p => ({ ...p, password: e.target.value }))}
+                  placeholder={newAcct.provider === "gmail" ? "Paste 16-character App Password here" : "your password"} />
+                {newAcct.provider === "gmail" && newAcct.password.replace(/\s/g, "").length > 0 && newAcct.password.replace(/\s/g, "").length !== 16 && (
+                  <p className="text-xs text-red-600 mt-1">⚠ App Passwords are exactly 16 characters. You have {newAcct.password.replace(/\s/g, "").length}.</p>
+                )}
               </div>
-              <div>
-                <label className="text-xs font-semibold text-muted-foreground mb-1 block">SMTP Host</label>
-                <Input value={newAcct.host} onChange={e => setNewAcct(p => ({ ...p, host: e.target.value }))} />
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-muted-foreground mb-1 block">Port</label>
-                <Input type="number" value={newAcct.port} onChange={e => setNewAcct(p => ({ ...p, port: Number(e.target.value) }))} />
-              </div>
+              {newAcct.provider === "smtp" && (
+                <>
+                  <div>
+                    <label className="text-xs font-semibold text-muted-foreground mb-1 block">SMTP Host</label>
+                    <Input value={newAcct.host} onChange={e => setNewAcct(p => ({ ...p, host: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-muted-foreground mb-1 block">Port</label>
+                    <Input type="number" value={newAcct.port} onChange={e => setNewAcct(p => ({ ...p, port: Number(e.target.value) }))} />
+                  </div>
+                </>
+              )}
             </div>
             <div className="flex gap-2 mt-2">
               <Button onClick={addAccount} disabled={addingAcct || !newAcct.user} className="gap-2 font-semibold">
