@@ -13,6 +13,8 @@ import SeoChecker from "@/pages/tools/SeoChecker";
 import BusinessNameGenerator from "@/pages/tools/BusinessNameGenerator";
 import InvoiceGenerator from "@/pages/tools/InvoiceGenerator";
 import ProfitMarginCalculator from "@/pages/tools/ProfitMarginCalculator";
+import NichesIndex from "@/pages/tools/niches/NichesIndex";
+import NicheGrader from "@/pages/tools/niches/NicheGrader";
 
 const queryClient = new QueryClient();
 
@@ -23,6 +25,8 @@ function Router() {
       <Route path="/free-tools" component={FreeTools} />
       <Route path="/tools" component={ToolsHub} />
       <Route path="/tools/website-grader" component={WebsiteGrader} />
+      <Route path="/tools/website-grader/industries" component={NichesIndex} />
+      <Route path="/tools/website-grader/:niche" component={NicheGrader} />
       <Route path="/tools/seo-checker" component={SeoChecker} />
       <Route path="/tools/business-name-generator" component={BusinessNameGenerator} />
       <Route path="/tools/invoice-generator" component={InvoiceGenerator} />
