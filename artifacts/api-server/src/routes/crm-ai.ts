@@ -51,10 +51,32 @@ function parseJSON(text: string): any {
 }
 
 // ─── Get the primary (first active) email account from DB ─────────────────────
+// If none exists but env vars are set, auto-seed a Brevo SMTP account.
 
 async function getPrimaryAccount() {
   const rows = await db.select().from(emailAccountsTable).where(eq(emailAccountsTable.active, true)).orderBy(emailAccountsTable.id).limit(1);
-  return rows[0] ?? null;
+  if (rows[0]) return rows[0];
+
+  // Auto-seed from env vars on first use
+  const envUser = process.env.BREVO_SMTP_USER;
+  const envPass = process.env.BREVO_PASS;
+  if (envUser && envPass) {
+    const inserted = await db.insert(emailAccountsTable).values({
+      label: "Brevo (auto)",
+      provider: "smtp",
+      host: "smtp-relay.brevo.com",
+      port: 587,
+      secure: false,
+      user: envUser,
+      password: envPass,
+      fromName: "DevStudio",
+      fromEmail: "",
+      active: true,
+    }).returning();
+    return inserted[0] ?? null;
+  }
+
+  return null;
 }
 
 // ─── Legacy email config endpoint (keeps old UI working) ──────────────────────
@@ -63,7 +85,7 @@ async function getPrimaryAccount() {
 router.get("/crm/email-config", async (_req, res) => {
   const acct = await getPrimaryAccount();
   if (!acct) {
-    res.json({ provider: "gmail", host: "smtp.gmail.com", port: 587, secure: false, user: "", password: "", fromName: "DevStudio", fromEmail: "" });
+    res.json({ provider: "smtp", host: "smtp-relay.brevo.com", port: 587, secure: false, user: "", password: "", fromName: "DevStudio", fromEmail: "" });
     return;
   }
   res.json({
