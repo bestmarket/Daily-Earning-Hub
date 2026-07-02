@@ -15,6 +15,7 @@ export const emailAccountsTable = pgTable("email_accounts", {
   imapHost: text("imap_host").notNull().default("imap.gmail.com"),
   imapPort: integer("imap_port").notNull().default(993),
   active: boolean("active").notNull().default(true),
+  sentCount: integer("sent_count").notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

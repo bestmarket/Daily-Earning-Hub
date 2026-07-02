@@ -94,90 +94,106 @@ function injectTracking(html: string, baseUrl: string, trackingId: string): stri
   return tracked + pixel;
 }
 
-// ─── Get the primary (first active) email account from DB ─────────────────────
-// If none exists but env vars are set, auto-seed a Brevo SMTP account.
+// ─── Account selection: round-robin by sentCount ──────────────────────────────
 
-async function getPrimaryAccount() {
-  const rows = await db.select().from(emailAccountsTable).where(eq(emailAccountsTable.active, true)).orderBy(emailAccountsTable.id).limit(1);
-  if (rows[0]) return rows[0];
-
-  // Auto-seed from env vars on first use
-  const envUser = process.env.BREVO_SMTP_USER;
-  const envPass = process.env.BREVO_PASS;
-  if (envUser && envPass) {
-    const inserted = await db.insert(emailAccountsTable).values({
-      label: "Brevo (auto)",
-      provider: "smtp",
-      host: "smtp-relay.brevo.com",
-      port: 587,
-      secure: false,
-      user: envUser,
-      password: envPass,
-      fromName: "DevStudio",
-      fromEmail: "",
-      active: true,
-    }).returning();
-    return inserted[0] ?? null;
-  }
-
-  return null;
+function maskAccount(a: typeof emailAccountsTable.$inferSelect) {
+  return {
+    id: a.id, label: a.label, provider: a.provider,
+    host: a.host, port: a.port, secure: a.secure,
+    user: a.user, fromName: a.fromName, fromEmail: a.fromEmail,
+    active: a.active, sentCount: a.sentCount,
+    hasPassword: !!a.password,
+    createdAt: (a.createdAt as any)?.toISOString?.() ?? String(a.createdAt),
+  };
 }
 
-// ─── Legacy email config endpoint (keeps old UI working) ──────────────────────
-// These now read/write the primary account in DB so password persists across restarts.
+async function autoSeedBrevo(): Promise<void> {
+  const envUser = process.env.BREVO_SMTP_USER;
+  const envPass = process.env.BREVO_PASS;
+  if (!envUser || !envPass) return;
+  // Only seed if there is literally no account at all
+  const count = await db.select().from(emailAccountsTable).limit(1);
+  if (count.length > 0) return;
+  await db.insert(emailAccountsTable).values({
+    label: "Brevo SMTP", provider: "brevo",
+    host: "smtp-relay.brevo.com", port: 587, secure: false,
+    user: envUser, password: envPass,
+    fromName: "DevStudio", fromEmail: "", active: true, sentCount: 0,
+  });
+}
 
-router.get("/crm/email-config", async (_req, res) => {
-  const acct = await getPrimaryAccount();
-  if (!acct) {
-    res.json({ provider: "smtp", host: "smtp-relay.brevo.com", port: 587, secure: false, user: "", password: "", fromName: "DevStudio", fromEmail: "" });
+async function getNextAccount() {
+  await autoSeedBrevo();
+  const rows = await db.select().from(emailAccountsTable)
+    .where(eq(emailAccountsTable.active, true))
+    .orderBy(emailAccountsTable.sentCount, emailAccountsTable.id)
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+async function incrementSentCount(id: number) {
+  await db.update(emailAccountsTable)
+    .set({ sentCount: sql`${emailAccountsTable.sentCount} + 1` })
+    .where(eq(emailAccountsTable.id, id));
+}
+
+// ─── Email account CRUD ───────────────────────────────────────────────────────
+
+router.get("/crm/email-accounts", async (_req, res) => {
+  await autoSeedBrevo();
+  const rows = await db.select().from(emailAccountsTable).orderBy(emailAccountsTable.id);
+  res.json(rows.map(maskAccount));
+});
+
+router.post("/crm/email-accounts", async (req, res) => {
+  const { label, provider, host, port, secure, user, password, fromName, fromEmail } = req.body;
+  if (!user || !password || !host) {
+    res.status(400).json({ error: "host, user, and password are required" });
     return;
   }
-  res.json({
-    provider: acct.provider, host: acct.host, port: acct.port,
-    secure: acct.secure, user: acct.user,
-    password: acct.password ? "••••••••" : "",
-    fromName: acct.fromName, fromEmail: acct.fromEmail,
-  });
+  const inserted = await db.insert(emailAccountsTable).values({
+    label: label || user, provider: provider || "smtp",
+    host, port: port || 587, secure: secure ?? false,
+    user, password, fromName: fromName || "DevStudio",
+    fromEmail: fromEmail || "", active: true, sentCount: 0,
+  }).returning();
+  res.json({ success: true, account: maskAccount(inserted[0]) });
 });
 
-router.post("/crm/email-config", async (req, res) => {
-  const { provider, host, port, secure, user, password, fromName, fromEmail } = req.body;
-  const existing = await getPrimaryAccount();
-
-  if (existing) {
-    const updated = await db.update(emailAccountsTable).set({
-      provider: provider || existing.provider,
-      host: host || existing.host,
-      port: port || existing.port,
-      secure: secure ?? existing.secure,
-      user: user || existing.user,
-      password: password && password !== "••••••••" ? password : existing.password,
-      fromName: fromName || existing.fromName,
-      fromEmail: fromEmail || existing.fromEmail,
-    }).where(eq(emailAccountsTable.id, existing.id)).returning();
-    const a = updated[0];
-    res.json({ success: true, config: { provider: a.provider, host: a.host, port: a.port, secure: a.secure, user: a.user, password: a.password ? "••••••••" : "", fromName: a.fromName, fromEmail: a.fromEmail } });
-  } else {
-    await db.insert(emailAccountsTable).values({
-      label: user || "Primary",
-      provider: provider || "gmail",
-      host: host || "smtp.gmail.com",
-      port: port || 587,
-      secure: secure ?? false,
-      user: user || "",
-      password: password || "",
-      fromName: fromName || "DevStudio",
-      fromEmail: fromEmail || "",
-    });
-    res.json({ success: true });
-  }
+router.put("/crm/email-accounts/:id", async (req, res) => {
+  const id = parseInt(req.params.id);
+  const { label, provider, host, port, secure, user, password, fromName, fromEmail, active } = req.body;
+  const rows = await db.select().from(emailAccountsTable).where(eq(emailAccountsTable.id, id)).limit(1);
+  const existing = rows[0];
+  if (!existing) { res.status(404).json({ error: "Account not found" }); return; }
+  const updated = await db.update(emailAccountsTable).set({
+    ...(label !== undefined && { label }),
+    ...(provider !== undefined && { provider }),
+    ...(host !== undefined && { host }),
+    ...(port !== undefined && { port }),
+    ...(secure !== undefined && { secure }),
+    ...(user !== undefined && { user }),
+    ...(password && password !== "••••••••" && { password }),
+    ...(fromName !== undefined && { fromName }),
+    ...(fromEmail !== undefined && { fromEmail }),
+    ...(active !== undefined && { active }),
+  }).where(eq(emailAccountsTable.id, id)).returning();
+  res.json({ success: true, account: maskAccount(updated[0]) });
 });
 
-router.post("/crm/test-email", async (req, res) => {
-  const { to } = req.body as { to: string };
-  const acct = await getPrimaryAccount();
+router.delete("/crm/email-accounts/:id", async (req, res) => {
+  const id = parseInt(req.params.id);
+  await db.delete(emailAccountsTable).where(eq(emailAccountsTable.id, id));
+  res.json({ success: true });
+});
+
+router.post("/crm/email-accounts/:id/test", async (req, res) => {
+  const id = parseInt(req.params.id);
+  const { to } = req.body as { to?: string };
+  const rows = await db.select().from(emailAccountsTable).where(eq(emailAccountsTable.id, id)).limit(1);
+  const acct = rows[0];
   if (!acct?.user || !acct?.password) {
-    res.status(400).json({ error: "Email not configured. Please set up your email settings first." });
+    res.status(404).json({ error: "Account not found or missing credentials" });
     return;
   }
   try {
@@ -186,12 +202,31 @@ router.post("/crm/test-email", async (req, res) => {
       from: `"${acct.fromName}" <${acct.fromEmail || acct.user}>`,
       to: to || acct.user,
       subject: "DevStudio CRM — Email Test",
-      text: "Your email is configured correctly. The AI Hunter is ready to send outreach emails.",
-      html: `<div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:24px;">
-        <h2 style="color:#6d28d9;">✓ Email configured successfully</h2>
-        <p>Your DevStudio CRM email is working. The AI Hunter will use this address to send outreach emails to prospects.</p>
-        <p style="color:#6b7280;font-size:14px;">From: ${acct.fromName} &lt;${acct.fromEmail || acct.user}&gt;</p>
-      </div>`,
+      text: `Account "${acct.label}" is working correctly.`,
+      html: `<div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:24px;"><h2 style="color:#6d28d9;">✓ Account working</h2><p>Account <strong>${acct.label}</strong> (${acct.user}) is configured and sending correctly via ${acct.host}.</p></div>`,
+    });
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Legacy test-email (uses next rotation account)
+router.post("/crm/test-email", async (req, res) => {
+  const { to } = req.body as { to?: string };
+  const acct = await getNextAccount();
+  if (!acct?.user || !acct?.password) {
+    res.status(400).json({ error: "No active email account configured. Add one in Email Settings." });
+    return;
+  }
+  try {
+    const transporter = makeTransporter(acct);
+    await transporter.sendMail({
+      from: `"${acct.fromName}" <${acct.fromEmail || acct.user}>`,
+      to: to || acct.user,
+      subject: "DevStudio CRM — Email Test",
+      text: "Email is configured correctly.",
+      html: `<div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:24px;"><h2 style="color:#6d28d9;">✓ Email working</h2><p>Sending via <strong>${acct.label}</strong> (${acct.user}).</p></div>`,
     });
     res.json({ success: true });
   } catch (err: any) {
@@ -216,11 +251,11 @@ router.post("/crm/send-email", async (req, res) => {
     const rows = await db.select().from(emailAccountsTable).where(eq(emailAccountsTable.id, accountId)).limit(1);
     acct = rows[0];
   } else {
-    acct = await getPrimaryAccount();
+    acct = await getNextAccount();
   }
 
   if (!acct?.user || !acct?.password) {
-    res.status(400).json({ error: "Email not configured. Go to Email Settings to set up your sender." });
+    res.status(400).json({ error: "No active email account configured. Add one in Email Settings." });
     return;
   }
 
@@ -235,7 +270,8 @@ router.post("/crm/send-email", async (req, res) => {
       from: `"${acct.fromName}" <${acct.fromEmail || acct.user}>`,
       to, subject, text: body, html: trackedHtml,
     });
-    res.json({ success: true, to, sentAt: new Date().toISOString(), trackingId });
+    await incrementSentCount(acct.id);
+    res.json({ success: true, to, sentAt: new Date().toISOString(), trackingId, sentVia: acct.label });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -249,9 +285,9 @@ router.post("/crm/send-proposal-email", async (req, res) => {
   };
   if (!to || !proposal) { res.status(400).json({ error: "to and proposal are required" }); return; }
 
-  const acct = await getPrimaryAccount();
+  const acct = await getNextAccount();
   if (!acct?.user || !acct?.password) {
-    res.status(400).json({ error: "Email not configured." });
+    res.status(400).json({ error: "No active email account configured. Add one in Email Settings." });
     return;
   }
 
@@ -334,7 +370,8 @@ router.post("/crm/send-proposal-email", async (req, res) => {
       from: `"${acct.fromName}" <${acct.fromEmail || acct.user}>`,
       to, subject, html: trackedHtml,
     });
-    res.json({ success: true, to, sentAt: new Date().toISOString(), trackingId });
+    await incrementSentCount(acct.id);
+    res.json({ success: true, to, sentAt: new Date().toISOString(), trackingId, sentVia: acct.label });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

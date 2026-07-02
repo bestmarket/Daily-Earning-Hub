@@ -106,15 +106,20 @@ interface ProposalData {
   };
 }
 
-interface EmailConfig {
-  provider: "gmail" | "smtp" | "outlook";
+interface EmailAccount {
+  id: number;
+  label: string;
+  provider: string;
   host: string;
   port: number;
   secure: boolean;
   user: string;
-  password: string;
   fromName: string;
   fromEmail: string;
+  active: boolean;
+  sentCount: number;
+  hasPassword: boolean;
+  createdAt?: string;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -155,10 +160,11 @@ const CHECK_LABELS: Record<string, string> = {
   callToAction: "Call-to-Action", trustElements: "Trust Elements",
 };
 
-const PROVIDER_PRESETS: Record<string, Partial<EmailConfig>> = {
-  gmail: { host: "smtp.gmail.com", port: 587, secure: false, provider: "gmail" },
-  outlook: { host: "smtp-mail.outlook.com", port: 587, secure: false, provider: "outlook" },
-  smtp: { host: "", port: 587, secure: false, provider: "smtp" },
+const PROVIDER_CONFIGS: Record<string, { label: string; icon: string; colorClass: string; host: string; port: number; hint: string }> = {
+  gmail:   { label: "Gmail",         icon: "G",  colorClass: "text-red-600 bg-red-50 border-red-200",   host: "smtp.gmail.com",        port: 587, hint: "Requires Gmail App Password (not your main password)" },
+  outlook: { label: "Outlook / 365", icon: "O",  colorClass: "text-blue-600 bg-blue-50 border-blue-200", host: "smtp-mail.outlook.com", port: 587, hint: "Use your Microsoft account password" },
+  brevo:   { label: "Brevo",         icon: "B",  colorClass: "text-teal-600 bg-teal-50 border-teal-200", host: "smtp-relay.brevo.com",  port: 587, hint: "Use Brevo SMTP key as password (not account password)" },
+  smtp:    { label: "Custom SMTP",   icon: "⚙",  colorClass: "text-gray-600 bg-gray-50 border-gray-200", host: "",                      port: 587, hint: "Any SMTP-compatible provider" },
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
