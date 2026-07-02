@@ -81,4 +81,3 @@ channel = "stable-25_05"
 [userenv]
 
 [userenv.shared]
-BREVO_PASS = "xsmtpsib-4e4d183af68b8ca8226078b8a96832f24c23173f89838b60155def2757dec267-DkrK2V3eM82VE8d3"

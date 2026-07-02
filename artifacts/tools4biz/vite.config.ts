@@ -73,6 +73,12 @@ export default defineConfig({
         path.resolve(import.meta.dirname, "../../node_modules"),
       ],
     },
+    proxy: {
+      "/api": {
+        target: "http://localhost:8080",
+        changeOrigin: true,
+      },
+    },
   },
   preview: {
     port,
