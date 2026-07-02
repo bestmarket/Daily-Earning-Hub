@@ -1,4 +1,4 @@
-import { pgTable, text, serial, boolean, integer, timestamp, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, boolean, integer, timestamp, jsonb, index } from "drizzle-orm/pg-core";
 
 export const emailAccountsTable = pgTable("email_accounts", {
   id: serial("id").primaryKey(),
@@ -37,5 +37,20 @@ export const automationSettingsTable = pgTable("automation_settings", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+export const emailTrackingTable = pgTable("email_tracking", {
+  id: serial("id").primaryKey(),
+  trackingId: text("tracking_id").notNull().unique(),
+  prospectEmail: text("prospect_email").notNull().default(""),
+  emailType: text("email_type").notNull().default("outreach"),
+  subject: text("subject").notNull().default(""),
+  opens: integer("opens").notNull().default(0),
+  clicks: integer("clicks").notNull().default(0),
+  firstOpenAt: timestamp("first_open_at"),
+  lastOpenAt: timestamp("last_open_at"),
+  firstClickAt: timestamp("first_click_at"),
+  sentAt: timestamp("sent_at").notNull().defaultNow(),
+}, (t) => [index("idx_email_tracking_email").on(t.prospectEmail)]);
+
 export type EmailAccount = typeof emailAccountsTable.$inferSelect;
 export type AutomationSettings = typeof automationSettingsTable.$inferSelect;
+export type EmailTracking = typeof emailTrackingTable.$inferSelect;

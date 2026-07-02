@@ -1,8 +1,9 @@
 import { Router } from "express";
 import nodemailer from "nodemailer";
+import { randomUUID } from "crypto";
 import { getGeminiAI } from "./api-keys";
-import { db, emailAccountsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { db, emailAccountsTable, emailTrackingTable } from "@workspace/db";
+import { eq, inArray, sql } from "drizzle-orm";
 
 const router = Router();
 
@@ -48,6 +49,49 @@ function parseJSON(text: string): any {
     if (match) return JSON.parse(match[0]);
     throw new Error("Failed to parse AI response as JSON");
   }
+}
+
+// ─── 1x1 transparent GIF for open-tracking pixel ─────────────────────────────
+
+const PIXEL_GIF = Buffer.from(
+  "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7",
+  "base64"
+);
+
+// ─── Tracking helpers ─────────────────────────────────────────────────────────
+
+function getBaseUrl(req: any): string {
+  const host = req.get("host") || "";
+  const proto = req.get("x-forwarded-proto") || req.protocol || "https";
+  return `${proto}://${host}`;
+}
+
+async function createTracking(prospectEmail: string, subject: string, emailType: string): Promise<string> {
+  const trackingId = randomUUID();
+  await db.insert(emailTrackingTable).values({
+    trackingId, prospectEmail, subject, emailType,
+  });
+  return trackingId;
+}
+
+function injectTracking(html: string, baseUrl: string, trackingId: string): string {
+  const pixelUrl = `${baseUrl}/api/crm/track/open/${trackingId}`;
+  const pixel = `<img src="${pixelUrl}" width="1" height="1" style="display:none;border:0;" alt="" />`;
+
+  // Wrap every <a href="..."> link through the click tracker
+  const tracked = html.replace(
+    /<a\s([^>]*?)href="(https?:\/\/[^"]+)"([^>]*?)>/gi,
+    (_match, before, url, after) => {
+      const clickUrl = `${baseUrl}/api/crm/track/click/${trackingId}?url=${encodeURIComponent(url)}`;
+      return `<a ${before}href="${clickUrl}"${after}>`;
+    }
+  );
+
+  // Append pixel before </body> if present, otherwise at end
+  if (tracked.includes("</body>")) {
+    return tracked.replace("</body>", `${pixel}</body>`);
+  }
+  return tracked + pixel;
 }
 
 // ─── Get the primary (first active) email account from DB ─────────────────────
@@ -167,7 +211,6 @@ router.post("/crm/send-email", async (req, res) => {
     return;
   }
 
-  // Use specified account or fall back to primary
   let acct;
   if (accountId) {
     const rows = await db.select().from(emailAccountsTable).where(eq(emailAccountsTable.id, accountId)).limit(1);
@@ -182,14 +225,17 @@ router.post("/crm/send-email", async (req, res) => {
   }
 
   try {
+    const baseUrl = getBaseUrl(req);
+    const trackingId = await createTracking(to, subject, "outreach");
     const transporter = makeTransporter(acct);
-    const html = body.split("\n").map((line) => (line.trim() ? `<p style="margin:0 0 12px;line-height:1.6;">${line}</p>` : "<br/>")).join("");
+    const htmlBody = body.split("\n").map((line) => (line.trim() ? `<p style="margin:0 0 12px;line-height:1.6;">${line}</p>` : "<br/>")).join("");
+    const rawHtml = `<div style="font-family:Georgia,serif;max-width:600px;margin:0 auto;padding:24px;color:#1a1a2e;">${htmlBody}<hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0;"/><p style="color:#6b7280;font-size:13px;">${acct.fromName}</p></div>`;
+    const trackedHtml = injectTracking(rawHtml, baseUrl, trackingId);
     await transporter.sendMail({
       from: `"${acct.fromName}" <${acct.fromEmail || acct.user}>`,
-      to, subject, text: body,
-      html: `<div style="font-family:Georgia,serif;max-width:600px;margin:0 auto;padding:24px;color:#1a1a2e;">${html}<hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0;"/><p style="color:#6b7280;font-size:13px;">${acct.fromName}</p></div>`,
+      to, subject, text: body, html: trackedHtml,
     });
-    res.json({ success: true, to, sentAt: new Date().toISOString() });
+    res.json({ success: true, to, sentAt: new Date().toISOString(), trackingId });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -279,14 +325,115 @@ router.post("/crm/send-proposal-email", async (req, res) => {
 </html>`;
 
   try {
+    const baseUrl = getBaseUrl(req);
+    const subject = `Your Custom Software Proposal — ${prospectName}`;
+    const trackingId = await createTracking(to, subject, "proposal");
+    const trackedHtml = injectTracking(html, baseUrl, trackingId);
     const transporter = makeTransporter(acct);
     await transporter.sendMail({
       from: `"${acct.fromName}" <${acct.fromEmail || acct.user}>`,
-      to,
-      subject: `Your Custom Software Proposal — ${prospectName}`,
-      html,
+      to, subject, html: trackedHtml,
     });
-    res.json({ success: true, to, sentAt: new Date().toISOString() });
+    res.json({ success: true, to, sentAt: new Date().toISOString(), trackingId });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Email Tracking endpoints ─────────────────────────────────────────────────
+
+// Open pixel
+router.get("/crm/track/open/:trackingId", async (req, res) => {
+  const { trackingId } = req.params;
+  try {
+    const now = new Date();
+    const rows = await db.select().from(emailTrackingTable)
+      .where(eq(emailTrackingTable.trackingId, trackingId)).limit(1);
+    if (rows[0]) {
+      await db.update(emailTrackingTable).set({
+        opens: sql`${emailTrackingTable.opens} + 1`,
+        lastOpenAt: now,
+        firstOpenAt: rows[0].firstOpenAt ?? now,
+      }).where(eq(emailTrackingTable.trackingId, trackingId));
+    }
+  } catch { /* silent — never break email clients */ }
+  res.set("Content-Type", "image/gif");
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate");
+  res.set("Pragma", "no-cache");
+  res.send(PIXEL_GIF);
+});
+
+// Click redirect
+router.get("/crm/track/click/:trackingId", async (req, res) => {
+  const { trackingId } = req.params;
+  const url = req.query.url as string;
+  try {
+    const now = new Date();
+    const rows = await db.select().from(emailTrackingTable)
+      .where(eq(emailTrackingTable.trackingId, trackingId)).limit(1);
+    if (rows[0]) {
+      await db.update(emailTrackingTable).set({
+        clicks: sql`${emailTrackingTable.clicks} + 1`,
+        firstClickAt: rows[0].firstClickAt ?? now,
+      }).where(eq(emailTrackingTable.trackingId, trackingId));
+    }
+  } catch { /* silent */ }
+  res.redirect(url && url.startsWith("http") ? url : "/");
+});
+
+// Batch stats by email list
+router.get("/crm/track/stats", async (req, res) => {
+  const emailsParam = req.query.emails as string;
+  if (!emailsParam) { res.json({}); return; }
+  const emails = emailsParam.split(",").map(e => e.trim()).filter(Boolean).slice(0, 100);
+  if (emails.length === 0) { res.json({}); return; }
+  try {
+    const rows = await db.select().from(emailTrackingTable)
+      .where(inArray(emailTrackingTable.prospectEmail, emails));
+    const map: Record<string, { opens: number; clicks: number; firstOpenAt: string | null; lastOpenAt: string | null; firstClickAt: string | null; count: number }> = {};
+    for (const r of rows) {
+      const prev = map[r.prospectEmail];
+      if (!prev) {
+        map[r.prospectEmail] = {
+          opens: r.opens, clicks: r.clicks,
+          firstOpenAt: r.firstOpenAt?.toISOString() ?? null,
+          lastOpenAt: r.lastOpenAt?.toISOString() ?? null,
+          firstClickAt: r.firstClickAt?.toISOString() ?? null,
+          count: 1,
+        };
+      } else {
+        prev.opens += r.opens;
+        prev.clicks += r.clicks;
+        prev.count++;
+        if (r.firstOpenAt && (!prev.firstOpenAt || r.firstOpenAt.toISOString() < prev.firstOpenAt)) prev.firstOpenAt = r.firstOpenAt.toISOString();
+        if (r.lastOpenAt && (!prev.lastOpenAt || r.lastOpenAt.toISOString() > prev.lastOpenAt)) prev.lastOpenAt = r.lastOpenAt.toISOString();
+        if (r.firstClickAt && (!prev.firstClickAt || r.firstClickAt.toISOString() < prev.firstClickAt)) prev.firstClickAt = r.firstClickAt.toISOString();
+      }
+    }
+    res.json(map);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get all tracking events for a single prospect email
+router.get("/crm/track/history/:email", async (req, res) => {
+  try {
+    const email = decodeURIComponent(req.params.email);
+    const rows = await db.select().from(emailTrackingTable)
+      .where(eq(emailTrackingTable.prospectEmail, email))
+      .orderBy(emailTrackingTable.sentAt);
+    res.json(rows.map(r => ({
+      trackingId: r.trackingId,
+      subject: r.subject,
+      emailType: r.emailType,
+      opens: r.opens,
+      clicks: r.clicks,
+      firstOpenAt: r.firstOpenAt?.toISOString() ?? null,
+      lastOpenAt: r.lastOpenAt?.toISOString() ?? null,
+      firstClickAt: r.firstClickAt?.toISOString() ?? null,
+      sentAt: r.sentAt.toISOString(),
+    })));
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

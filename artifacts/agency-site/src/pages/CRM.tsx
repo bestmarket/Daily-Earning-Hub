@@ -1427,10 +1427,12 @@ function ProspectDetail({ prospect, onUpdate, onDelete, onBack }: {
           <TabsTrigger value="analysis" className="flex-1">AI Analysis</TabsTrigger>
           <TabsTrigger value="outreach" className="flex-1">Outreach</TabsTrigger>
           <TabsTrigger value="proposal" className="flex-1">Proposal</TabsTrigger>
+          <TabsTrigger value="tracking" className="flex-1 gap-1"><Eye className="w-3.5 h-3.5" />Tracking</TabsTrigger>
         </TabsList>
         <TabsContent value="analysis" className="mt-4"><AnalysisPanel prospect={prospect} onUpdate={onUpdate} /></TabsContent>
         <TabsContent value="outreach" className="mt-4"><OutreachPanel prospect={prospect} onUpdate={onUpdate} /></TabsContent>
         <TabsContent value="proposal" className="mt-4"><ProposalPanel prospect={prospect} onUpdate={onUpdate} /></TabsContent>
+        <TabsContent value="tracking" className="mt-4"><TrackingPanel prospect={prospect} /></TabsContent>
       </Tabs>
 
       {editing && <AddProspectDialog onAdd={p => { onUpdate({ ...prospect, ...p }); setEditing(false); }} editData={prospect} onClose={() => setEditing(false)} />}
@@ -1438,7 +1440,119 @@ function ProspectDetail({ prospect, onUpdate, onDelete, onBack }: {
   );
 }
 
+// ─── Email Tracking Panel ─────────────────────────────────────────────────────
+
+interface TrackingEvent {
+  trackingId: string;
+  subject: string;
+  emailType: string;
+  opens: number;
+  clicks: number;
+  firstOpenAt: string | null;
+  lastOpenAt: string | null;
+  firstClickAt: string | null;
+  sentAt: string;
+}
+
+function TrackingPanel({ prospect }: { prospect: Prospect }) {
+  const [history, setHistory] = useState<TrackingEvent[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!prospect.email) { setLoading(false); return; }
+    fetch(`${apiBase()}/api/crm/track/history/${encodeURIComponent(prospect.email)}`)
+      .then(r => r.json())
+      .then(d => { setHistory(Array.isArray(d) ? d : []); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, [prospect.email]);
+
+  if (loading) return <LoadingSpinner text="Loading tracking data…" />;
+  if (!prospect.email) return (
+    <div className="text-center py-10 text-sm text-muted-foreground">No email address for this prospect.</div>
+  );
+
+  const totalOpens = history.reduce((a, h) => a + h.opens, 0);
+  const totalClicks = history.reduce((a, h) => a + h.clicks, 0);
+
+  if (history.length === 0) return (
+    <div className="text-center py-12">
+      <Eye className="w-10 h-10 mx-auto mb-3 opacity-20" />
+      <h3 className="font-semibold text-base mb-1">No emails sent yet</h3>
+      <p className="text-sm text-muted-foreground">Once you send an outreach or proposal email, open & click tracking will appear here.</p>
+    </div>
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-3 gap-3">
+        {[
+          { label: "Emails Sent", value: history.length, color: "text-foreground" },
+          { label: "Total Opens", value: totalOpens, color: totalOpens > 0 ? "text-green-600" : "text-muted-foreground" },
+          { label: "Link Clicks", value: totalClicks, color: totalClicks > 0 ? "text-orange-600" : "text-muted-foreground" },
+        ].map(s => (
+          <div key={s.label} className="rounded-xl border border-border/50 p-4 text-center">
+            <div className={`text-2xl font-extrabold ${s.color}`}>{s.value}</div>
+            <div className="text-xs text-muted-foreground mt-1">{s.label}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="space-y-2">
+        {history.map((h, i) => (
+          <div key={i} className="rounded-xl border border-border/50 p-4 space-y-2">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-semibold truncate">{h.subject}</div>
+                <div className="text-xs text-muted-foreground mt-0.5">
+                  Sent {new Date(h.sentAt).toLocaleDateString()} · {h.emailType === "proposal" ? "📄 Proposal" : "✉ Outreach"}
+                </div>
+              </div>
+              <div className="flex gap-1.5 flex-shrink-0 flex-wrap justify-end">
+                {h.opens > 0 ? (
+                  <span className="text-xs font-bold text-green-700 bg-green-100 px-2 py-1 rounded-full flex items-center gap-1">
+                    <Eye className="w-3 h-3" /> {h.opens} open{h.opens !== 1 ? "s" : ""}
+                  </span>
+                ) : (
+                  <span className="text-xs text-muted-foreground bg-muted/50 px-2 py-1 rounded-full">Not opened</span>
+                )}
+                {h.clicks > 0 && (
+                  <span className="text-xs font-bold text-orange-700 bg-orange-100 px-2 py-1 rounded-full">
+                    🔗 {h.clicks} click{h.clicks !== 1 ? "s" : ""}
+                  </span>
+                )}
+              </div>
+            </div>
+            {h.firstOpenAt && (
+              <div className="text-xs text-muted-foreground flex items-center gap-1">
+                <Eye className="w-3 h-3 text-green-600" />
+                First opened: {new Date(h.firstOpenAt).toLocaleString()}
+                {h.lastOpenAt && h.lastOpenAt !== h.firstOpenAt && (
+                  <> · Last: {new Date(h.lastOpenAt).toLocaleString()}</>
+                )}
+              </div>
+            )}
+            {h.firstClickAt && (
+              <div className="text-xs text-muted-foreground">
+                🔗 First clicked: {new Date(h.firstClickAt).toLocaleString()}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── Prospect List ────────────────────────────────────────────────────────────
+
+interface TrackingStats {
+  opens: number;
+  clicks: number;
+  firstOpenAt: string | null;
+  lastOpenAt: string | null;
+  firstClickAt: string | null;
+  count: number;
+}
 
 function ProspectList({ prospects, onSelect, onDelete, onUpdate }: {
   prospects: Prospect[];
@@ -1449,6 +1563,16 @@ function ProspectList({ prospects, onSelect, onDelete, onUpdate }: {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
+  const [trackingStats, setTrackingStats] = useState<Record<string, TrackingStats>>({});
+
+  useEffect(() => {
+    const emailedEmails = prospects.filter(p => p.emailSentAt && p.email).map(p => p.email);
+    if (emailedEmails.length === 0) return;
+    fetch(`${apiBase()}/api/crm/track/stats?emails=${encodeURIComponent(emailedEmails.join(","))}`)
+      .then(r => r.json())
+      .then(d => { if (d && typeof d === "object") setTrackingStats(d); })
+      .catch(() => {});
+  }, [prospects]);
 
   const filtered = prospects.filter(p => {
     const q = search.toLowerCase();
@@ -1503,6 +1627,14 @@ function ProspectList({ prospects, onSelect, onDelete, onUpdate }: {
                     {p.hunted && <span className="text-xs text-purple-600 font-bold flex items-center gap-0.5"><Radar className="w-3 h-3" /></span>}
                     {p.analysis && <span className="text-xs text-purple-600 font-bold">✓ Analyzed</span>}
                     {p.emailSentAt && <span className="text-xs text-green-600 font-bold">✓ Emailed</span>}
+                    {p.email && trackingStats[p.email]?.opens > 0 && (
+                      <span className="text-xs font-bold text-blue-600 flex items-center gap-0.5">
+                        <Eye className="w-3 h-3" /> Opened {trackingStats[p.email].opens}×
+                      </span>
+                    )}
+                    {p.email && trackingStats[p.email]?.clicks > 0 && (
+                      <span className="text-xs font-bold text-orange-600">🔗 Clicked</span>
+                    )}
                   </div>
                   <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground flex-wrap">
                     {p.category && <span>{p.category}</span>}
