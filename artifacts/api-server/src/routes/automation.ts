@@ -376,7 +376,7 @@ export async function runAutomationCycle(overrides?: {
         }
 
         const followUpBody = fillPlaceholders(
-          `Hi again,\n\nI sent a note last week about helping ${item.businessName} with a custom software solution — wanted to make sure it didn't get buried.\n\nWould a quick 15-minute call make sense this week?\n\nDaniel\nDevStudio`
+          `Hi again,\n\nI sent a note last week about helping ${item.businessName} with a custom software solution — wanted to make sure it didn't get buried.\n\nDoes any of it sound relevant to where you're at right now? Just hit reply — happy to answer questions over email.\n\nDaniel\nDevStudio`
         );
         const followUpSubject = `Re: ${item.originalSubject}`;
         const html = followUpBody.split("\n").map(l => l.trim() ? `<p style="margin:0 0 12px;line-height:1.6;">${l}</p>` : "<br/>").join("");

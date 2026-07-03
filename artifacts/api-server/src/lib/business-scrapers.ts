@@ -223,29 +223,82 @@ async function scrapeYellowPages(category: string, city: string, country: string
   return dedup(businesses).slice(0, count);
 }
 
-// ─── SCRAPER 3: Google Search — local pack ────────────────────────────────────
+// ─── SCRAPER 3: Google Local / GMB (tbm=lcl gives the My Business results tab) ─
 
 async function scrapeGoogleLocal(category: string, city: string, country: string, count: number): Promise<ScrapedBusiness[]> {
   const q = `${category} in ${city} ${country}`;
+  const businesses: ScrapedBusiness[] = [];
+
+  // ── Pass 1: tbm=lcl — Google's local/GMB results tab ──────────────────────
+  // This is the same data shown in the "Places" section and pulls directly from
+  // Google My Business profiles (name, address, phone, website, rating).
+  const lclUrl = `https://www.google.com/search?q=${encodeURIComponent(q)}&tbm=lcl&num=20&hl=en`;
+  const lclHtml = await browserFetch(lclUrl);
+
+  // JSON-LD is sometimes embedded in local results
+  businesses.push(...schemasToBusinesses(extractJsonLd(lclHtml), category, city, country, "google-gmb"));
+
+  // The local results page embeds business data in JS callback blobs like:
+  //   AF_initDataCallback({key:'ds:1', data:[[["Business Name","address","phone",...]],...}
+  // We extract all strings that look like business names near phone/address patterns.
+  const afBlocks = lclHtml.matchAll(/AF_initDataCallback\(\{[^}]+data:([\s\S]+?)\}\);/g);
+  for (const block of afBlocks) {
+    try {
+      // Pull quoted strings of plausible business-name length from the blob
+      const names = [...block[1].matchAll(/"([A-Z][^"]{2,60})"/g)]
+        .map(x => x[1])
+        .filter(n => /^[A-Z]/.test(n) && !/^https?:/.test(n) && n.split(" ").length <= 8);
+      // Pull phone numbers
+      const phones = [...block[1].matchAll(/"(\+?[\d\s\-().]{7,20})"/g)].map(x => x[1].trim());
+      // Pull website-like URLs
+      const sites = [...block[1].matchAll(/"(https?:\/\/[^"]{4,100})"/g)].map(x => x[1]);
+      for (let i = 0; i < names.length; i++) {
+        businesses.push({
+          businessName: names[i],
+          phone: phones[i] ?? "",
+          website: sites[i] ?? "",
+          address: "",
+          city, country, category,
+          source: "google-gmb",
+          email: "",
+        });
+      }
+    } catch {}
+  }
+
+  // Known GMB card HTML patterns for the local results page
+  // <div class="rllt__details"> <div class="dbg0pd">Name</div> ... </div>
+  const lclCardRe = /<div[^>]+class="[^"]*rllt__details[^"]*"[^>]*>([\s\S]{20,500}?)<\/div>\s*<\/div>/gi;
+  let lm: RegExpExecArray | null;
+  while ((lm = lclCardRe.exec(lclHtml)) !== null) {
+    const card = lm[1];
+    const name = (/<div[^>]+class="[^"]*(?:dbg0pd|OSrXXb|NsNu7e|uMdZh)[^"]*"[^>]*>([^<]{2,80})<\/div>/i.exec(card))?.[1]?.trim();
+    const phone = (/(\+?[\d\s\-().]{7,20})/.exec(
+      (/<span[^>]+class="[^"]*(?:rllt__wrapped-text|LrzXr)[^"]*"[^>]*>([^<]+)<\/span>/i.exec(card))?.[1] ?? ""
+    ))?.[1]?.trim() ?? "";
+    const website = (/<a[^>]+href="(https?:\/\/[^"]{4,100})"[^>]*class="[^"]*(?:yYlJEf|rllt__link)[^"]*"/i.exec(card))?.[1] ?? "";
+    if (name) {
+      businesses.push({ businessName: name, phone, website, address: "", city, country, category, source: "google-gmb", email: "" });
+    }
+  }
+
+  // ── Pass 2: regular search — local 3-pack JSON-LD + script blocks ──────────
   const url = `https://www.google.com/search?q=${encodeURIComponent(q)}&num=20&hl=en`;
   const html = await browserFetch(url);
-  const businesses: ScrapedBusiness[] = schemasToBusinesses(extractJsonLd(html), category, city, country, "google");
+  businesses.push(...schemasToBusinesses(extractJsonLd(html), category, city, country, "google"));
 
-  // Google also bakes data into JSON in large script blocks
-  // Look for the local-pack JSON array: ["BusinessName",null,[null,null,lat,lng]...]
   const bigJsonRe = /<script[^>]*>\s*(?:window\._sharedData\s*=\s*|AF_initDataCallback\(|var _pageData\s*=\s*)?(\{[\s\S]{200,}?\})\s*(?:;|\))\s*<\/script>/gi;
   let m: RegExpExecArray | null;
   while ((m = bigJsonRe.exec(html)) !== null) {
     try {
       const obj = JSON.parse(m[1]);
-      // Scan for LocalBusiness-style keys in any nested object
       const stringify = JSON.stringify(obj);
       const innerSchemas = extractJsonLd(`<script type="application/ld+json">${stringify}</script>`);
       businesses.push(...schemasToBusinesses(innerSchemas, category, city, country, "google"));
     } catch {}
   }
 
-  // HTML fallback: Google local 3-pack business names appear in known class patterns
+  // HTML fallback: known 3-pack class names
   const nameRe = /<(?:div|span|h3)[^>]+class="(?:OSrXXb|dbg0pd|qrShPb|uMdZh tNxQIb yl|fc9yUc|Zt0a5e|NsNu7e)[^"]*"[^>]*>([^<]{3,80})<\/(?:div|span|h3)>/gi;
   while ((m = nameRe.exec(html)) !== null) {
     const name = m[1].trim();
