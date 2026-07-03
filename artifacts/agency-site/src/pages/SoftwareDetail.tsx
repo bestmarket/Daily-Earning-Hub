@@ -11,7 +11,7 @@ import SeoHead from "@/components/SeoHead";
 export default function SoftwareDetail() {
   const params = useParams();
   const id = Number(params.id);
-  const { data: tool, isLoading } = useGetTool(id, { query: { enabled: !!id } });
+  const { data: tool, isLoading } = useGetTool(id);
   const [modalOpen, setModalOpen] = useState(false);
   const [copied, setCopied] = useState(false);
 

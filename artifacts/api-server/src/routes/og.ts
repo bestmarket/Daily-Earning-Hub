@@ -56,7 +56,8 @@ async function generateOgImage(tool: {
 
   const svg = await satori(
     // Root: 1200×630 white card
-    {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ({
       type: "div",
       props: {
         style: {
@@ -372,7 +373,7 @@ async function generateOgImage(tool: {
           },
         ],
       },
-    },
+    }) as any,
     {
       width: 1200,
       height: 630,

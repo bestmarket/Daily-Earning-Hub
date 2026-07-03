@@ -14,12 +14,16 @@ import {
 
 const router = Router();
 
-const ADMIN_SECRET = process.env.ADMIN_PASSWORD ?? process.env.SESSION_SECRET ?? "devstudio-admin";
+const ADMIN_SECRET = process.env.ADMIN_PASSWORD ?? process.env.SESSION_SECRET;
+if (!ADMIN_SECRET) {
+  console.error("FATAL: ADMIN_PASSWORD or SESSION_SECRET env var must be set");
+  process.exit(1);
+}
 
 function requireAdmin(req: any, res: any, next: any) {
   const auth = req.headers["authorization"] ?? "";
   const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-  if (token !== ADMIN_SECRET && token !== "devstudio-admin") {
+  if (token !== ADMIN_SECRET) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }

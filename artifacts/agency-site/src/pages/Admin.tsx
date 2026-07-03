@@ -32,8 +32,6 @@ import {
 import { toast as sonnerToast } from "sonner";
 import API_BASE from "@/lib/api";
 
-const ADMIN_TOKEN = "devstudio-admin";
-
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type PricingPlan = {
@@ -81,27 +79,26 @@ export default function Admin() {
   const { toast } = useToast();
   const [authed, setAuthed] = useState(false);
   const [password, setPassword] = useState("");
-  const [apiToken, setApiToken] = useState<string>(() => localStorage.getItem("ds_api_token") || ADMIN_TOKEN);
+  const [apiToken, setApiToken] = useState<string>(() => localStorage.getItem("ds_api_token") ?? "");
   const loginMutation = useAdminLogin();
 
   const login = () => {
-    if (password === ADMIN_TOKEN) {
-      loginMutation.mutate({ data: { password } }, {
-        onSuccess: (data) => {
-          const tok = data.token ?? ADMIN_TOKEN;
-          setApiToken(tok);
-          localStorage.setItem("ds_api_token", tok);
-          setAuthed(true);
-        },
-        onError: () => {
-          setApiToken(ADMIN_TOKEN);
-          localStorage.setItem("ds_api_token", ADMIN_TOKEN);
-          setAuthed(true);
-        },
-      });
-    } else {
-      toast({ title: "Wrong password", description: "Default: devstudio-admin", variant: "destructive" });
-    }
+    if (!password) return;
+    loginMutation.mutate({ data: { password } }, {
+      onSuccess: (data) => {
+        const tok = data.token;
+        if (!tok) {
+          toast({ title: "Login failed", description: "No token returned", variant: "destructive" });
+          return;
+        }
+        setApiToken(tok);
+        localStorage.setItem("ds_api_token", tok);
+        setAuthed(true);
+      },
+      onError: () => {
+        toast({ title: "Wrong password", variant: "destructive" });
+      },
+    });
   };
 
   useEffect(() => {
@@ -133,7 +130,7 @@ export default function Admin() {
               Login
             </Button>
           </div>
-          <p className="text-xs text-center text-muted-foreground">Default password: devstudio-admin</p>
+          <p className="text-xs text-center text-muted-foreground">Enter your admin password to continue.</p>
         </div>
       </div>
     );
@@ -159,7 +156,7 @@ export default function Admin() {
             <Button variant="outline" size="sm" onClick={() => window.open("/admin/crm", "_blank")}>
               <Bot className="w-3.5 h-3.5 mr-1.5" /> AI Hunter
             </Button>
-            <Button variant="ghost" size="sm" onClick={() => { localStorage.removeItem("ds_api_token"); setAuthed(false); setApiToken(ADMIN_TOKEN); }}>
+            <Button variant="ghost" size="sm" onClick={() => { localStorage.removeItem("ds_api_token"); setAuthed(false); setApiToken(""); }}>
               Logout
             </Button>
           </div>
@@ -301,7 +298,7 @@ function OverviewTab({ apiToken }: { apiToken: string }) {
 function CustomRequestsTab({ apiToken }: { apiToken: string }) {
   const queryClient = useQueryClient();
   const requestOptions = { request: { headers: { Authorization: `Bearer ${apiToken}` } } };
-  const { data: customRequests, isLoading } = useGetAdminCustomRequests({ query: { enabled: !!apiToken } }, requestOptions);
+  const { data: customRequests, isLoading } = useGetAdminCustomRequests(requestOptions);
   const updateCustomRequest = useUpdateCustomRequest(requestOptions);
 
   const handleUpdateStatus = (id: number, status: string) => {
@@ -524,7 +521,7 @@ function CatalogTab({ apiToken }: { apiToken: string }) {
 
 function WaitlistTab({ apiToken }: { apiToken: string }) {
   const requestOptions = { request: { headers: { Authorization: `Bearer ${apiToken}` } } };
-  const { data: waitlist, isLoading } = useGetAdminWaitlist({ query: { enabled: !!apiToken } }, requestOptions);
+  const { data: waitlist, isLoading } = useGetAdminWaitlist(requestOptions);
 
   return (
     <div className="space-y-4">
@@ -1614,7 +1611,7 @@ interface EmailAccount {
   id: number; label: string; provider: string; host: string; port: number;
   secure: boolean; user: string; password: string; fromName: string;
   fromEmail: string; imapEnabled: boolean; imapHost: string; imapPort: number;
-  active: boolean;
+  active: boolean; lastError?: string | null; lastErrorAt?: string | null;
 }
 
 interface AutoSettings {

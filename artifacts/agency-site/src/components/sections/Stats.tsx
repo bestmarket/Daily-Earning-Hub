@@ -22,6 +22,7 @@ function Counter({ value, suffix }: { value: number; suffix: string }) {
       const controls = animate(count, value, { duration: 1.8, ease: "easeOut" });
       return controls.stop;
     }
+    return undefined;
   }, [inView, value, count]);
 
   return (

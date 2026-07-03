@@ -109,9 +109,9 @@ function AdminDashboard({ token }: { token: string }) {
   const requestOptions = { request: { headers: { Authorization: `Bearer ${token}` } } };
   const queryClient = useQueryClient();
 
-  const { data: summary } = useGetAdminSummary({ query: { enabled: !!token } }, requestOptions);
-  const { data: customRequests } = useGetAdminCustomRequests({ query: { enabled: !!token } }, requestOptions);
-  const { data: waitlist } = useGetAdminWaitlist({ query: { enabled: !!token } }, requestOptions);
+  const { data: summary } = useGetAdminSummary(requestOptions);
+  const { data: customRequests } = useGetAdminCustomRequests(requestOptions);
+  const { data: waitlist } = useGetAdminWaitlist(requestOptions);
   const { data: tools } = useListTools({}, requestOptions);
   
   const updateCustomRequest = useUpdateCustomRequest(requestOptions);
