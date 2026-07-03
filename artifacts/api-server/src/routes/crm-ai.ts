@@ -141,6 +141,59 @@ async function filterLiveProspects(prospects: any[]): Promise<{ live: any[]; dea
   return { live, dead: results.length - live.length };
 }
 
+// ─── Google Places: real live business sourcing ───────────────────────────────
+
+/**
+ * Search Google Places API for real, operational businesses.
+ * Returns an empty array if GOOGLE_PLACES_API_KEY is not set — caller falls back to AI.
+ */
+async function searchGooglePlaces(category: string, city: string, country: string, count: number): Promise<any[]> {
+  const apiKey = process.env.GOOGLE_PLACES_API_KEY;
+  if (!apiKey) return [];
+
+  const query = `${category} in ${city}${country ? ", " + country : ""}`;
+  try {
+    const res = await Promise.race([
+      fetch("https://places.googleapis.com/v1/places:searchText", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Goog-Api-Key": apiKey,
+          "X-Goog-FieldMask": "places.displayName,places.formattedAddress,places.nationalPhoneNumber,places.websiteUri,places.businessStatus,places.id",
+        },
+        body: JSON.stringify({ textQuery: query, maxResultCount: Math.min(count, 20), languageCode: "en" }),
+      }),
+      new Promise<never>((_, r) => setTimeout(() => r(new Error("timeout")), 10000)),
+    ]) as Response;
+    const data = await res.json();
+    // Only return businesses confirmed operational
+    return (data.places || []).filter((p: any) =>
+      !p.businessStatus || p.businessStatus === "OPERATIONAL"
+    );
+  } catch { return []; }
+}
+
+/**
+ * Extract the first real email address found in a website's HTML.
+ * Returns "" if none found or fetch fails.
+ */
+async function extractEmailFromWebsite(url: string): Promise<string> {
+  if (!url || /^(none|n\/a|-)$/i.test(url.trim())) return "";
+  const fullUrl = url.startsWith("http") ? url : `https://${url}`;
+  try {
+    const res = await Promise.race([
+      fetch(fullUrl, { headers: { "User-Agent": "Mozilla/5.0 (compatible; DevStudio/1.0)" } }),
+      new Promise<never>((_, r) => setTimeout(() => r(new Error("timeout")), 8000)),
+    ]) as Response;
+    const html = await res.text();
+    // Match all emails, skip noreply/support/privacy addresses
+    const matches = html.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g) || [];
+    const skip = /noreply|no-reply|donotreply|support|privacy|legal|abuse|spam|example|test@/i;
+    const best = matches.find(e => !skip.test(e));
+    return best || "";
+  } catch { return ""; }
+}
+
 // ─── Placeholder filler ───────────────────────────────────────────────────────
 
 /**
@@ -660,23 +713,74 @@ router.post("/crm/hunt-businesses", async (req, res) => {
   };
   if (!category || !city) { res.status(400).json({ error: "category and city are required" }); return; }
 
-  const prompt = `You are a business intelligence researcher. Generate a list of ${Math.min(count, 20)} realistic ${category} businesses in ${city}, ${country || ""}.
+  try {
+    let raw: any[] = [];
+    let source = "ai";
+
+    // ── Step 1: Try Google Places first (real, live, operational businesses) ──
+    const places = await searchGooglePlaces(category, city, country, count);
+    if (places.length > 0) {
+      source = "google_places";
+      // Convert Places format → prospect format; scrape each website for a real email
+      const converted = await Promise.all(
+        places.map(async (p: any) => {
+          const website = p.websiteUri || "";
+          const email = await extractEmailFromWebsite(website);
+          return {
+            businessName: p.displayName?.text || "",
+            ownerName: "",
+            category,
+            email,
+            phone: p.nationalPhoneNumber || "",
+            website,
+            city,
+            country: country || "",
+            instagram: "",
+            facebook: "",
+            linkedin: "",
+            softwareNeedScore: 5,
+            painPoint: "",
+            estimatedValue: 0,
+            notes: p.formattedAddress || "",
+            source: "google_places",
+          };
+        })
+      );
+      // Keep only entries where we found a real email from the website
+      raw = converted.filter(p => p.email);
+
+      // If Google Places returned businesses but none had findable emails,
+      // fall through to AI with a note so the user knows
+      if (raw.length === 0 && places.length > 0) {
+        res.json({
+          prospects: [],
+          filtered: places.length,
+          total: places.length,
+          source: "google_places",
+          warning: "Google Places found businesses but none had a publicly listed email on their websites. Try a different category or city, or enable AI fallback.",
+        });
+        return;
+      }
+    }
+
+    // ── Step 2: AI fallback when no Places key or zero results ────────────────
+    if (raw.length === 0) {
+      source = "ai";
+      const prompt = `You are a business intelligence researcher. Generate a list of ${Math.min(count, 20)} realistic ${category} businesses in ${city}, ${country || ""}.
 ${extraContext ? `Additional context: ${extraContext}` : ""}
 These should look like real local businesses — use realistic local naming conventions, realistic email patterns (info@, hello@, contact@, owner first name, etc.), realistic phone formats for that region, and realistic website patterns.
 For each business, estimate how much they would benefit from custom software (1-10 score) and why.
 Return ONLY a JSON array with exactly ${Math.min(count, 20)} objects. Each object must have:
 { "businessName":"string","ownerName":"string","category":"${category}","email":"string","phone":"string","website":"string","city":"${city}","country":"${country || ""}","instagram":"string","facebook":"string","linkedin":"string","softwareNeedScore":<1-10>,"painPoint":"string","estimatedValue":<number>,"notes":"string" }
 Make the data diverse: mix of businesses with websites and without, different owner names, different email styles. Be realistic for ${city}, ${country || ""}.`;
+      const text = await generateText(prompt);
+      const data = parseJSON(text);
+      raw = Array.isArray(data) ? data : data.businesses || [];
+    }
 
-  try {
-    const text = await generateText(prompt);
-    const data = parseJSON(text);
-    const raw: any[] = Array.isArray(data) ? data : data.businesses || [];
-
-    // Verify each prospect: email domain must have MX records; website domain (if given) must resolve in DNS.
+    // ── Step 3: DNS/MX verification ──────────────────────────────────────────
     const { live, dead } = await filterLiveProspects(raw);
-
-    res.json({ prospects: live, filtered: dead, total: raw.length });
+    res.json({ prospects: live, filtered: dead, total: raw.length, source });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -701,7 +805,7 @@ For the cold email and WhatsApp/LinkedIn messages, follow this high-converting f
 1. ONE specific observation pulled directly from their real website content (name something real — an actual service, product, gap, or outdated element you noticed)
 2. The exact business problem that costs them money or customers right now
 3. What DevStudio would build to fix it (one sentence, concrete)
-4. CTA: "Would a 15-minute call make sense this week?"
+4. CTA: End with one low-pressure question inviting them to reply by email — something like "Does this sound relevant to where you're at? Just hit reply." NO mention of a call whatsoever.
 RULES: Email body max 100 words. No "I hope this finds you well". No buzzwords. Sound like a real human, not a template. Subject line: max 6 words, curiosity-driven. Sign off as "Daniel, DevStudio". If no website content is available, make the observation specific to their business category.
 
 Return ONLY a JSON object with this exact structure:
@@ -755,7 +859,7 @@ Framework (follow exactly):
 1. Open with ONE specific observation from their actual website or business type — name something real (a service, a gap, something you noticed)
 2. Name the exact pain point this causes (lost bookings, manual work, missed revenue)
 3. One sentence: what you'd build to fix it
-4. CTA: "Would a 15-minute call make sense this week?"
+4. CTA: A single low-pressure question asking them to reply by email — e.g. "Does any of this apply to you? Just hit reply." Do NOT mention a call at all.
 
 RULES: Max 100 words body. NEVER say "I hope this finds you well", "I wanted to reach out", or any AI filler. No buzzwords. Subject: max 6 words, curiosity-driven. Sign off: "Daniel, DevStudio". Sound like a real person wrote this at 9am.
 Return JSON: { "subject":"string","body":"string" }`;

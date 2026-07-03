@@ -77,7 +77,26 @@ export const followUpQueueTable = pgTable("follow_up_queue", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// ─── Inbox replies (from leads who reply to outreach emails) ──────────────────
+
+export const inboxRepliesTable = pgTable("inbox_replies", {
+  id: serial("id").primaryKey(),
+  messageId: text("message_id").notNull().unique(), // deduplicate by IMAP message-id
+  accountId: integer("account_id"),                // which email account received it
+  prospectEmail: text("prospect_email").notNull().default(""),
+  businessName: text("business_name").notNull().default(""),
+  subject: text("subject").notNull().default(""),
+  bodyText: text("body_text").notNull().default(""),
+  // classification: interested | call_requested | not_interested | objection | other
+  classification: text("classification").notNull().default("other"),
+  aiResponse: text("ai_response").notNull().default(""),
+  aiRepliedAt: timestamp("ai_replied_at"),
+  receivedAt: timestamp("received_at").notNull().defaultNow(),
+  read: boolean("read").notNull().default(false),
+});
+
 export type EmailAccount = typeof emailAccountsTable.$inferSelect;
 export type AutomationSettings = typeof automationSettingsTable.$inferSelect;
 export type EmailTracking = typeof emailTrackingTable.$inferSelect;
 export type FollowUpQueue = typeof followUpQueueTable.$inferSelect;
+export type InboxReply = typeof inboxRepliesTable.$inferSelect;

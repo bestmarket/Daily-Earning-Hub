@@ -1,7 +1,8 @@
 import { Router } from "express";
 import nodemailer from "nodemailer";
 import { promises as dnsPromises } from "dns";
-import { db, emailAccountsTable, automationSettingsTable, emailTrackingTable, followUpQueueTable } from "@workspace/db";
+import { ImapFlow } from "imapflow";
+import { db, emailAccountsTable, automationSettingsTable, emailTrackingTable, followUpQueueTable, inboxRepliesTable } from "@workspace/db";
 import { eq, and, lte, isNull } from "drizzle-orm";
 import { getGeminiAI } from "./api-keys";
 import { sendMail as brevoSendMail, brevoTransporter } from "../lib/brevo-mailer";
@@ -450,7 +451,7 @@ For the cold email, follow this exact framework — it converts:
 1. ONE specific observation about their actual business (from site content if available — name a real service, product, or gap you noticed)
 2. Name the exact problem that costs them money or time  
 3. One-line solution: what DevStudio would build
-4. Single CTA: "Would a 15-minute call this week make sense?"
+4. Single CTA: A low-pressure question inviting them to reply by email — e.g. "Does any of this apply to you? Just hit reply." Do NOT mention a call at all.
 RULES: Max 100 words body. No "I hope this finds you well". No buzzwords. Sound like a real person, not a template. Subject line must be curiosity-driven, 6 words max, no ALL CAPS. Sign off as "Daniel, DevStudio".
 
 Return ONLY JSON: { "analysis": { "websiteScore":<0-100>,"leadScore":<0-100>,"conversionScore":<0-100>,"mobileScore":<0-100>,"seoScore":<0-100>,"growthPotential":<0-100>,"summary":"string","projectType":"string","estimatedValue":{"min":<n>,"max":<n>},"deliveryWeeks":{"min":<n>,"max":<n>},"recommendedFeatures":["string"],"issues":[{"title":"string","description":"string","priority":"high|medium|low"}],"opportunities":[{"title":"string","impact":"string","effort":"low|medium|high"}],"checks":{"responsiveDesign":false,"sslCertificate":false,"modernUI":false,"whatsappButton":false,"contactForm":false,"bookingSystem":false,"onlineOrdering":false,"paymentIntegration":false,"customerPortal":false,"membershipArea":false,"blog":false,"seoBasics":false,"analytics":false,"socialMedia":false,"emailCapture":false,"liveChat":false,"aiChatbot":false,"callToAction":false,"trustElements":false}}, "email":{"subject":"string","body":"string"} }`;
@@ -536,8 +537,236 @@ Return ONLY JSON: { "analysis": { "websiteScore":<0-100>,"leadScore":<0-100>,"co
 
 // ─── IMAP reply checker ───────────────────────────────────────────────────────
 
+/** Read recent (last 7 days) messages from an IMAP inbox. */
+async function readImapMessages(acct: {
+  user: string; password: string; imapHost: string; imapPort: number; id: number;
+}): Promise<Array<{ messageId: string; from: string; subject: string; text: string; date: Date }>> {
+  const client = new ImapFlow({
+    host: acct.imapHost || "imap.gmail.com",
+    port: acct.imapPort || 993,
+    secure: true,
+    auth: { user: acct.user.trim(), pass: (acct.password || "").replace(/\s/g, "") },
+    logger: false,
+    tls: { rejectUnauthorized: false },
+  } as any);
+
+  const out: Array<{ messageId: string; from: string; subject: string; text: string; date: Date }> = [];
+
+  try {
+    await client.connect();
+    const lock = await client.getMailboxLock("INBOX");
+    try {
+      const since = new Date();
+      since.setDate(since.getDate() - 7);
+      const uids = await client.search({ since });
+      if (uids.length > 0) {
+        const subset = uids.slice(-50); // cap at 50 per account
+        for await (const msg of client.fetch(subset as any, {
+          envelope: true,
+          bodyParts: ["TEXT", "1"],
+        } as any)) {
+          const fromAddr = (msg as any).envelope?.from?.[0]?.address || "";
+          const subject = (msg as any).envelope?.subject || "";
+          const msgId = (msg as any).envelope?.messageId || `${acct.id}-${(msg as any).uid}`;
+          const date: Date = (msg as any).envelope?.date || new Date();
+          let text = "";
+          if ((msg as any).bodyParts) {
+            for (const [, buf] of (msg as any).bodyParts) {
+              if (Buffer.isBuffer(buf)) text += buf.toString("utf-8");
+            }
+          }
+          // Strip quoted replies (lines starting with ">") and email headers
+          text = text
+            .replace(/\r\n/g, "\n")
+            .split("\n")
+            .filter(l => !l.trim().startsWith(">") && !/^On .* wrote:$/i.test(l.trim()))
+            .join("\n")
+            .replace(/\n{3,}/g, "\n\n")
+            .trim()
+            .slice(0, 2000);
+          out.push({ messageId: msgId, from: fromAddr, subject, text, date });
+        }
+      }
+    } finally {
+      lock.release();
+    }
+    await client.logout();
+  } catch {
+    try { await client.logout(); } catch {}
+  }
+
+  return out;
+}
+
+/** AI: classify a reply and write an appropriate response. */
+async function classifyAndRespond(
+  text: string, businessName: string
+): Promise<{ classification: string; response: string }> {
+  const prompt = `You received this reply to a cold outreach email sent to ${businessName}.
+Reply: """${text.slice(0, 600)}"""
+
+Classify it as exactly one of:
+- "interested" — positive interest, questions, wants to know more (but did NOT explicitly ask for a phone/video call)
+- "call_requested" — explicitly asked for a phone call, video call, or said "let's hop on a call / talk / chat"
+- "not_interested" — declined, unsubscribe, not relevant
+- "objection" — has a concern or pushback that needs addressing
+
+Write a short reply email (max 80 words, no filler, no "I hope this finds you well"):
+- interested → warmly acknowledge, ask one follow-up question about their biggest challenge so you can tailor a proposal
+- call_requested → gently explain you prefer email for now (faster to share details & examples), ask them to describe their main challenge so you can send something tailored — keep it warm, not dismissive
+- not_interested → wish them well briefly, no pressure
+- objection → address their concern directly, invite them to share more
+
+Sign off: "Daniel, DevStudio". Sound human.
+Return ONLY JSON: { "classification": "...", "response": "..." }`;
+
+  try {
+    const ai = await getGeminiAI();
+    const result = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      config: { maxOutputTokens: 512 },
+    });
+    const raw = (result.text ?? "").replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+    return JSON.parse(raw);
+  } catch {
+    return { classification: "other", response: "" };
+  }
+}
+
 router.post("/automation/check-replies", async (_req, res) => {
-  res.json({ checked: 0, replied: 0, message: "Reply checking requires IMAP — enable it on your email accounts and ensure IMAP access is enabled in Gmail settings." });
+  try {
+    const accounts = await db
+      .select()
+      .from(emailAccountsTable)
+      .where(and(eq(emailAccountsTable.active, true), eq(emailAccountsTable.imapEnabled, true)));
+
+    if (accounts.length === 0) {
+      res.json({
+        checked: 0,
+        replied: 0,
+        newReplies: [],
+        message: "No email accounts have IMAP enabled. Go to Automation → Email Accounts, enable IMAP and fill in the IMAP host/port.",
+      });
+      return;
+    }
+
+    const settings = await getOrCreateSettings();
+    let totalChecked = 0;
+    let totalAutoReplied = 0;
+    const newReplies: any[] = [];
+
+    for (const acct of accounts) {
+      const messages = await readImapMessages(acct);
+
+      for (const msg of messages) {
+        // Skip messages sent by us (sent-from addresses)
+        if (acct.user && msg.from.toLowerCase() === acct.user.toLowerCase()) continue;
+        if (acct.fromEmail && msg.from.toLowerCase() === acct.fromEmail.toLowerCase()) continue;
+        if (!msg.text.trim()) continue;
+
+        // Skip if already stored
+        const [existing] = await db
+          .select({ id: inboxRepliesTable.id })
+          .from(inboxRepliesTable)
+          .where(eq(inboxRepliesTable.messageId, msg.messageId))
+          .limit(1);
+        if (existing) continue;
+
+        totalChecked++;
+
+        // Look up the business name from the follow-up queue
+        const [knownLead] = await db
+          .select({ businessName: followUpQueueTable.businessName })
+          .from(followUpQueueTable)
+          .where(eq(followUpQueueTable.prospectEmail, msg.from))
+          .limit(1);
+        const businessName = knownLead?.businessName || msg.from;
+
+        // AI classify + draft response
+        const { classification, response } = await classifyAndRespond(msg.text, businessName);
+
+        // Auto-send the reply if autoReply is enabled and AI produced a response
+        let aiRepliedAt: Date | null = null;
+        if (settings.autoReply && response) {
+          try {
+            const transporter = makeTransporter(acct);
+            await transporter.sendMail({
+              from: `"${acct.fromName}" <${acct.fromEmail || acct.user}>`,
+              to: msg.from,
+              subject: `Re: ${msg.subject}`,
+              text: response,
+              html: `<div style="font-family:Georgia,serif;max-width:600px;margin:0 auto;padding:24px;color:#1a1a2e;">${response
+                .split("\n")
+                .map(l => (l.trim() ? `<p style="margin:0 0 12px;line-height:1.6;">${l}</p>` : "<br/>"))
+                .join("")}</div>`,
+            });
+            aiRepliedAt = new Date();
+            totalAutoReplied++;
+          } catch {}
+        }
+
+        await db
+          .insert(inboxRepliesTable)
+          .values({
+            messageId: msg.messageId,
+            accountId: acct.id,
+            prospectEmail: msg.from,
+            businessName,
+            subject: msg.subject,
+            bodyText: msg.text,
+            classification,
+            aiResponse: response,
+            aiRepliedAt,
+            receivedAt: msg.date,
+          })
+          .onConflictDoNothing();
+
+        newReplies.push({ from: msg.from, businessName, classification, subject: msg.subject, autoReplied: !!aiRepliedAt });
+      }
+    }
+
+    res.json({
+      checked: totalChecked,
+      replied: totalAutoReplied,
+      newReplies,
+      message: `Checked ${accounts.length} account(s). Found ${totalChecked} new reply(ies), auto-replied to ${totalAutoReplied}.`,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** List stored inbox replies (newest first). */
+router.get("/automation/replies", async (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 50, 200);
+    const rows = await db
+      .select()
+      .from(inboxRepliesTable)
+      .orderBy(inboxRepliesTable.receivedAt)
+      .limit(limit);
+    res.json(rows.map(r => ({
+      ...r,
+      receivedAt: r.receivedAt.toISOString(),
+      aiRepliedAt: r.aiRepliedAt?.toISOString() ?? null,
+    })));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** Mark a reply as read. */
+router.patch("/automation/replies/:id/read", async (req, res) => {
+  try {
+    await db
+      .update(inboxRepliesTable)
+      .set({ read: true })
+      .where(eq(inboxRepliesTable.id, Number(req.params.id)));
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ─── Daily email account health check ────────────────────────────────────────
