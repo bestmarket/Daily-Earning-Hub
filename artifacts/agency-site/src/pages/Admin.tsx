@@ -1601,8 +1601,8 @@ function AutomationTab() {
       const r = await fetch(`${apiBase()}/api/automation/settings`, {
         method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch),
       });
-      if (!r.ok) throw new Error("Save failed");
-      const updated = await r.json();
+      const updated = await safeJson(r);
+      if (!r.ok) throw new Error(updated.error || "Save failed");
       setSettings(updated);
       setMsg({ type: "success", text: "Settings saved." });
     } catch (e: any) { setMsg({ type: "error", text: e.message }); }
@@ -1636,7 +1636,7 @@ function AutomationTab() {
       const r = await fetch(`${apiBase()}/api/automation/email-accounts`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(newAcct),
       });
-      if (!r.ok) { const d = await r.json(); throw new Error(d.error); }
+      if (!r.ok) { const d = await safeJson(r); throw new Error(d.error); }
       setShowAddAccount(false);
       setNewAcct({ label: "", provider: "gmail", host: "smtp.gmail.com", port: 587, secure: false, user: "", password: "", fromName: "DevStudio", fromEmail: "", imapEnabled: false });
       setMsg({ type: "success", text: "Email account added." });
@@ -1649,7 +1649,7 @@ function AutomationTab() {
     setTestingId(id); setMsg(null);
     try {
       const r = await fetch(`${apiBase()}/api/automation/email-accounts/${id}/test`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
-      const d = await r.json();
+      const d = await safeJson(r);
       if (!r.ok) throw new Error(d.error);
       setMsg({ type: "success", text: "✓ Test email sent successfully! Check your inbox." });
     } catch (e: any) {
@@ -1685,7 +1685,7 @@ function AutomationTab() {
       const r = await fetch(`${apiBase()}/api/automation/email-accounts/${editAcct.id}`, {
         method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       });
-      if (!r.ok) { const d = await r.json(); throw new Error(d.error); }
+      if (!r.ok) { const d = await safeJson(r); throw new Error(d.error); }
       setEditAcct(null); setEditPass("");
       setMsg({ type: "success", text: "Account updated." });
       await load();
@@ -1693,6 +1693,17 @@ function AutomationTab() {
   };
 
   const BLANK_ACCT = { label: "", user: "", password: "", fromName: "DevStudio", fromEmail: "", imapEnabled: false };
+
+  async function safeJson(r: Response): Promise<any> {
+    const text = await r.text();
+    try { return JSON.parse(text); } catch {
+      throw new Error(
+        r.ok
+          ? "Server returned an unexpected response. Please try again."
+          : "Server is temporarily unavailable (it may be restarting). Please wait a few seconds and try again."
+      );
+    }
+  }
 
   function validateCredentials(provider: string, password: string, user: string): string | null {
     const cleaned = password.replace(/\s/g, "");
