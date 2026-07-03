@@ -1,8 +1,8 @@
 import { Router } from "express";
 import nodemailer from "nodemailer";
 import { promises as dnsPromises } from "dns";
-import { db, emailAccountsTable, automationSettingsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { db, emailAccountsTable, automationSettingsTable, emailTrackingTable, followUpQueueTable } from "@workspace/db";
+import { eq, and, lte, isNull } from "drizzle-orm";
 import { getGeminiAI } from "./api-keys";
 import { sendMail as brevoSendMail, brevoTransporter } from "../lib/brevo-mailer";
 
@@ -45,6 +45,28 @@ function parseJSON(text: string): any {
     if (match) return JSON.parse(match[0]);
     throw new Error("Failed to parse AI response as JSON");
   }
+}
+
+// ─── Real website scraper ─────────────────────────────────────────────────────
+
+async function scrapeWebsite(url: string): Promise<string> {
+  if (!url || /^(none|n\/a|no website|-)$/i.test(url.trim())) return "";
+  const fullUrl = url.startsWith("http") ? url : `https://${url}`;
+  try {
+    const res = await Promise.race([
+      fetch(fullUrl, { headers: { "User-Agent": "Mozilla/5.0 (compatible; DevStudio/1.0)" } }),
+      new Promise<never>((_, r) => setTimeout(() => r(new Error("timeout")), 8000)),
+    ]) as Response;
+    const html = await res.text();
+    return html
+      .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&[a-z#0-9]+;/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 2500);
+  } catch { return ""; }
 }
 
 // ─── Domain / email verification helpers ─────────────────────────────────────
@@ -280,6 +302,8 @@ router.put("/automation/settings", async (req, res) => {
     ...(autoEmail !== undefined && { autoEmail }),
     ...(emailDelayMinutes !== undefined && { emailDelayMinutes }),
     ...(autoReply !== undefined && { autoReply }),
+    ...(req.body.followUpEnabled !== undefined && { followUpEnabled: req.body.followUpEnabled }),
+    ...(req.body.followUpDays !== undefined && { followUpDays: req.body.followUpDays }),
     updatedAt: new Date(),
     // recalculate nextRunAt if interval changed
     ...(autoHuntEnabled === true ? {
@@ -328,7 +352,58 @@ export async function runAutomationCycle(overrides?: {
 
   if (!cfg.city) return;
 
-  const runStats: Record<string, number> = { hunted: 0, scored: 0, emailed: 0, errors: 0 };
+  const runStats: Record<string, number> = { hunted: 0, scored: 0, emailed: 0, followUps: 0, errors: 0 };
+
+  // 0. Process pending follow-ups first (non-openers past their follow-up date)
+  if (settings.followUpEnabled) {
+    try {
+      const dueDate = new Date(Date.now() - (settings.followUpDays ?? 4) * 24 * 60 * 60 * 1000);
+      const pending = await db.select().from(followUpQueueTable)
+        .where(and(eq(followUpQueueTable.status, "pending"), lte(followUpQueueTable.firstSentAt, dueDate)));
+
+      const followUpAccounts = await db.select().from(emailAccountsTable).where(eq(emailAccountsTable.active, true));
+      let fuAcctIdx = 0;
+
+      for (const item of pending) {
+        // Skip if the original was opened — check tracking table
+        const opened = await db.select().from(emailTrackingTable)
+          .where(and(eq(emailTrackingTable.prospectEmail, item.prospectEmail)));
+        const wasOpened = opened.some(t => t.opens > 0);
+        if (wasOpened) {
+          await db.update(followUpQueueTable).set({ status: "skipped" }).where(eq(followUpQueueTable.id, item.id));
+          continue;
+        }
+
+        const followUpBody = fillPlaceholders(
+          `Hi again,\n\nI sent a note last week about helping ${item.businessName} with a custom software solution — wanted to make sure it didn't get buried.\n\nWould a quick 15-minute call make sense this week?\n\nDaniel\nDevStudio`
+        );
+        const followUpSubject = `Re: ${item.originalSubject}`;
+        const html = followUpBody.split("\n").map(l => l.trim() ? `<p style="margin:0 0 12px;line-height:1.6;">${l}</p>` : "<br/>").join("");
+
+        try {
+          if (followUpAccounts.length > 0) {
+            const acct = followUpAccounts[fuAcctIdx % followUpAccounts.length];
+            fuAcctIdx++;
+            const transporter = makeTransporter(acct);
+            await transporter.sendMail({
+              from: `"${acct.fromName}" <${acct.fromEmail || acct.user}>`,
+              to: item.prospectEmail,
+              subject: followUpSubject,
+              text: followUpBody,
+              html: `<div style="font-family:Georgia,serif;max-width:600px;margin:0 auto;padding:24px;color:#1a1a2e;">${html}</div>`,
+            });
+          } else {
+            await brevoSendMail({ to: item.prospectEmail, subject: followUpSubject, text: followUpBody, html });
+          }
+          await db.update(followUpQueueTable).set({ status: "sent", followUpSentAt: new Date() }).where(eq(followUpQueueTable.id, item.id));
+          runStats.followUps++;
+          if (settings.emailDelayMinutes > 0) {
+            await new Promise(r => setTimeout(r, settings.emailDelayMinutes * 60 * 1000));
+          }
+        } catch { runStats.errors++; }
+      }
+    } catch { /* follow-up errors don't block main cycle */ }
+  }
 
   // 1. Hunt businesses
   let businesses: any[] = [];
@@ -361,9 +436,23 @@ Return ONLY a JSON array. Each object:
 
     if (settings.autoScore) {
       try {
-        const autoPrompt = `You are a senior business analyst at DevStudio, a custom software agency.
-Analyze this ${biz.category} business and generate analysis + cold email.
-Business: ${biz.businessName}, Location: ${biz.city} ${biz.country}, Owner: ${biz.ownerName || "Owner"}, Website: ${biz.website || "No website"}, Pain Point: ${biz.painPoint || "manual processes"}
+        // Scrape the real website first — gives AI actual content to reference
+        const siteContent = await scrapeWebsite(biz.website);
+        const siteContext = siteContent
+          ? `\nReal website content scraped from ${biz.website}:\n"""\n${siteContent}\n"""`
+          : (biz.website ? `\nWebsite ${biz.website} could not be scraped.` : "\nNo website.");
+
+        const autoPrompt = `You are a senior business analyst at DevStudio, a custom software development agency run by Daniel.
+Analyze this ${biz.category} business and generate analysis + a high-converting cold email.
+Business: ${biz.businessName}, Location: ${biz.city} ${biz.country}, Owner: ${biz.ownerName || "the owner"}, Website: ${biz.website || "No website"}, Pain Point: ${biz.painPoint || "manual processes"}${siteContext}
+
+For the cold email, follow this exact framework — it converts:
+1. ONE specific observation about their actual business (from site content if available — name a real service, product, or gap you noticed)
+2. Name the exact problem that costs them money or time  
+3. One-line solution: what DevStudio would build
+4. Single CTA: "Would a 15-minute call this week make sense?"
+RULES: Max 100 words body. No "I hope this finds you well". No buzzwords. Sound like a real person, not a template. Subject line must be curiosity-driven, 6 words max, no ALL CAPS. Sign off as "Daniel, DevStudio".
+
 Return ONLY JSON: { "analysis": { "websiteScore":<0-100>,"leadScore":<0-100>,"conversionScore":<0-100>,"mobileScore":<0-100>,"seoScore":<0-100>,"growthPotential":<0-100>,"summary":"string","projectType":"string","estimatedValue":{"min":<n>,"max":<n>},"deliveryWeeks":{"min":<n>,"max":<n>},"recommendedFeatures":["string"],"issues":[{"title":"string","description":"string","priority":"high|medium|low"}],"opportunities":[{"title":"string","impact":"string","effort":"low|medium|high"}],"checks":{"responsiveDesign":false,"sslCertificate":false,"modernUI":false,"whatsappButton":false,"contactForm":false,"bookingSystem":false,"onlineOrdering":false,"paymentIntegration":false,"customerPortal":false,"membershipArea":false,"blog":false,"seoBasics":false,"analytics":false,"socialMedia":false,"emailCapture":false,"liveChat":false,"aiChatbot":false,"callToAction":false,"trustElements":false}}, "email":{"subject":"string","body":"string"} }`;
         const genText = await generateText(autoPrompt);
         const genData = parseJSON(genText);
@@ -410,6 +499,20 @@ Return ONLY JSON: { "analysis": { "websiteScore":<0-100>,"leadScore":<0-100>,"co
         }
         runStats.emailed++;
         prospectsSummary[prospectsSummary.length - 1].emailed = true;
+
+        // Queue a follow-up if enabled
+        if (settings.followUpEnabled && biz.email) {
+          await db.insert(followUpQueueTable).values({
+            prospectEmail: biz.email,
+            businessName: biz.businessName,
+            originalSubject: emailContent!.subject,
+            originalBody: emailContent!.body,
+            followUpDays: settings.followUpDays ?? 4,
+            accountId: accounts.length > 0 ? accounts[(accountIndex - 1) % accounts.length].id : null,
+            status: "pending",
+          }).onConflictDoNothing();
+        }
+
         // Delay before next email (convert minutes to ms)
         if (i < businesses.length - 1 && settings.emailDelayMinutes > 0) {
           await new Promise(r => setTimeout(r, settings.emailDelayMinutes * 60 * 1000));

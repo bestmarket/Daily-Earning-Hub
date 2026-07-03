@@ -39,6 +39,8 @@ export const automationSettingsTable = pgTable("automation_settings", {
   autoEmail: boolean("auto_email").notNull().default(false),
   emailDelayMinutes: integer("email_delay_minutes").notNull().default(20),
   autoReply: boolean("auto_reply").notNull().default(false),
+  followUpEnabled: boolean("follow_up_enabled").notNull().default(false),
+  followUpDays: integer("follow_up_days").notNull().default(4),
   lastRunAt: timestamp("last_run_at"),
   nextRunAt: timestamp("next_run_at"),
   runStats: jsonb("run_stats").default("{}"),
@@ -59,6 +61,23 @@ export const emailTrackingTable = pgTable("email_tracking", {
   sentAt: timestamp("sent_at").notNull().defaultNow(),
 }, (t) => [index("idx_email_tracking_email").on(t.prospectEmail)]);
 
+// ─── Follow-up queue ──────────────────────────────────────────────────────────
+
+export const followUpQueueTable = pgTable("follow_up_queue", {
+  id: serial("id").primaryKey(),
+  prospectEmail: text("prospect_email").notNull(),
+  businessName: text("business_name").notNull().default(""),
+  originalSubject: text("original_subject").notNull().default(""),
+  originalBody: text("original_body").notNull().default(""),
+  firstSentAt: timestamp("first_sent_at").notNull().defaultNow(),
+  followUpSentAt: timestamp("follow_up_sent_at"),
+  followUpDays: integer("follow_up_days").notNull().default(4),
+  accountId: integer("account_id"),
+  status: text("status").notNull().default("pending"), // pending | sent | skipped | opened
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 export type EmailAccount = typeof emailAccountsTable.$inferSelect;
 export type AutomationSettings = typeof automationSettingsTable.$inferSelect;
 export type EmailTracking = typeof emailTrackingTable.$inferSelect;
+export type FollowUpQueue = typeof followUpQueueTable.$inferSelect;

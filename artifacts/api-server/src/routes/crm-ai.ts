@@ -52,6 +52,33 @@ function parseJSON(text: string): any {
   }
 }
 
+// ─── Real website scraper ─────────────────────────────────────────────────────
+
+/**
+ * Fetch the actual HTML of a business website and return plain-text content
+ * (scripts/styles stripped). Returns "" if URL is missing or fetch fails.
+ * Used to give the AI real, specific content for hyper-personalised emails.
+ */
+async function scrapeWebsite(url: string): Promise<string> {
+  if (!url || /^(none|n\/a|no website|-)$/i.test(url.trim())) return "";
+  const fullUrl = url.startsWith("http") ? url : `https://${url}`;
+  try {
+    const res = await Promise.race([
+      fetch(fullUrl, { headers: { "User-Agent": "Mozilla/5.0 (compatible; DevStudio/1.0)" } }),
+      new Promise<never>((_, r) => setTimeout(() => r(new Error("timeout")), 8000)),
+    ]) as Response;
+    const html = await res.text();
+    return html
+      .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&[a-z#0-9]+;/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 2500);
+  } catch { return ""; }
+}
+
 // ─── Domain / email verification helpers ─────────────────────────────────────
 
 /** Extract the bare hostname from a URL or raw domain string. Returns "" if unparseable. */
@@ -659,9 +686,24 @@ Make the data diverse: mix of businesses with websites and without, different ow
 
 router.post("/crm/auto-generate", async (req, res) => {
   const { businessName, category, website, city, country, ownerName, painPoint, agencyName } = req.body as Record<string, string>;
-  const prompt = `You are a senior business analyst and sales copywriter at ${agencyName || "DevStudio"}, a custom software agency.
+
+  // Scrape the real website so the AI references actual content
+  const siteContent = await scrapeWebsite(website);
+  const siteContext = siteContent
+    ? `\nReal website content scraped from ${website}:\n"""\n${siteContent}\n"""`
+    : (website ? `\nWebsite ${website} could not be loaded.` : "\nNo website.");
+
+  const prompt = `You are a senior business analyst and sales copywriter at ${agencyName || "DevStudio"}, a custom software agency run by Daniel.
 Analyze this business and generate everything needed to start the sales process — all in one response.
-Business: ${businessName}, Category: ${category}, Location: ${city}, ${country}, Owner: ${ownerName || "Business Owner"}, Website: ${website || "No website"}, Known Pain Point: ${painPoint || "Manual processes, outdated systems"}
+Business: ${businessName}, Category: ${category}, Location: ${city}, ${country}, Owner: ${ownerName || "the owner"}, Website: ${website || "No website"}, Known Pain Point: ${painPoint || "Manual processes, outdated systems"}${siteContext}
+
+For the cold email and WhatsApp/LinkedIn messages, follow this high-converting framework:
+1. ONE specific observation pulled directly from their real website content (name something real — an actual service, product, gap, or outdated element you noticed)
+2. The exact business problem that costs them money or customers right now
+3. What DevStudio would build to fix it (one sentence, concrete)
+4. CTA: "Would a 15-minute call make sense this week?"
+RULES: Email body max 100 words. No "I hope this finds you well". No buzzwords. Sound like a real human, not a template. Subject line: max 6 words, curiosity-driven. Sign off as "Daniel, DevStudio". If no website content is available, make the observation specific to their business category.
+
 Return ONLY a JSON object with this exact structure:
 { "analysis":{"websiteScore":<0-100>,"leadScore":<0-100>,"conversionScore":<0-100>,"mobileScore":<0-100>,"seoScore":<0-100>,"growthPotential":<0-100>,"checks":{"responsiveDesign":<bool>,"sslCertificate":<bool>,"modernUI":<bool>,"whatsappButton":<bool>,"contactForm":<bool>,"bookingSystem":<bool>,"onlineOrdering":<bool>,"paymentIntegration":<bool>,"customerPortal":<bool>,"membershipArea":<bool>,"blog":<bool>,"seoBasics":<bool>,"analytics":<bool>,"socialMedia":<bool>,"emailCapture":<bool>,"liveChat":<bool>,"aiChatbot":<bool>,"callToAction":<bool>,"trustElements":<bool>},"issues":[{"title":"string","description":"string","priority":"high|medium|low"}],"opportunities":[{"title":"string","impact":"string","effort":"low|medium|high"}],"recommendedFeatures":["string"],"projectType":"Small Website|Medium Web App|Large SaaS","estimatedValue":{"min":<number>,"max":<number>},"deliveryWeeks":{"min":<number>,"max":<number>},"summary":"2-3 sentence plain English summary"}, "email":{"subject":"string","body":"string"},"whatsapp":"string","linkedin":"string" }
 Be specific to a ${category} business in ${city}. If no website, give website scores of 5-25.`;
@@ -699,9 +741,23 @@ Be realistic and specific to a ${category} business. If no website is provided, 
 router.post("/crm/generate-email", async (req, res) => {
   try {
     const { businessName, ownerName, category, website, issues, opportunities, agencyName } = req.body as Record<string, string>;
-    const prompt = `Write a personalized cold outreach email from ${agencyName || "DevStudio"} to ${businessName}, a ${category || "business"}.
-Context: Owner/contact: ${ownerName || "Business Owner"}, Website: ${website || "no website"}, Top issues found: ${issues || "outdated website, no online booking, poor mobile experience"}, Key opportunity: ${opportunities || "custom software could save them time and grow revenue"}
-Rules: NEVER use generic AI phrases like "I hope this finds you well" or "I wanted to reach out". Reference something specific about their business type. Be human, warm, professional. Under 150 words total. ONE clear CTA only. No hype, no buzzwords. Subject line included. Sign off as ${agencyName || "DevStudio"} team.
+
+    // Scrape real website for genuine personalisation
+    const siteContent = await scrapeWebsite(website);
+    const siteContext = siteContent
+      ? `\nReal content from their website:\n"""\n${siteContent}\n"""`
+      : "";
+
+    const prompt = `Write a high-converting cold outreach email from Daniel at ${agencyName || "DevStudio"} to ${businessName}, a ${category || "business"}.
+Context: Owner: ${ownerName || "the owner"}, Website: ${website || "no website"}, Issues found: ${issues || "outdated systems, no online booking"}, Opportunity: ${opportunities || "custom software to save time and grow revenue"}${siteContext}
+
+Framework (follow exactly):
+1. Open with ONE specific observation from their actual website or business type — name something real (a service, a gap, something you noticed)
+2. Name the exact pain point this causes (lost bookings, manual work, missed revenue)
+3. One sentence: what you'd build to fix it
+4. CTA: "Would a 15-minute call make sense this week?"
+
+RULES: Max 100 words body. NEVER say "I hope this finds you well", "I wanted to reach out", or any AI filler. No buzzwords. Subject: max 6 words, curiosity-driven. Sign off: "Daniel, DevStudio". Sound like a real person wrote this at 9am.
 Return JSON: { "subject":"string","body":"string" }`;
     const text = await generateText(prompt);
     const data = parseJSON(text);

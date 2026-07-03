@@ -1622,6 +1622,7 @@ interface AutoSettings {
   huntCountry: string; huntCount: number; huntExtraContext: string;
   huntIntervalHours: number; autoScore: boolean; autoEmail: boolean;
   emailDelayMinutes: number; autoReply: boolean;
+  followUpEnabled: boolean; followUpDays: number;
   lastRunAt: string | null; nextRunAt: string | null;
   runStats: any;
 }
@@ -1952,15 +1953,43 @@ function AutomationTab() {
           </div>
 
           {s.autoEmail && (
-            <div className="p-4 border-t border-border/50">
-              <label className="text-xs font-semibold text-muted-foreground mb-2 block">Delay Between Emails</label>
-              <Select value={String(s.emailDelayMinutes)} onValueChange={v => setSettings(p => p ? { ...p, emailDelayMinutes: Number(v) } : p)}>
-                <SelectTrigger className="w-48"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {[["1","1 minute"],["2","2 minutes"],["3","3 minutes"],["4","4 minutes"],["5","5 minutes"],["10","10 minutes"],["15","15 minutes"],["20","20 minutes"],["30","30 minutes"],["60","1 hour"]].map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground mt-1.5">Emails rotate through your active accounts with this gap between each send.</p>
+            <div className="p-4 border-t border-border/50 space-y-4">
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground mb-2 block">Delay Between Emails</label>
+                <Select value={String(s.emailDelayMinutes)} onValueChange={v => setSettings(p => p ? { ...p, emailDelayMinutes: Number(v) } : p)}>
+                  <SelectTrigger className="w-48"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {[["1","1 minute"],["2","2 minutes"],["3","3 minutes"],["4","4 minutes"],["5","5 minutes"],["10","10 minutes"],["15","15 minutes"],["20","20 minutes"],["30","30 minutes"],["60","1 hour"]].map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground mt-1.5">Emails rotate through your active accounts with this gap between each send.</p>
+              </div>
+
+              {/* Follow-up sequence */}
+              <div className={`p-3 rounded-xl border ${s.followUpEnabled ? "bg-blue-50 border-blue-200" : "bg-muted/20 border-border/40"}`}>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <RefreshCw className={`w-4 h-4 ${s.followUpEnabled ? "text-blue-600" : "text-muted-foreground"}`} />
+                    <div>
+                      <div className="text-sm font-bold">Auto Follow-Up</div>
+                      <div className="text-xs text-muted-foreground">Automatically re-email non-openers after X days</div>
+                    </div>
+                  </div>
+                  <Switch checked={s.followUpEnabled} onCheckedChange={v => setSettings(p => p ? { ...p, followUpEnabled: v } : p)} />
+                </div>
+                {s.followUpEnabled && (
+                  <div className="mt-2 flex items-center gap-3">
+                    <label className="text-xs font-semibold text-muted-foreground whitespace-nowrap">Follow up after</label>
+                    <Select value={String(s.followUpDays)} onValueChange={v => setSettings(p => p ? { ...p, followUpDays: Number(v) } : p)}>
+                      <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {[["2","2 days"],["3","3 days"],["4","4 days"],["5","5 days"],["7","7 days"],["10","10 days"]].map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                    <span className="text-xs text-muted-foreground">if no open detected</span>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
