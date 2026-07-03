@@ -1,6 +1,7 @@
 import { Router } from "express";
 import nodemailer from "nodemailer";
 import { randomUUID } from "crypto";
+import { promises as dnsPromises } from "dns";
 import { getGeminiAI } from "./api-keys";
 import { db, emailAccountsTable, emailTrackingTable } from "@workspace/db";
 import { eq, inArray, sql } from "drizzle-orm";
@@ -49,6 +50,93 @@ function parseJSON(text: string): any {
     if (match) return JSON.parse(match[0]);
     throw new Error("Failed to parse AI response as JSON");
   }
+}
+
+// ─── Domain / email verification helpers ─────────────────────────────────────
+
+/** Extract the bare hostname from a URL or raw domain string. Returns "" if unparseable. */
+function extractHostname(raw: string): string {
+  if (!raw || raw.trim() === "" || /^(none|n\/a|no website|-)$/i.test(raw.trim())) return "";
+  const s = raw.trim().startsWith("http") ? raw.trim() : `https://${raw.trim()}`;
+  try { return new URL(s).hostname.replace(/^www\./, ""); }
+  catch { return ""; }
+}
+
+/**
+ * Returns true if the domain has at least one A/AAAA record (i.e. is real and live).
+ * Times out after 5 s so it never hangs the whole request.
+ */
+async function verifyWebsiteDomain(website: string): Promise<boolean> {
+  const host = extractHostname(website);
+  if (!host) return true; // no website listed → not a reason to discard
+  try {
+    await Promise.race([
+      dnsPromises.lookup(host),
+      new Promise<never>((_, r) => setTimeout(() => r(new Error("timeout")), 5000)),
+    ]);
+    return true;
+  } catch { return false; }
+}
+
+/**
+ * Returns true if the email's domain has at least one MX record.
+ * Emails sent to a domain with no MX will always bounce.
+ */
+async function verifyEmailMx(email: string): Promise<boolean> {
+  if (!email || !email.includes("@")) return false;
+  const domain = email.split("@")[1].toLowerCase();
+  try {
+    const records = await Promise.race([
+      dnsPromises.resolveMx(domain),
+      new Promise<never>((_, r) => setTimeout(() => r(new Error("timeout")), 5000)),
+    ]);
+    return Array.isArray(records) && records.length > 0;
+  } catch { return false; }
+}
+
+/**
+ * Verify all prospects in parallel; return only those whose email domain has
+ * MX records AND (if a website is listed) whose website domain resolves in DNS.
+ */
+async function filterLiveProspects(prospects: any[]): Promise<{ live: any[]; dead: number }> {
+  const results = await Promise.all(
+    prospects
+      .filter(biz => biz && typeof biz === "object")
+      .map(async (biz) => {
+        const [emailOk, domainOk] = await Promise.all([
+          verifyEmailMx(biz.email),
+          verifyWebsiteDomain(biz.website),
+        ]);
+        return { biz, ok: emailOk && domainOk };
+      })
+  );
+  const live = results.filter(r => r.ok).map(r => r.biz);
+  return { live, dead: results.length - live.length };
+}
+
+// ─── Placeholder filler ───────────────────────────────────────────────────────
+
+/**
+ * Replace any unfilled bracket placeholders in AI-generated text with real values.
+ * Covers patterns like [Your Name], [Agency Name], [Your Company], etc.
+ */
+function fillPlaceholders(
+  text: string,
+  senderName = "Daniel",
+  agencyName = "DevStudio"
+): string {
+  return text
+    .replace(/\[(?:your\s+)?name\]/gi, senderName)
+    .replace(/\[sender(?:\s+name)?\]/gi, senderName)
+    .replace(/\[(?:agency|company|your\s+(?:agency|company))(?:\s+name)?\]/gi, agencyName)
+    .replace(/\[(?:from|your)\s+(?:email\s+)?signature\]/gi, agencyName)
+    // catch any remaining single-word bracket token that looks like a placeholder
+    .replace(/\[\s*[A-Z][a-zA-Z\s]{1,30}\s*\]/g, (match) => {
+      const inner = match.replace(/[\[\]]/g, "").trim().toLowerCase();
+      if (inner.includes("name") || inner === "your" || inner === "sender") return senderName;
+      if (inner.includes("agency") || inner.includes("company") || inner.includes("studio")) return agencyName;
+      return match; // leave truly unknown tokens as-is
+    });
 }
 
 // ─── 1x1 transparent GIF for open-tracking pixel ─────────────────────────────
@@ -556,7 +644,12 @@ Make the data diverse: mix of businesses with websites and without, different ow
   try {
     const text = await generateText(prompt);
     const data = parseJSON(text);
-    res.json(Array.isArray(data) ? data : data.businesses || []);
+    const raw: any[] = Array.isArray(data) ? data : data.businesses || [];
+
+    // Verify each prospect: email domain must have MX records; website domain (if given) must resolve in DNS.
+    const { live, dead } = await filterLiveProspects(raw);
+
+    res.json({ prospects: live, filtered: dead, total: raw.length });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -575,6 +668,11 @@ Be specific to a ${category} business in ${city}. If no website, give website sc
   try {
     const text = await generateText(prompt);
     const data = parseJSON(text);
+    // Fill any bracket placeholders the AI left in generated email/messages
+    if (data?.email?.body) data.email.body = fillPlaceholders(data.email.body);
+    if (data?.email?.subject) data.email.subject = fillPlaceholders(data.email.subject);
+    if (data?.whatsapp) data.whatsapp = fillPlaceholders(data.whatsapp);
+    if (data?.linkedin) data.linkedin = fillPlaceholders(data.linkedin);
     res.json(data);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -607,6 +705,8 @@ Rules: NEVER use generic AI phrases like "I hope this finds you well" or "I want
 Return JSON: { "subject":"string","body":"string" }`;
     const text = await generateText(prompt);
     const data = parseJSON(text);
+    if (data?.subject) data.subject = fillPlaceholders(data.subject);
+    if (data?.body) data.body = fillPlaceholders(data.body);
     res.json(data);
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -620,6 +720,7 @@ Rules: Max 120 words. Friendly, conversational tone. Professional but not stiff.
 Return JSON: { "message":"string" }`;
     const text = await generateText(prompt);
     const data = parseJSON(text);
+    if (data?.message) data.message = fillPlaceholders(data.message);
     res.json(data);
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -632,6 +733,7 @@ Rules: Max 300 characters. Professional and genuine. No generic phrases. Mention
 Return JSON: { "message":"string" }`;
     const text = await generateText(prompt);
     const data = parseJSON(text);
+    if (data?.message) data.message = fillPlaceholders(data.message);
     res.json(data);
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });

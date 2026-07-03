@@ -1,5 +1,6 @@
 import { Router } from "express";
 import nodemailer from "nodemailer";
+import { promises as dnsPromises } from "dns";
 import { db, emailAccountsTable, automationSettingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { getGeminiAI } from "./api-keys";
@@ -45,6 +46,76 @@ function parseJSON(text: string): any {
     throw new Error("Failed to parse AI response as JSON");
   }
 }
+
+// ─── Domain / email verification helpers ─────────────────────────────────────
+
+function extractHostname(raw: string): string {
+  if (!raw || raw.trim() === "" || /^(none|n\/a|no website|-)$/i.test(raw.trim())) return "";
+  const s = raw.trim().startsWith("http") ? raw.trim() : `https://${raw.trim()}`;
+  try { return new URL(s).hostname.replace(/^www\./, ""); }
+  catch { return ""; }
+}
+
+async function verifyWebsiteDomain(website: string): Promise<boolean> {
+  const host = extractHostname(website);
+  if (!host) return true;
+  try {
+    await Promise.race([
+      dnsPromises.lookup(host),
+      new Promise<never>((_, r) => setTimeout(() => r(new Error("timeout")), 5000)),
+    ]);
+    return true;
+  } catch { return false; }
+}
+
+async function verifyEmailMx(email: string): Promise<boolean> {
+  if (!email || !email.includes("@")) return false;
+  const domain = email.split("@")[1].toLowerCase();
+  try {
+    const records = await Promise.race([
+      dnsPromises.resolveMx(domain),
+      new Promise<never>((_, r) => setTimeout(() => r(new Error("timeout")), 5000)),
+    ]);
+    return Array.isArray(records) && records.length > 0;
+  } catch { return false; }
+}
+
+async function filterLiveProspects(prospects: any[]): Promise<any[]> {
+  const results = await Promise.all(
+    prospects
+      .filter(biz => biz && typeof biz === "object")
+      .map(async (biz) => {
+        const [emailOk, domainOk] = await Promise.all([
+          verifyEmailMx(biz.email),
+          verifyWebsiteDomain(biz.website),
+        ]);
+        return { biz, ok: emailOk && domainOk };
+      })
+  );
+  return results.filter(r => r.ok).map(r => r.biz);
+}
+
+// ─── Placeholder filler ───────────────────────────────────────────────────────
+
+function fillPlaceholders(
+  text: string,
+  senderName = "Daniel",
+  agencyName = "DevStudio"
+): string {
+  return text
+    .replace(/\[(?:your\s+)?name\]/gi, senderName)
+    .replace(/\[sender(?:\s+name)?\]/gi, senderName)
+    .replace(/\[(?:agency|company|your\s+(?:agency|company))(?:\s+name)?\]/gi, agencyName)
+    .replace(/\[(?:from|your)\s+(?:email\s+)?signature\]/gi, agencyName)
+    .replace(/\[\s*[A-Z][a-zA-Z\s]{1,30}\s*\]/g, (match) => {
+      const inner = match.replace(/[\[\]]/g, "").trim().toLowerCase();
+      if (inner.includes("name") || inner === "your" || inner === "sender") return senderName;
+      if (inner.includes("agency") || inner.includes("company") || inner.includes("studio")) return agencyName;
+      return match;
+    });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 function maskPassword(acct: any) {
   return { ...acct, password: acct.password ? "••••••••" : "" };
@@ -270,6 +341,10 @@ Return ONLY a JSON array. Each object:
     businesses = parseJSON(text);
     if (!Array.isArray(businesses)) businesses = [];
     runStats.hunted = businesses.length;
+
+    // Filter: discard businesses whose email domain has no MX records or whose website domain doesn't resolve in DNS
+    businesses = await filterLiveProspects(businesses);
+    runStats.filtered = runStats.hunted - businesses.length;
   } catch { runStats.errors++; }
 
   // 2. Auto-score + generate email content for each, then send
@@ -293,7 +368,12 @@ Return ONLY JSON: { "analysis": { "websiteScore":<0-100>,"leadScore":<0-100>,"co
         const genText = await generateText(autoPrompt);
         const genData = parseJSON(genText);
         analysis = genData.analysis;
-        emailContent = genData.email;
+        emailContent = genData.email
+          ? {
+              subject: fillPlaceholders(genData.email.subject || ""),
+              body: fillPlaceholders(genData.email.body || ""),
+            }
+          : null;
         runStats.scored++;
       } catch { runStats.errors++; }
     }

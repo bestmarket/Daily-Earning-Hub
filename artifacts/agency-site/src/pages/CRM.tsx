@@ -685,12 +685,16 @@ function AIHunterPanel({ onImport }: { onImport: (prospects: Omit<Prospect, "id"
     setHunting(true); setError(""); setResults([]); setProgress("🔍 AI is scanning for businesses…");
 
     try {
-      const businesses: HuntedBusiness[] = await callCRM("hunt-businesses", {
+      const resp = await callCRM("hunt-businesses", {
         category, city: city.trim(), country: country.trim(), count: Number(count), extraContext,
       });
-      const tagged = businesses.map(b => ({ ...b, selected: true, imported: false, importing: false }));
+      // API returns { prospects, filtered, total } — fall back to plain array for older builds
+      const businesses: HuntedBusiness[] = Array.isArray(resp) ? resp : (resp.prospects ?? []);
+      const filtered: number = resp.filtered ?? 0;
+      const tagged = businesses.map((b: HuntedBusiness) => ({ ...b, selected: true, imported: false, importing: false }));
       setResults(tagged);
-      setProgress(`✓ Found ${tagged.length} ${category} businesses in ${city}`);
+      const filterNote = filtered > 0 ? ` (${filtered} with dead domains removed)` : "";
+      setProgress(`✓ Found ${tagged.length} ${category} businesses in ${city}${filterNote}`);
     } catch (e: any) {
       setError(e.message); setProgress("");
     } finally { setHunting(false); }
