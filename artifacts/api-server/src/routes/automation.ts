@@ -3,7 +3,7 @@ import nodemailer from "nodemailer";
 import { promises as dnsPromises } from "dns";
 import { ImapFlow } from "imapflow";
 import { db, emailAccountsTable, automationSettingsTable, emailTrackingTable, followUpQueueTable, inboxRepliesTable } from "@workspace/db";
-import { eq, and, lte, isNull } from "drizzle-orm";
+import { eq, and, lte, isNull, desc } from "drizzle-orm";
 import { getGeminiAI } from "./api-keys";
 import { sendMail as brevoSendMail, brevoTransporter } from "../lib/brevo-mailer";
 
@@ -559,8 +559,9 @@ async function readImapMessages(acct: {
       const since = new Date();
       since.setDate(since.getDate() - 7);
       const uids = await client.search({ since });
-      if (uids.length > 0) {
-        const subset = uids.slice(-50); // cap at 50 per account
+      const uidList = Array.isArray(uids) ? uids : [];
+      if (uidList.length > 0) {
+        const subset = uidList.slice(-50); // cap at 50 per account
         for await (const msg of client.fetch(subset as any, {
           envelope: true,
           bodyParts: ["TEXT", "1"],
@@ -665,16 +666,6 @@ router.post("/automation/check-replies", async (_req, res) => {
         if (acct.fromEmail && msg.from.toLowerCase() === acct.fromEmail.toLowerCase()) continue;
         if (!msg.text.trim()) continue;
 
-        // Skip if already stored
-        const [existing] = await db
-          .select({ id: inboxRepliesTable.id })
-          .from(inboxRepliesTable)
-          .where(eq(inboxRepliesTable.messageId, msg.messageId))
-          .limit(1);
-        if (existing) continue;
-
-        totalChecked++;
-
         // Look up the business name from the follow-up queue
         const [knownLead] = await db
           .select({ businessName: followUpQueueTable.businessName })
@@ -682,6 +673,27 @@ router.post("/automation/check-replies", async (_req, res) => {
           .where(eq(followUpQueueTable.prospectEmail, msg.from))
           .limit(1);
         const businessName = knownLead?.businessName || msg.from;
+
+        // Atomically claim this message by inserting first (pending classification).
+        // If another concurrent run already inserted it, the unique constraint fires and
+        // onConflictDoNothing returns zero rows — we skip to avoid duplicate auto-replies.
+        const inserted = await db
+          .insert(inboxRepliesTable)
+          .values({
+            messageId: msg.messageId,
+            accountId: acct.id,
+            prospectEmail: msg.from,
+            businessName,
+            subject: msg.subject,
+            bodyText: msg.text,
+            classification: "pending",
+            receivedAt: msg.date,
+          })
+          .onConflictDoNothing()
+          .returning({ id: inboxRepliesTable.id });
+        if (!inserted.length) continue; // already handled by another run
+
+        totalChecked++;
 
         // AI classify + draft response
         const { classification, response } = await classifyAndRespond(msg.text, businessName);
@@ -706,21 +718,11 @@ router.post("/automation/check-replies", async (_req, res) => {
           } catch {}
         }
 
+        // Update the row with classification results now that we've sent the reply
         await db
-          .insert(inboxRepliesTable)
-          .values({
-            messageId: msg.messageId,
-            accountId: acct.id,
-            prospectEmail: msg.from,
-            businessName,
-            subject: msg.subject,
-            bodyText: msg.text,
-            classification,
-            aiResponse: response,
-            aiRepliedAt,
-            receivedAt: msg.date,
-          })
-          .onConflictDoNothing();
+          .update(inboxRepliesTable)
+          .set({ classification, aiResponse: response, aiRepliedAt })
+          .where(eq(inboxRepliesTable.id, inserted[0].id));
 
         newReplies.push({ from: msg.from, businessName, classification, subject: msg.subject, autoReplied: !!aiRepliedAt });
       }
@@ -744,7 +746,7 @@ router.get("/automation/replies", async (req, res) => {
     const rows = await db
       .select()
       .from(inboxRepliesTable)
-      .orderBy(inboxRepliesTable.receivedAt)
+      .orderBy(desc(inboxRepliesTable.receivedAt))
       .limit(limit);
     res.json(rows.map(r => ({
       ...r,

@@ -165,7 +165,7 @@ async function searchGooglePlaces(category: string, city: string, country: strin
       }),
       new Promise<never>((_, r) => setTimeout(() => r(new Error("timeout")), 10000)),
     ]) as Response;
-    const data = await res.json();
+    const data = await res.json() as any;
     // Only return businesses confirmed operational
     return (data.places || []).filter((p: any) =>
       !p.businessStatus || p.businessStatus === "OPERATIONAL"
@@ -749,18 +749,8 @@ router.post("/crm/hunt-businesses", async (req, res) => {
       // Keep only entries where we found a real email from the website
       raw = converted.filter(p => p.email);
 
-      // If Google Places returned businesses but none had findable emails,
-      // fall through to AI with a note so the user knows
-      if (raw.length === 0 && places.length > 0) {
-        res.json({
-          prospects: [],
-          filtered: places.length,
-          total: places.length,
-          source: "google_places",
-          warning: "Google Places found businesses but none had a publicly listed email on their websites. Try a different category or city, or enable AI fallback.",
-        });
-        return;
-      }
+      // If Places found businesses but none had scrapeable emails, fall through to AI
+      // (raw remains empty, the block below will run the AI fallback)
     }
 
     // ── Step 2: AI fallback when no Places key or zero results ────────────────

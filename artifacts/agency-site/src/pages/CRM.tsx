@@ -14,7 +14,7 @@ import {
   AlertTriangle, Clock, TrendingUp, Users, Target, Sparkles, Download,
   X, Copy, Check, Building, Zap, LayoutDashboard, Radar,
   Settings, Eye, EyeOff, Wifi, WifiOff, PlayCircle, StopCircle,
-  ChevronDown, ChevronUp, Bot, MapPin, Filter,
+  ChevronDown, ChevronUp, Bot, MapPin, Filter, Inbox, BotMessageSquare,
 } from "lucide-react";
 import API_BASE from "@/lib/api";
 
@@ -1919,6 +1919,168 @@ function ProspectList({ prospects, onSelect, onDelete, onUpdate }: {
   );
 }
 
+// ─── Inbox Replies Panel ──────────────────────────────────────────────────────
+
+type InboxReply = {
+  id: number;
+  prospectEmail: string;
+  businessName: string;
+  subject: string;
+  bodyText: string;
+  classification: string;
+  aiResponse: string | null;
+  aiRepliedAt: string | null;
+  receivedAt: string;
+  read: boolean;
+};
+
+const CLASSIFICATION_META: Record<string, { label: string; color: string }> = {
+  interested:      { label: "Interested",      color: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30" },
+  call_requested:  { label: "Call Requested",  color: "bg-amber-500/15  text-amber-400  border-amber-500/30" },
+  not_interested:  { label: "Not Interested",  color: "bg-slate-500/15  text-slate-400  border-slate-500/30" },
+  objection:       { label: "Objection",       color: "bg-rose-500/15   text-rose-400   border-rose-500/30" },
+  other:           { label: "Other",            color: "bg-sky-500/15    text-sky-400    border-sky-500/30" },
+};
+
+function InboxPanel() {
+  const [replies, setReplies] = useState<InboxReply[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [expanded, setExpanded] = useState<number | null>(null);
+
+  const loadReplies = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await fetch(`${apiBase()}/api/automation/replies?limit=100`);
+      if (r.ok) setReplies(await r.json());
+    } finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { loadReplies(); }, [loadReplies]);
+
+  const checkReplies = async () => {
+    setChecking(true);
+    setMsg("");
+    try {
+      const r = await fetch(`${apiBase()}/api/automation/check-replies`, { method: "POST" });
+      const d = await r.json();
+      setMsg(d.message || (d.error ? `Error: ${d.error}` : "Done"));
+      if (!d.error) await loadReplies();
+    } finally { setChecking(false); }
+  };
+
+  const markRead = async (id: number) => {
+    await fetch(`${apiBase()}/api/automation/replies/${id}/read`, { method: "PATCH" });
+    setReplies(r => r.map(x => x.id === id ? { ...x, read: true } : x));
+  };
+
+  const unread = replies.filter(r => !r.read).length;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold flex items-center gap-2">
+            <Inbox className="w-5 h-5 text-primary" />
+            Inbox Replies
+            {unread > 0 && (
+              <span className="text-xs bg-primary text-white px-2 py-0.5 rounded-full font-bold">{unread} new</span>
+            )}
+          </h2>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            Replies from prospects — AI classifies each one and auto-responds if enabled.
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={loadReplies} disabled={loading}>
+            <RefreshCw className={`w-4 h-4 mr-1.5 ${loading ? "animate-spin" : ""}`} /> Refresh
+          </Button>
+          <Button size="sm" onClick={checkReplies} disabled={checking}>
+            <BotMessageSquare className="w-4 h-4 mr-1.5" />
+            {checking ? "Checking…" : "Check Inbox"}
+          </Button>
+        </div>
+      </div>
+
+      {msg && (
+        <div className="text-sm px-3 py-2 rounded-lg bg-muted border border-border text-muted-foreground">
+          {msg}
+        </div>
+      )}
+
+      {replies.length === 0 && !loading && (
+        <div className="text-center py-16 text-muted-foreground">
+          <Inbox className="w-10 h-10 mx-auto mb-3 opacity-30" />
+          <p className="font-medium">No replies yet</p>
+          <p className="text-sm mt-1">Make sure IMAP is enabled on your email accounts, then click <strong>Check Inbox</strong>.</p>
+        </div>
+      )}
+
+      <div className="space-y-2">
+        {replies.map(reply => {
+          const meta = CLASSIFICATION_META[reply.classification] ?? CLASSIFICATION_META.other;
+          const isOpen = expanded === reply.id;
+          return (
+            <motion.div
+              key={reply.id}
+              layout
+              className={`rounded-xl border ${reply.read ? "border-border bg-card/50" : "border-primary/30 bg-primary/5"} overflow-hidden`}
+            >
+              <button
+                className="w-full flex items-center gap-3 px-4 py-3 text-left"
+                onClick={() => {
+                  setExpanded(isOpen ? null : reply.id);
+                  if (!reply.read) markRead(reply.id);
+                }}
+              >
+                {!reply.read && <span className="w-2 h-2 rounded-full bg-primary flex-shrink-0" />}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-medium text-sm truncate">{reply.businessName || reply.prospectEmail}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${meta.color}`}>{meta.label}</span>
+                    {reply.aiRepliedAt && (
+                      <span className="text-xs text-emerald-400 flex items-center gap-1">
+                        <BotMessageSquare className="w-3 h-3" /> Auto-replied
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground truncate mt-0.5">{reply.subject}</p>
+                </div>
+                <span className="text-xs text-muted-foreground flex-shrink-0">
+                  {new Date(reply.receivedAt).toLocaleDateString()}
+                </span>
+                {isOpen ? <ChevronUp className="w-4 h-4 text-muted-foreground flex-shrink-0" /> : <ChevronDown className="w-4 h-4 text-muted-foreground flex-shrink-0" />}
+              </button>
+
+              {isOpen && (
+                <div className="px-4 pb-4 space-y-3 border-t border-border pt-3">
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground mb-1">Their reply</p>
+                    <p className="text-sm whitespace-pre-wrap bg-muted/50 rounded-lg p-3 border border-border">
+                      {reply.bodyText || "(empty)"}
+                    </p>
+                  </div>
+                  {reply.aiResponse && (
+                    <div>
+                      <p className="text-xs font-medium text-muted-foreground mb-1 flex items-center gap-1">
+                        <BotMessageSquare className="w-3 h-3" /> AI response sent
+                      </p>
+                      <p className="text-sm whitespace-pre-wrap bg-emerald-950/30 rounded-lg p-3 border border-emerald-800/30">
+                        {reply.aiResponse}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </motion.div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ─── Main CRM Page ────────────────────────────────────────────────────────────
 
 export default function CRM() {
@@ -2003,6 +2165,9 @@ export default function CRM() {
             <TabsTrigger value="email-settings" className="flex-1 gap-1.5">
               <Settings className="w-4 h-4" /> Email Settings
             </TabsTrigger>
+            <TabsTrigger value="inbox" className="flex-1 gap-1.5">
+              <Inbox className="w-4 h-4" /> Inbox
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="hunter">
@@ -2024,6 +2189,10 @@ export default function CRM() {
 
           <TabsContent value="email-settings">
             <EmailSettingsPanel />
+          </TabsContent>
+
+          <TabsContent value="inbox">
+            <InboxPanel />
           </TabsContent>
         </Tabs>
       </div>
