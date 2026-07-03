@@ -230,184 +230,347 @@ function LoadingSpinner({ text }: { text: string }) {
   );
 }
 
-// ─── Email Settings Panel ─────────────────────────────────────────────────────
+// ─── Email Settings Panel (multi-account + rotation) ──────────────────────────
 
-function EmailSettingsPanel() {
-  const [config, setConfig] = useState<EmailConfig>({
-    provider: "gmail", host: "smtp.gmail.com", port: 587, secure: false,
-    user: "", password: "", fromName: "DevStudio", fromEmail: "",
+function AccountDialog({ account, onSave, onClose }: {
+  account?: EmailAccount;
+  onSave: (a: EmailAccount) => void;
+  onClose: () => void;
+}) {
+  const [form, setForm] = useState({
+    label: account?.label ?? "",
+    provider: account?.provider ?? "gmail",
+    host: account?.host ?? "smtp.gmail.com",
+    port: account?.port ?? 587,
+    secure: account?.secure ?? false,
+    user: account?.user ?? "",
+    password: "",
+    fromName: account?.fromName ?? "DevStudio",
+    fromEmail: account?.fromEmail ?? "",
   });
   const [showPass, setShowPass] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
-  const [testEmail, setTestEmail] = useState("");
+  const [testTo, setTestTo] = useState("");
   const [status, setStatus] = useState<{ type: "success" | "error"; msg: string } | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    fetch(`${apiBase()}/api/crm/email-config`)
-      .then(r => r.json())
-      .then(d => { setConfig(d); setLoading(false); })
-      .catch(() => setLoading(false));
-  }, []);
 
   const applyPreset = (provider: string) => {
-    const preset = PROVIDER_PRESETS[provider] || {};
-    setConfig(prev => ({ ...prev, ...preset }));
+    const cfg = PROVIDER_CONFIGS[provider] || PROVIDER_CONFIGS.smtp;
+    setForm(f => ({ ...f, provider, host: cfg.host, port: cfg.port, secure: false }));
   };
 
   const save = async () => {
+    if (!form.host || !form.user || (!form.password && !account)) {
+      setStatus({ type: "error", msg: "Host, email, and password are required." });
+      return;
+    }
     setSaving(true); setStatus(null);
     try {
-      const r = await fetch(`${apiBase()}/api/crm/email-config`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(config),
+      const url = account ? `${apiBase()}/api/crm/email-accounts/${account.id}` : `${apiBase()}/api/crm/email-accounts`;
+      const r = await fetch(url, {
+        method: account ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
       });
-      if (!r.ok) throw new Error("Save failed");
-      setStatus({ type: "success", msg: "Email settings saved." });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "Save failed");
+      onSave(d.account);
     } catch (e: any) {
       setStatus({ type: "error", msg: e.message });
     } finally { setSaving(false); }
   };
 
-  const sendTest = async () => {
+  const test = async () => {
+    if (!account) { setStatus({ type: "error", msg: "Save the account first, then send a test." }); return; }
     setTesting(true); setStatus(null);
     try {
-      const r = await fetch(`${apiBase()}/api/crm/test-email`, {
+      const r = await fetch(`${apiBase()}/api/crm/email-accounts/${account.id}/test`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ to: testEmail || config.user }),
+        body: JSON.stringify({ to: testTo || form.user }),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error);
-      setStatus({ type: "success", msg: `Test email sent to ${testEmail || config.user}` });
+      setStatus({ type: "success", msg: `Test email sent to ${testTo || form.user}` });
     } catch (e: any) {
       setStatus({ type: "error", msg: e.message });
     } finally { setTesting(false); }
   };
 
-  if (loading) return <LoadingSpinner text="Loading email settings…" />;
+  const cfg = PROVIDER_CONFIGS[form.provider] || PROVIDER_CONFIGS.smtp;
 
   return (
-    <div className="space-y-5 max-w-2xl">
-      <div>
-        <h3 className="font-bold text-lg mb-1">Email Sender Setup</h3>
-        <p className="text-sm text-muted-foreground">Configure the email account used to send outreach to your prospects. Works with Gmail, Outlook, or any custom SMTP.</p>
-      </div>
+    <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>{account ? "Edit Email Account" : "Add Email Account"}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          {status && (
+            <div className={`flex items-center gap-2 text-sm px-3 py-2.5 rounded-lg border ${status.type === "success" ? "bg-green-50 text-green-800 border-green-200" : "bg-red-50 text-red-700 border-red-200"}`}>
+              {status.type === "success" ? <CheckCircle2 className="w-4 h-4 flex-shrink-0" /> : <AlertTriangle className="w-4 h-4 flex-shrink-0" />}
+              {status.msg}
+            </div>
+          )}
 
-      {status && (
-        <div className={`flex items-center gap-2 text-sm px-4 py-3 rounded-lg border ${status.type === "success" ? "bg-green-50 text-green-800 border-green-200" : "bg-red-50 text-red-700 border-red-200"}`}>
-          {status.type === "success" ? <CheckCircle2 className="w-4 h-4 flex-shrink-0" /> : <AlertTriangle className="w-4 h-4 flex-shrink-0" />}
-          {status.msg}
-        </div>
-      )}
-
-      {/* Provider */}
-      <div className="rounded-xl border border-border/50 overflow-hidden">
-        <div className="p-3 bg-muted/20 border-b border-border/50">
-          <h4 className="text-sm font-bold">Email Provider</h4>
-        </div>
-        <div className="p-4">
-          <div className="grid grid-cols-3 gap-2">
-            {[
-              { id: "gmail", label: "Gmail", icon: "📧", hint: "Use App Password" },
-              { id: "outlook", label: "Outlook / 365", icon: "📨", hint: "Microsoft account" },
-              { id: "smtp", label: "Custom SMTP", icon: "⚙️", hint: "Any mail provider" },
-            ].map(p => (
-              <button key={p.id} onClick={() => applyPreset(p.id)}
-                className={`flex flex-col items-center gap-1 p-3 rounded-xl border-2 transition-all text-sm font-semibold ${config.provider === p.id ? "border-primary bg-primary/5 text-primary" : "border-border/50 hover:border-primary/40"}`}>
-                <span className="text-2xl">{p.icon}</span>
-                <span>{p.label}</span>
-                <span className="text-xs font-normal text-muted-foreground">{p.hint}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* SMTP settings */}
-      <div className="rounded-xl border border-border/50 overflow-hidden">
-        <div className="p-3 bg-muted/20 border-b border-border/50">
-          <h4 className="text-sm font-bold">Connection Settings</h4>
-        </div>
-        <div className="p-4 grid grid-cols-2 gap-3">
-          <div className="col-span-2 md:col-span-1">
-            <label className="text-xs font-semibold text-muted-foreground mb-1 block">SMTP Host</label>
-            <Input value={config.host} onChange={e => setConfig(p => ({ ...p, host: e.target.value }))} placeholder="smtp.gmail.com" />
-          </div>
           <div>
-            <label className="text-xs font-semibold text-muted-foreground mb-1 block">Port</label>
-            <Input type="number" value={config.port} onChange={e => setConfig(p => ({ ...p, port: Number(e.target.value) }))} placeholder="587" />
+            <label className="text-xs font-semibold text-muted-foreground mb-2 block">Email Provider</label>
+            <div className="grid grid-cols-2 gap-2">
+              {Object.entries(PROVIDER_CONFIGS).map(([id, p]) => (
+                <button key={id} onClick={() => applyPreset(id)}
+                  className={`flex items-center gap-2 p-2.5 rounded-xl border-2 text-sm font-semibold transition-all ${form.provider === id ? "border-primary bg-primary/5 text-primary" : "border-border/50 hover:border-primary/40"}`}>
+                  <span className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs font-bold border ${p.colorClass}`}>{p.icon}</span>
+                  <span>{p.label}</span>
+                </button>
+              ))}
+            </div>
+            {cfg.hint && <p className="text-xs text-muted-foreground mt-1.5 bg-muted/30 px-3 py-2 rounded-lg">{cfg.hint}</p>}
           </div>
-          <div className="col-span-2 flex items-center gap-3">
-            <Switch checked={config.secure} onCheckedChange={v => setConfig(p => ({ ...p, secure: v }))} />
+
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground mb-1 block">Account Label</label>
+            <Input value={form.label} onChange={e => setForm(f => ({ ...f, label: e.target.value }))} placeholder="e.g. Main Gmail, Sales Brevo" />
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            <div className="col-span-2">
+              <label className="text-xs font-semibold text-muted-foreground mb-1 block">SMTP Host</label>
+              <Input value={form.host} onChange={e => setForm(f => ({ ...f, host: e.target.value }))} placeholder="smtp.gmail.com" />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-muted-foreground mb-1 block">Port</label>
+              <Input type="number" value={form.port} onChange={e => setForm(f => ({ ...f, port: Number(e.target.value) }))} />
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <Switch checked={form.secure} onCheckedChange={v => setForm(f => ({ ...f, secure: v }))} />
             <label className="text-sm font-medium">Use SSL/TLS (port 465)</label>
           </div>
-        </div>
-      </div>
 
-      {/* Credentials */}
-      <div className="rounded-xl border border-border/50 overflow-hidden">
-        <div className="p-3 bg-muted/20 border-b border-border/50">
-          <h4 className="text-sm font-bold">Login Credentials</h4>
-        </div>
-        <div className="p-4 grid grid-cols-2 gap-3">
-          <div className="col-span-2">
-            <label className="text-xs font-semibold text-muted-foreground mb-1 block">Email Address (your login)</label>
-            <Input type="email" value={config.user} onChange={e => setConfig(p => ({ ...p, user: e.target.value }))} placeholder="you@gmail.com" />
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground mb-1 block">Email / Login</label>
+            <Input type="email" value={form.user} onChange={e => setForm(f => ({ ...f, user: e.target.value }))} placeholder="you@gmail.com" />
           </div>
-          <div className="col-span-2">
+          <div>
             <label className="text-xs font-semibold text-muted-foreground mb-1 block">
-              Password
-              {config.provider === "gmail" && <span className="text-primary ml-1 font-normal">(use Gmail App Password, not your main password)</span>}
+              Password {account?.hasPassword && <span className="text-muted-foreground font-normal">(leave blank to keep current)</span>}
             </label>
             <div className="relative">
-              <Input type={showPass ? "text" : "password"} value={config.password}
-                onChange={e => setConfig(p => ({ ...p, password: e.target.value }))}
-                placeholder={config.provider === "gmail" ? "16-char App Password" : "your password"} className="pr-10" />
-              <button className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-                onClick={() => setShowPass(v => !v)}>
+              <Input type={showPass ? "text" : "password"} value={form.password}
+                onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
+                placeholder={account?.hasPassword ? "••••••••  (unchanged)" : form.provider === "gmail" ? "16-char App Password" : "your password"}
+                className="pr-10" />
+              <button className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground" onClick={() => setShowPass(v => !v)}>
                 {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
             </div>
-            {config.provider === "gmail" && (
-              <p className="text-xs text-muted-foreground mt-1.5">
-                <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener noreferrer" className="text-primary underline">Generate Gmail App Password →</a>
-                {" "}(requires 2FA enabled on your Google account)
-              </p>
+            {form.provider === "gmail" && (
+              <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener noreferrer" className="text-xs text-primary underline mt-1 block">
+                Generate Gmail App Password →
+              </a>
             )}
           </div>
-          <div>
-            <label className="text-xs font-semibold text-muted-foreground mb-1 block">Sender Name</label>
-            <Input value={config.fromName} onChange={e => setConfig(p => ({ ...p, fromName: e.target.value }))} placeholder="DevStudio" />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-semibold text-muted-foreground mb-1 block">Sender Name</label>
+              <Input value={form.fromName} onChange={e => setForm(f => ({ ...f, fromName: e.target.value }))} placeholder="DevStudio" />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-muted-foreground mb-1 block">From Email (optional)</label>
+              <Input type="email" value={form.fromEmail} onChange={e => setForm(f => ({ ...f, fromEmail: e.target.value }))} placeholder="Same as login" />
+            </div>
           </div>
-          <div>
-            <label className="text-xs font-semibold text-muted-foreground mb-1 block">From Email (optional)</label>
-            <Input type="email" value={config.fromEmail} onChange={e => setConfig(p => ({ ...p, fromEmail: e.target.value }))} placeholder="Same as login if empty" />
+
+          {account && (
+            <div className="flex gap-2 pt-1">
+              <Input value={testTo} onChange={e => setTestTo(e.target.value)} placeholder="Test recipient (optional)" className="flex-1" />
+              <Button variant="outline" onClick={test} disabled={testing} className="gap-1.5 whitespace-nowrap">
+                {testing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                {testing ? "Sending…" : "Send Test"}
+              </Button>
+            </div>
+          )}
+
+          <div className="flex gap-2 pt-1">
+            <Button onClick={save} disabled={saving} className="flex-1 gap-2">
+              {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+              {saving ? "Saving…" : account ? "Save Changes" : "Add Account"}
+            </Button>
+            <Button variant="outline" onClick={onClose}>Cancel</Button>
           </div>
         </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function EmailSettingsPanel() {
+  const [accounts, setAccounts] = useState<EmailAccount[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [editingAccount, setEditingAccount] = useState<EmailAccount | undefined>(undefined);
+  const [showAddDialog, setShowAddDialog] = useState(false);
+  const [testingId, setTestingId] = useState<number | null>(null);
+  const [testStatus, setTestStatus] = useState<Record<number, { type: "success" | "error"; msg: string }>>({});
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const r = await fetch(`${apiBase()}/api/crm/email-accounts`);
+      const d = await r.json();
+      setAccounts(Array.isArray(d) ? d : []);
+    } catch { /* ignore */ } finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const toggleActive = async (acct: EmailAccount) => {
+    setAccounts(prev => prev.map(a => a.id === acct.id ? { ...a, active: !acct.active } : a));
+    const r = await fetch(`${apiBase()}/api/crm/email-accounts/${acct.id}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ active: !acct.active }),
+    });
+    if (!r.ok) setAccounts(prev => prev.map(a => a.id === acct.id ? { ...a, active: acct.active } : a));
+  };
+
+  const deleteAccount = async (id: number) => {
+    setDeletingId(id);
+    try {
+      await fetch(`${apiBase()}/api/crm/email-accounts/${id}`, { method: "DELETE" });
+      setAccounts(prev => prev.filter(a => a.id !== id));
+    } finally { setDeletingId(null); }
+  };
+
+  const testAccount = async (acct: EmailAccount) => {
+    setTestingId(acct.id);
+    setTestStatus(prev => { const n = { ...prev }; delete n[acct.id]; return n; });
+    try {
+      const r = await fetch(`${apiBase()}/api/crm/email-accounts/${acct.id}/test`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to: acct.user }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error);
+      setTestStatus(prev => ({ ...prev, [acct.id]: { type: "success", msg: "Test email sent!" } }));
+    } catch (e: any) {
+      setTestStatus(prev => ({ ...prev, [acct.id]: { type: "error", msg: e.message } }));
+    } finally { setTestingId(null); }
+  };
+
+  const onSave = (savedAccount: EmailAccount) => {
+    setAccounts(prev => {
+      const exists = prev.find(a => a.id === savedAccount.id);
+      return exists ? prev.map(a => a.id === savedAccount.id ? savedAccount : a) : [...prev, savedAccount];
+    });
+    setEditingAccount(undefined);
+    setShowAddDialog(false);
+  };
+
+  const activeAccounts = accounts.filter(a => a.active);
+  const providerCfg = (p: string) => PROVIDER_CONFIGS[p] || PROVIDER_CONFIGS.smtp;
+
+  if (loading) return <LoadingSpinner text="Loading email accounts…" />;
+
+  return (
+    <div className="space-y-5 max-w-2xl">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="font-bold text-lg mb-1">Email Accounts</h3>
+          <p className="text-sm text-muted-foreground">Add multiple accounts — Gmail, Outlook, Brevo, or custom SMTP. The CRM rotates across all active accounts to send outreach.</p>
+        </div>
+        <Button onClick={() => setShowAddDialog(true)} className="gap-2 shrink-0">
+          <Plus className="w-4 h-4" /> Add Account
+        </Button>
       </div>
 
-      {/* Save & Test */}
-      <div className="flex flex-col sm:flex-row gap-3">
-        <Button onClick={save} disabled={saving} className="gap-2 font-semibold">
-          {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-          {saving ? "Saving…" : "Save Settings"}
-        </Button>
-        <div className="flex gap-2 flex-1">
-          <Input value={testEmail} onChange={e => setTestEmail(e.target.value)} placeholder="Test recipient email (optional)" className="flex-1" />
-          <Button variant="outline" onClick={sendTest} disabled={testing || !config.user || !config.password} className="gap-2 whitespace-nowrap">
-            {testing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-            {testing ? "Sending…" : "Send Test"}
+      {activeAccounts.length > 1 && (
+        <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-sm text-green-800">
+          <RefreshCw className="w-4 h-4 flex-shrink-0" />
+          <span><strong>Rotation active</strong> — outreach cycles across {activeAccounts.length} accounts, always sending from whichever has sent the least.</span>
+        </div>
+      )}
+      {activeAccounts.length === 1 && (
+        <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-sm text-blue-800">
+          <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+          <span><strong>1 active account</strong> — add another to enable rotation and higher daily sending limits.</span>
+        </div>
+      )}
+      {activeAccounts.length === 0 && accounts.length > 0 && (
+        <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800">
+          <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+          <span>No active accounts — enable at least one to send emails.</span>
+        </div>
+      )}
+
+      {accounts.length === 0 && (
+        <div className="text-center py-14 border-2 border-dashed border-border/40 rounded-xl">
+          <Mail className="w-10 h-10 mx-auto mb-3 text-muted-foreground/30" />
+          <h4 className="font-semibold text-base mb-1">No email accounts yet</h4>
+          <p className="text-sm text-muted-foreground mb-4 max-w-xs mx-auto">Add Gmail, Outlook, Brevo, or any custom SMTP to start sending outreach.</p>
+          <Button onClick={() => setShowAddDialog(true)} className="gap-2">
+            <Plus className="w-4 h-4" /> Add First Account
           </Button>
         </div>
+      )}
+
+      <div className="space-y-3">
+        {accounts.map(acct => {
+          const cfg = providerCfg(acct.provider);
+          const ts = testStatus[acct.id];
+          return (
+            <div key={acct.id} className={`rounded-xl border-2 overflow-hidden transition-all ${acct.active ? "border-border/60" : "border-border/20 opacity-60"}`}>
+              <div className="p-4 flex items-start gap-3">
+                <div className={`w-10 h-10 flex items-center justify-center rounded-xl border font-bold ${cfg.colorClass} flex-shrink-0`}>
+                  {cfg.icon}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-bold text-sm">{acct.label || acct.user}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded-full border font-semibold ${cfg.colorClass}`}>{cfg.label}</span>
+                    {acct.active
+                      ? <span className="text-xs text-green-700 bg-green-100 px-2 py-0.5 rounded-full font-semibold">Active</span>
+                      : <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full font-semibold">Inactive</span>}
+                    {acct.sentCount > 0 && <span className="text-xs text-muted-foreground">{acct.sentCount} sent</span>}
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-0.5 truncate">{acct.user}</div>
+                  <div className="text-xs text-muted-foreground">{acct.host}:{acct.port}</div>
+                </div>
+                <Switch checked={acct.active} onCheckedChange={() => toggleActive(acct)} />
+              </div>
+              <div className="px-4 pb-3 flex items-center gap-2 flex-wrap border-t border-border/30 pt-3">
+                <Button size="sm" variant="outline" onClick={() => testAccount(acct)} disabled={testingId === acct.id} className="h-7 text-xs gap-1">
+                  {testingId === acct.id ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+                  {testingId === acct.id ? "Testing…" : "Send Test"}
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setEditingAccount(acct)} className="h-7 text-xs gap-1">
+                  Edit
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => deleteAccount(acct.id)} disabled={deletingId === acct.id}
+                  className="h-7 text-xs gap-1 text-destructive/70 hover:text-destructive">
+                  {deletingId === acct.id ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                  Delete
+                </Button>
+                {ts && (
+                  <span className={`text-xs flex items-center gap-1 ${ts.type === "success" ? "text-green-700" : "text-red-600"}`}>
+                    {ts.type === "success" ? <CheckCircle2 className="w-3 h-3" /> : <AlertTriangle className="w-3 h-3" />}
+                    {ts.msg}
+                  </span>
+                )}
+              </div>
+            </div>
+          );
+        })}
       </div>
 
-      <div className="text-xs text-muted-foreground bg-muted/30 rounded-lg p-3 border border-border/40 space-y-1">
-        <p className="font-semibold">Tips for reliable email delivery:</p>
-        <p>• Gmail: Enable 2FA → generate App Password at myaccount.google.com/apppasswords</p>
-        <p>• Outlook: Use your Microsoft 365 password or an app-specific password</p>
-        <p>• Custom domain: Use your hosting provider's outgoing SMTP details</p>
-      </div>
+      {accounts.length > 0 && (
+        <div className="text-xs text-muted-foreground bg-muted/30 rounded-lg p-3 border border-border/40 space-y-1">
+          <p className="font-semibold">Provider setup tips:</p>
+          <p>• <strong>Gmail:</strong> Enable 2FA → myaccount.google.com/apppasswords → generate a 16-char App Password</p>
+          <p>• <strong>Outlook / 365:</strong> Use your Microsoft account password, or an app password if 2FA is on</p>
+          <p>• <strong>Brevo:</strong> SMTP & API → SMTP Keys → generate key (use as password, login is your Brevo email)</p>
+        </div>
+      )}
+
+      {showAddDialog && <AccountDialog onSave={onSave} onClose={() => setShowAddDialog(false)} />}
+      {editingAccount && <AccountDialog account={editingAccount} onSave={onSave} onClose={() => setEditingAccount(undefined)} />}
     </div>
   );
 }
