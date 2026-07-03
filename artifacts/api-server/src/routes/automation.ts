@@ -357,9 +357,43 @@ router.post("/automation/check-replies", async (_req, res) => {
   res.json({ checked: 0, replied: 0, message: "Reply checking requires IMAP — enable it on your email accounts and ensure IMAP access is enabled in Gmail settings." });
 });
 
+// ─── Daily email account health check ────────────────────────────────────────
+
+async function runHealthCheck() {
+  const accounts = await db.select().from(emailAccountsTable).where(eq(emailAccountsTable.active, true));
+  for (const acct of accounts) {
+    if (!acct.user || !acct.password) continue;
+    try {
+      const transporter = makeTransporter(acct);
+      await transporter.verify();
+      await db.update(emailAccountsTable).set({
+        lastError: "",
+        lastErrorAt: null,
+        consecutiveFailures: 0,
+      }).where(eq(emailAccountsTable.id, acct.id));
+    } catch (err: any) {
+      await db.update(emailAccountsTable).set({
+        lastError: err.message || "Verification failed",
+        lastErrorAt: new Date(),
+        consecutiveFailures: (acct.consecutiveFailures || 0) + 1,
+      }).where(eq(emailAccountsTable.id, acct.id));
+    }
+  }
+}
+
+router.post("/automation/health-check", async (_req, res) => {
+  try {
+    await runHealthCheck();
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── Scheduler (runs in-process) ─────────────────────────────────────────────
 
 let schedulerTimer: ReturnType<typeof setTimeout> | null = null;
+let healthCheckTimer: ReturnType<typeof setInterval> | null = null;
 
 async function scheduleNext() {
   if (schedulerTimer) clearTimeout(schedulerTimer);
@@ -378,6 +412,11 @@ export function startScheduler() {
   scheduleNext().catch(() => {});
   // Re-check every 5 minutes in case settings changed
   setInterval(() => scheduleNext().catch(() => {}), 5 * 60 * 1000);
+
+  // Run an initial account health check shortly after boot, then every 24h
+  setTimeout(() => runHealthCheck().catch(() => {}), 30_000);
+  if (healthCheckTimer) clearInterval(healthCheckTimer);
+  healthCheckTimer = setInterval(() => runHealthCheck().catch(() => {}), 24 * 60 * 60 * 1000);
 }
 
 export default router;

@@ -2088,8 +2088,18 @@ function AutomationTab() {
                       {acct.label || acct.user}
                       {acct.active ? <span className="text-xs text-green-700 bg-green-100 px-2 py-0.5 rounded-full font-semibold">Active</span> : <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">Inactive</span>}
                       {acct.imapEnabled && <span className="text-xs text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full">IMAP ON</span>}
+                      {acct.active && acct.lastError && (
+                        <span className="text-xs text-red-700 bg-red-100 px-2 py-0.5 rounded-full font-semibold" title={acct.lastError}>
+                          ⚠ Failing
+                        </span>
+                      )}
                     </div>
                     <div className="text-xs text-muted-foreground mt-0.5">{acct.user} · {acct.provider} · {acct.fromName}</div>
+                    {acct.active && acct.lastError && (
+                      <div className="text-xs text-red-600 mt-1">
+                        Last health check failed{acct.lastErrorAt ? ` (${new Date(acct.lastErrorAt).toLocaleString()})` : ""}: {acct.lastError}
+                      </div>
+                    )}
                   </div>
                   <div className="flex items-center gap-1.5 flex-shrink-0">
                     <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => testAccount(acct.id)} disabled={testingId === acct.id}>
