@@ -118,6 +118,12 @@ interface EmailAccount {
   fromEmail: string;
   active: boolean;
   sentCount: number;
+  dailyLimit: number;
+  sentToday: number;
+  consecutiveFailures: number;
+  lastError: string;
+  lastErrorAt: string | null;
+  autoPaused: boolean;
   hasPassword: boolean;
   createdAt?: string;
 }
@@ -247,6 +253,7 @@ function AccountDialog({ account, onSave, onClose }: {
     password: "",
     fromName: account?.fromName ?? "DevStudio",
     fromEmail: account?.fromEmail ?? "",
+    dailyLimit: account?.dailyLimit ?? 0,
   });
   const [showPass, setShowPass] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -380,6 +387,21 @@ function AccountDialog({ account, onSave, onClose }: {
             </div>
           </div>
 
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground mb-1 block">Daily Send Limit</label>
+            <Input type="number" min={0} value={form.dailyLimit}
+              onChange={e => setForm(f => ({ ...f, dailyLimit: Math.max(0, Number(e.target.value)) }))}
+              placeholder="0 = unlimited" />
+            <p className="text-xs text-muted-foreground mt-1">Rotation skips this account once it hits the limit for the day. Set 0 for unlimited.</p>
+          </div>
+
+          {account && account.autoPaused && (
+            <div className="flex items-center gap-2 text-sm px-3 py-2.5 rounded-lg border bg-amber-50 text-amber-800 border-amber-200">
+              <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+              <span>Auto-paused after {account.consecutiveFailures} consecutive send failures{account.lastError ? `: ${account.lastError}` : ""}. Saving or sending a successful test will reactivate it.</span>
+            </div>
+          )}
+
           {account && (
             <div className="flex gap-2 pt-1">
               <Input value={testTo} onChange={e => setTestTo(e.target.value)} placeholder="Test recipient (optional)" className="flex-1" />
@@ -429,6 +451,19 @@ function EmailSettingsPanel() {
       body: JSON.stringify({ active: !acct.active }),
     });
     if (!r.ok) setAccounts(prev => prev.map(a => a.id === acct.id ? { ...a, active: acct.active } : a));
+  };
+
+  const reactivateAccount = async (acct: EmailAccount) => {
+    try {
+      const r = await fetch(`${apiBase()}/api/crm/email-accounts/${acct.id}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ active: true, resetFailures: true }),
+      });
+      const d = await r.json();
+      if (r.ok && d.account) {
+        setAccounts(prev => prev.map(a => a.id === acct.id ? d.account : a));
+      }
+    } catch { /* ignore */ }
   };
 
   const deleteAccount = async (id: number) => {
@@ -515,8 +550,9 @@ function EmailSettingsPanel() {
         {accounts.map(acct => {
           const cfg = providerCfg(acct.provider);
           const ts = testStatus[acct.id];
+          const atLimit = acct.dailyLimit > 0 && acct.sentToday >= acct.dailyLimit;
           return (
-            <div key={acct.id} className={`rounded-xl border-2 overflow-hidden transition-all ${acct.active ? "border-border/60" : "border-border/20 opacity-60"}`}>
+            <div key={acct.id} className={`rounded-xl border-2 overflow-hidden transition-all ${acct.autoPaused ? "border-amber-300" : acct.active ? "border-border/60" : "border-border/20 opacity-60"}`}>
               <div className="p-4 flex items-start gap-3">
                 <div className={`w-10 h-10 flex items-center justify-center rounded-xl border font-bold ${cfg.colorClass} flex-shrink-0`}>
                   {cfg.icon}
@@ -525,13 +561,29 @@ function EmailSettingsPanel() {
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-bold text-sm">{acct.label || acct.user}</span>
                     <span className={`text-xs px-2 py-0.5 rounded-full border font-semibold ${cfg.colorClass}`}>{cfg.label}</span>
-                    {acct.active
+                    {acct.autoPaused
+                      ? <span className="text-xs text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full font-semibold flex items-center gap-1"><AlertTriangle className="w-3 h-3" />Auto-paused</span>
+                      : atLimit
+                      ? <span className="text-xs text-orange-700 bg-orange-100 px-2 py-0.5 rounded-full font-semibold">Daily limit reached</span>
+                      : acct.active
                       ? <span className="text-xs text-green-700 bg-green-100 px-2 py-0.5 rounded-full font-semibold">Active</span>
                       : <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full font-semibold">Inactive</span>}
-                    {acct.sentCount > 0 && <span className="text-xs text-muted-foreground">{acct.sentCount} sent</span>}
+                    {acct.sentCount > 0 && <span className="text-xs text-muted-foreground">{acct.sentCount} sent total</span>}
                   </div>
                   <div className="text-xs text-muted-foreground mt-0.5 truncate">{acct.user}</div>
                   <div className="text-xs text-muted-foreground">{acct.host}:{acct.port}</div>
+                  <div className="text-xs text-muted-foreground mt-1">
+                    {acct.dailyLimit > 0 ? (
+                      <span className={atLimit ? "text-orange-600 font-semibold" : ""}>{acct.sentToday}/{acct.dailyLimit} sent today</span>
+                    ) : (
+                      <span>{acct.sentToday} sent today · unlimited</span>
+                    )}
+                  </div>
+                  {acct.autoPaused && acct.lastError && (
+                    <div className="text-xs text-amber-700 mt-1 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                      Paused after {acct.consecutiveFailures} failed sends: {acct.lastError}
+                    </div>
+                  )}
                 </div>
                 <Switch checked={acct.active} onCheckedChange={() => toggleActive(acct)} />
               </div>
@@ -543,6 +595,11 @@ function EmailSettingsPanel() {
                 <Button size="sm" variant="outline" onClick={() => setEditingAccount(acct)} className="h-7 text-xs gap-1">
                   Edit
                 </Button>
+                {acct.autoPaused && (
+                  <Button size="sm" variant="outline" onClick={() => reactivateAccount(acct)} className="h-7 text-xs gap-1 text-amber-700 border-amber-300 hover:bg-amber-50">
+                    <RefreshCw className="w-3 h-3" /> Reactivate
+                  </Button>
+                )}
                 <Button size="sm" variant="ghost" onClick={() => deleteAccount(acct.id)} disabled={deletingId === acct.id}
                   className="h-7 text-xs gap-1 text-destructive/70 hover:text-destructive">
                   {deletingId === acct.id ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}

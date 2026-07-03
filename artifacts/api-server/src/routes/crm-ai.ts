@@ -96,16 +96,30 @@ function injectTracking(html: string, baseUrl: string, trackingId: string): stri
 
 // ─── Account selection: round-robin by sentCount ──────────────────────────────
 
+function todayStr(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function effectiveSentToday(a: typeof emailAccountsTable.$inferSelect): number {
+  return a.lastSentDay === todayStr() ? a.sentToday : 0;
+}
+
 function maskAccount(a: typeof emailAccountsTable.$inferSelect) {
   return {
     id: a.id, label: a.label, provider: a.provider,
     host: a.host, port: a.port, secure: a.secure,
     user: a.user, fromName: a.fromName, fromEmail: a.fromEmail,
     active: a.active, sentCount: a.sentCount,
+    dailyLimit: a.dailyLimit, sentToday: effectiveSentToday(a),
+    consecutiveFailures: a.consecutiveFailures,
+    lastError: a.lastError, lastErrorAt: (a.lastErrorAt as any)?.toISOString?.() ?? null,
+    autoPaused: a.autoPaused,
     hasPassword: !!a.password,
     createdAt: (a.createdAt as any)?.toISOString?.() ?? String(a.createdAt),
   };
 }
+
+const MAX_CONSECUTIVE_FAILURES = 3;
 
 async function autoSeedBrevo(): Promise<void> {
   const envUser = process.env.BREVO_SMTP_USER;
@@ -122,19 +136,86 @@ async function autoSeedBrevo(): Promise<void> {
   });
 }
 
-async function getNextAccount() {
+async function getNextAccount(excludeIds: number[] = []) {
   await autoSeedBrevo();
   const rows = await db.select().from(emailAccountsTable)
-    .where(eq(emailAccountsTable.active, true))
-    .orderBy(emailAccountsTable.sentCount, emailAccountsTable.id)
-    .limit(1);
-  return rows[0] ?? null;
+    .where(eq(emailAccountsTable.active, true));
+  const today = todayStr();
+  const eligible = rows
+    .filter(a => !excludeIds.includes(a.id))
+    .filter(a => !a.autoPaused)
+    .filter(a => {
+      const sentToday = a.lastSentDay === today ? a.sentToday : 0;
+      return a.dailyLimit <= 0 || sentToday < a.dailyLimit;
+    })
+    .sort((a, b) => {
+      const aToday = a.lastSentDay === today ? a.sentToday : 0;
+      const bToday = b.lastSentDay === today ? b.sentToday : 0;
+      if (aToday !== bToday) return aToday - bToday;
+      if (a.sentCount !== b.sentCount) return a.sentCount - b.sentCount;
+      return a.id - b.id;
+    });
+  return eligible[0] ?? null;
 }
 
 async function incrementSentCount(id: number) {
+  const today = todayStr();
+  const rows = await db.select().from(emailAccountsTable).where(eq(emailAccountsTable.id, id)).limit(1);
+  const acct = rows[0];
+  const sentToday = acct && acct.lastSentDay === today ? acct.sentToday + 1 : 1;
   await db.update(emailAccountsTable)
-    .set({ sentCount: sql`${emailAccountsTable.sentCount} + 1` })
+    .set({
+      sentCount: sql`${emailAccountsTable.sentCount} + 1`,
+      sentToday,
+      lastSentDay: today,
+      consecutiveFailures: 0,
+      lastError: "",
+    })
     .where(eq(emailAccountsTable.id, id));
+}
+
+async function recordFailure(id: number, message: string) {
+  const rows = await db.select().from(emailAccountsTable).where(eq(emailAccountsTable.id, id)).limit(1);
+  const acct = rows[0];
+  if (!acct) return;
+  const failures = acct.consecutiveFailures + 1;
+  await db.update(emailAccountsTable)
+    .set({
+      consecutiveFailures: failures,
+      lastError: message.slice(0, 500),
+      lastErrorAt: new Date(),
+      ...(failures >= MAX_CONSECUTIVE_FAILURES && { autoPaused: true }),
+    })
+    .where(eq(emailAccountsTable.id, id));
+}
+
+async function sendWithFailover(
+  buildMail: (acct: typeof emailAccountsTable.$inferSelect) => Record<string, any>,
+  preferredAccountId?: number
+): Promise<{ acct: typeof emailAccountsTable.$inferSelect; result: any }> {
+  const tried: number[] = [];
+  let acct = preferredAccountId
+    ? (await db.select().from(emailAccountsTable).where(eq(emailAccountsTable.id, preferredAccountId)).limit(1))[0] ?? null
+    : await getNextAccount();
+
+  let lastErr: any = null;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    if (!acct || !acct.user || !acct.password) {
+      throw new Error(lastErr?.message || "No active email account available (all accounts paused, over limit, or missing credentials).");
+    }
+    tried.push(acct.id);
+    try {
+      const transporter = makeTransporter(acct);
+      const result = await transporter.sendMail(buildMail(acct));
+      await incrementSentCount(acct.id);
+      return { acct, result };
+    } catch (err: any) {
+      lastErr = err;
+      await recordFailure(acct.id, err.message || String(err));
+      acct = await getNextAccount(tried);
+    }
+  }
+  throw new Error(lastErr?.message || "Failed to send after trying all available accounts.");
 }
 
 // ─── Email account CRUD ───────────────────────────────────────────────────────
@@ -146,7 +227,7 @@ router.get("/crm/email-accounts", async (_req, res) => {
 });
 
 router.post("/crm/email-accounts", async (req, res) => {
-  const { label, provider, host, port, secure, user, password, fromName, fromEmail } = req.body;
+  const { label, provider, host, port, secure, user, password, fromName, fromEmail, dailyLimit } = req.body;
   if (!user || !password || !host) {
     res.status(400).json({ error: "host, user, and password are required" });
     return;
@@ -156,16 +237,18 @@ router.post("/crm/email-accounts", async (req, res) => {
     host, port: port || 587, secure: secure ?? false,
     user, password, fromName: fromName || "DevStudio",
     fromEmail: fromEmail || "", active: true, sentCount: 0,
+    dailyLimit: Number.isFinite(dailyLimit) ? Math.max(0, dailyLimit) : 0,
   }).returning();
   res.json({ success: true, account: maskAccount(inserted[0]) });
 });
 
 router.put("/crm/email-accounts/:id", async (req, res) => {
   const id = parseInt(req.params.id);
-  const { label, provider, host, port, secure, user, password, fromName, fromEmail, active } = req.body;
+  const { label, provider, host, port, secure, user, password, fromName, fromEmail, active, dailyLimit, resetFailures } = req.body;
   const rows = await db.select().from(emailAccountsTable).where(eq(emailAccountsTable.id, id)).limit(1);
   const existing = rows[0];
   if (!existing) { res.status(404).json({ error: "Account not found" }); return; }
+  const reactivating = active === true && existing.active === false;
   const updated = await db.update(emailAccountsTable).set({
     ...(label !== undefined && { label }),
     ...(provider !== undefined && { provider }),
@@ -177,6 +260,8 @@ router.put("/crm/email-accounts/:id", async (req, res) => {
     ...(fromName !== undefined && { fromName }),
     ...(fromEmail !== undefined && { fromEmail }),
     ...(active !== undefined && { active }),
+    ...(dailyLimit !== undefined && Number.isFinite(dailyLimit) && { dailyLimit: Math.max(0, dailyLimit) }),
+    ...((resetFailures || reactivating) && { consecutiveFailures: 0, autoPaused: false, lastError: "" }),
   }).where(eq(emailAccountsTable.id, id)).returning();
   res.json({ success: true, account: maskAccount(updated[0]) });
 });
@@ -187,6 +272,7 @@ router.delete("/crm/email-accounts/:id", async (req, res) => {
   res.json({ success: true });
 });
 
+// Direct single-account test — does NOT fail over, so the user can verify that specific account.
 router.post("/crm/email-accounts/:id/test", async (req, res) => {
   const id = parseInt(req.params.id);
   const { to } = req.body as { to?: string };
@@ -205,32 +291,28 @@ router.post("/crm/email-accounts/:id/test", async (req, res) => {
       text: `Account "${acct.label}" is working correctly.`,
       html: `<div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:24px;"><h2 style="color:#6d28d9;">✓ Account working</h2><p>Account <strong>${acct.label}</strong> (${acct.user}) is configured and sending correctly via ${acct.host}.</p></div>`,
     });
+    await db.update(emailAccountsTable).set({ consecutiveFailures: 0, autoPaused: false, lastError: "" }).where(eq(emailAccountsTable.id, id));
     res.json({ success: true });
   } catch (err: any) {
+    await recordFailure(id, err.message || String(err));
     res.status(500).json({ error: err.message });
   }
 });
 
-// Legacy test-email (uses next rotation account)
+// Legacy test-email (uses rotation + failover across active accounts)
 router.post("/crm/test-email", async (req, res) => {
   const { to } = req.body as { to?: string };
-  const acct = await getNextAccount();
-  if (!acct?.user || !acct?.password) {
-    res.status(400).json({ error: "No active email account configured. Add one in Email Settings." });
-    return;
-  }
   try {
-    const transporter = makeTransporter(acct);
-    await transporter.sendMail({
-      from: `"${acct.fromName}" <${acct.fromEmail || acct.user}>`,
-      to: to || acct.user,
+    const { acct } = await sendWithFailover((a) => ({
+      from: `"${a.fromName}" <${a.fromEmail || a.user}>`,
+      to: to || a.user,
       subject: "DevStudio CRM — Email Test",
       text: "Email is configured correctly.",
-      html: `<div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:24px;"><h2 style="color:#6d28d9;">✓ Email working</h2><p>Sending via <strong>${acct.label}</strong> (${acct.user}).</p></div>`,
-    });
-    res.json({ success: true });
+      html: `<div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:24px;"><h2 style="color:#6d28d9;">✓ Email working</h2><p>Sending via <strong>${a.label}</strong> (${a.user}).</p></div>`,
+    }));
+    res.json({ success: true, sentVia: acct.label });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(400).json({ error: err.message });
   }
 });
 
@@ -246,34 +328,21 @@ router.post("/crm/send-email", async (req, res) => {
     return;
   }
 
-  let acct;
-  if (accountId) {
-    const rows = await db.select().from(emailAccountsTable).where(eq(emailAccountsTable.id, accountId)).limit(1);
-    acct = rows[0];
-  } else {
-    acct = await getNextAccount();
-  }
-
-  if (!acct?.user || !acct?.password) {
-    res.status(400).json({ error: "No active email account configured. Add one in Email Settings." });
-    return;
-  }
-
   try {
     const baseUrl = getBaseUrl(req);
     const trackingId = await createTracking(to, subject, "outreach");
-    const transporter = makeTransporter(acct);
     const htmlBody = body.split("\n").map((line) => (line.trim() ? `<p style="margin:0 0 12px;line-height:1.6;">${line}</p>` : "<br/>")).join("");
-    const rawHtml = `<div style="font-family:Georgia,serif;max-width:600px;margin:0 auto;padding:24px;color:#1a1a2e;">${htmlBody}<hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0;"/><p style="color:#6b7280;font-size:13px;">${acct.fromName}</p></div>`;
-    const trackedHtml = injectTracking(rawHtml, baseUrl, trackingId);
-    await transporter.sendMail({
-      from: `"${acct.fromName}" <${acct.fromEmail || acct.user}>`,
-      to, subject, text: body, html: trackedHtml,
-    });
-    await incrementSentCount(acct.id);
+    const { acct } = await sendWithFailover((a) => {
+      const rawHtml = `<div style="font-family:Georgia,serif;max-width:600px;margin:0 auto;padding:24px;color:#1a1a2e;">${htmlBody}<hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0;"/><p style="color:#6b7280;font-size:13px;">${a.fromName}</p></div>`;
+      return {
+        from: `"${a.fromName}" <${a.fromEmail || a.user}>`,
+        to, subject, text: body,
+        html: injectTracking(rawHtml, baseUrl, trackingId),
+      };
+    }, accountId);
     res.json({ success: true, to, sentAt: new Date().toISOString(), trackingId, sentVia: acct.label });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(400).json({ error: err.message });
   }
 });
 
@@ -284,12 +353,6 @@ router.post("/crm/send-proposal-email", async (req, res) => {
     to: string; prospectName: string; proposal: any; agencyName?: string;
   };
   if (!to || !proposal) { res.status(400).json({ error: "to and proposal are required" }); return; }
-
-  const acct = await getNextAccount();
-  if (!acct?.user || !acct?.password) {
-    res.status(400).json({ error: "No active email account configured. Add one in Email Settings." });
-    return;
-  }
 
   const p = proposal.sections;
   const agency = agencyName || "DevStudio";
@@ -365,15 +428,13 @@ router.post("/crm/send-proposal-email", async (req, res) => {
     const subject = `Your Custom Software Proposal — ${prospectName}`;
     const trackingId = await createTracking(to, subject, "proposal");
     const trackedHtml = injectTracking(html, baseUrl, trackingId);
-    const transporter = makeTransporter(acct);
-    await transporter.sendMail({
-      from: `"${acct.fromName}" <${acct.fromEmail || acct.user}>`,
+    const { acct } = await sendWithFailover((a) => ({
+      from: `"${a.fromName}" <${a.fromEmail || a.user}>`,
       to, subject, html: trackedHtml,
-    });
-    await incrementSentCount(acct.id);
+    }));
     res.json({ success: true, to, sentAt: new Date().toISOString(), trackingId, sentVia: acct.label });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(400).json({ error: err.message });
   }
 });
 

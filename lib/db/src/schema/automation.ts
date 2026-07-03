@@ -16,6 +16,13 @@ export const emailAccountsTable = pgTable("email_accounts", {
   imapPort: integer("imap_port").notNull().default(993),
   active: boolean("active").notNull().default(true),
   sentCount: integer("sent_count").notNull().default(0),
+  dailyLimit: integer("daily_limit").notNull().default(0),
+  sentToday: integer("sent_today").notNull().default(0),
+  lastSentDay: text("last_sent_day").notNull().default(""),
+  consecutiveFailures: integer("consecutive_failures").notNull().default(0),
+  lastError: text("last_error").notNull().default(""),
+  lastErrorAt: timestamp("last_error_at"),
+  autoPaused: boolean("auto_paused").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
