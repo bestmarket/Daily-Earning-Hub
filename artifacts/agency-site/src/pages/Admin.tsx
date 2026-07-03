@@ -1042,7 +1042,10 @@ function BrevoSetupSection({ apiToken, apiKeys, onRefresh }: {
 function AISetupTab({ apiToken }: { apiToken: string }) {
   const { toast } = useToast();
   const [apiKeys, setApiKeys] = useState<Record<string, { masked: string; set: boolean; viaIntegration?: boolean }>>({});
+  const [geminiPool, setGeminiPool] = useState<{ id: string; label: string; masked: string; addedAt: string }[]>([]);
+  const [viaIntegration, setViaIntegration] = useState(false);
   const [geminiKey, setGeminiKey] = useState("");
+  const [geminiLabel, setGeminiLabel] = useState("");
   const [geminiVisible, setGeminiVisible] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -1050,50 +1053,58 @@ function AISetupTab({ apiToken }: { apiToken: string }) {
 
   const authHeader = { Authorization: `Bearer ${apiToken}` };
 
+  const loadGeminiKeys = () =>
+    fetch(`${API_BASE}/api/admin/gemini-keys`, { headers: authHeader })
+      .then(r => r.json())
+      .then((d) => { setViaIntegration(!!d.viaIntegration); setGeminiPool(d.keys || []); })
+      .catch(() => {});
+
   useEffect(() => {
     fetch(`${API_BASE}/api/admin/api-keys`, { headers: authHeader })
       .then(r => r.json()).then(setApiKeys).catch(() => {});
+    loadGeminiKeys();
   }, []);
 
-  const isGeminiSet = apiKeys["GEMINI_API_KEY"]?.set;
-  const isViaIntegration = apiKeys["GEMINI_API_KEY"]?.viaIntegration;
+  const isGeminiSet = viaIntegration || geminiPool.length > 0;
+  const isViaIntegration = viaIntegration;
 
-  const saveGeminiKey = async () => {
+  const addGeminiKey = async () => {
     if (!geminiKey.trim()) { toast({ title: "Please enter a key", variant: "destructive" }); return; }
     setSaving(true);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/api-keys`, {
+      const res = await fetch(`${API_BASE}/api/admin/gemini-keys`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeader },
-        body: JSON.stringify({ GEMINI_API_KEY: geminiKey.trim() }),
+        body: JSON.stringify({ apiKey: geminiKey.trim(), label: geminiLabel.trim() || undefined }),
       });
-      if (!res.ok) throw new Error();
-      toast({ title: "✅ Gemini AI key saved!" });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || "Failed to save key");
+      toast({ title: geminiPool.length > 0 ? "✅ Gemini key added to rotation!" : "✅ Gemini AI key saved!" });
       setGeminiKey("");
+      setGeminiLabel("");
       setTestResult(null);
-      const fresh = await fetch(`${API_BASE}/api/admin/api-keys`, { headers: authHeader }).then(r => r.json());
-      setApiKeys(fresh);
-    } catch {
-      toast({ title: "Failed to save key", variant: "destructive" });
+      await loadGeminiKeys();
+    } catch (e: any) {
+      toast({ title: e.message || "Failed to save key", variant: "destructive" });
     } finally { setSaving(false); }
   };
 
-  const removeGeminiKey = async () => {
-    if (!confirm("Remove the Gemini API key? AI features will stop working.")) return;
-    await fetch(`${API_BASE}/api/admin/api-keys/GEMINI_API_KEY`, { method: "DELETE", headers: authHeader });
+  const removeGeminiKey = async (id: string) => {
+    if (!confirm(geminiPool.length <= 1 ? "Remove this Gemini API key? AI features will stop working." : "Remove this key from the rotation?")) return;
+    await fetch(`${API_BASE}/api/admin/gemini-keys/${id}`, { method: "DELETE", headers: authHeader });
     toast({ title: "Gemini key removed" });
-    setApiKeys(s => ({ ...s, GEMINI_API_KEY: { masked: "", set: false } }));
     setTestResult(null);
+    await loadGeminiKeys();
   };
 
   const testAI = async () => {
     setTesting(true);
     setTestResult(null);
     try {
-      const res = await fetch(`${API_BASE}/api/tools-ai/recommend`, {
+      const res = await fetch(`${API_BASE}/api/ai/recommend`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ businessType: "Restaurant", goals: ["Get more customers"], challenges: ["No online presence"], teamSize: "1-5" }),
+        body: JSON.stringify({ businessName: "Test Business", industry: "Restaurant", description: "A small local restaurant", challenges: "No online presence", goal: "Get more customers" }),
       });
       if (res.ok) {
         setTestResult({ ok: true, message: "✅ AI is working! Gemini is responding correctly." });
@@ -1192,47 +1203,73 @@ function AISetupTab({ apiToken }: { apiToken: string }) {
               <div>
                 <p className="text-sm font-semibold text-purple-800">Managed automatically by Replit</p>
                 <p className="text-xs text-purple-700 mt-0.5">Your API key is securely provided by the Replit Gemini integration. You don't need to enter anything here.</p>
-                <p className="font-mono text-xs text-purple-600 mt-1">{apiKeys["GEMINI_API_KEY"]?.masked}</p>
               </div>
             </div>
           ) : (
             <>
-              {isGeminiSet && (
-                <div className="flex items-center gap-3 px-4 py-3 bg-green-50 rounded-lg border border-green-200">
-                  <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0" />
-                  <span className="font-mono text-sm text-muted-foreground flex-1">{apiKeys["GEMINI_API_KEY"]?.masked}</span>
-                  <button className="text-xs text-destructive/70 hover:text-destructive font-medium flex items-center gap-1" onClick={removeGeminiKey}>
-                    <Trash2 className="w-3 h-3" /> Remove
-                  </button>
+              {geminiPool.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-semibold text-muted-foreground">
+                      {geminiPool.length > 1 ? `${geminiPool.length} keys in rotation` : "Active key"}
+                    </label>
+                    {geminiPool.length > 1 && (
+                      <Badge className="bg-indigo-100 text-indigo-700 border-indigo-200 text-[10px]">🔁 Rotating requests across keys</Badge>
+                    )}
+                  </div>
+                  {geminiPool.map((k) => (
+                    <div key={k.id} className="flex items-center gap-3 px-4 py-3 bg-green-50 rounded-lg border border-green-200">
+                      <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs font-semibold text-green-800">{k.label}</div>
+                        <span className="font-mono text-sm text-muted-foreground">{k.masked}</span>
+                      </div>
+                      <button className="text-xs text-destructive/70 hover:text-destructive font-medium flex items-center gap-1" onClick={() => removeGeminiKey(k.id)}>
+                        <Trash2 className="w-3 h-3" /> Remove
+                      </button>
+                    </div>
+                  ))}
                 </div>
               )}
 
-              <div>
-                <label className="text-xs font-semibold text-muted-foreground mb-2 block">
-                  {isGeminiSet ? "Replace API Key" : "Enter Gemini API Key"}
-                </label>
-                <div className="relative">
-                  <Input
-                    type={geminiVisible ? "text" : "password"}
-                    placeholder="AIzaSy…"
-                    value={geminiKey}
-                    onChange={(e) => setGeminiKey(e.target.value)}
-                    className="pr-10 font-mono h-10"
-                  />
-                  <button type="button"
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                    onClick={() => setGeminiVisible(v => !v)}>
-                    {geminiVisible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
+              <div className="grid sm:grid-cols-[1fr_140px] gap-3">
+                <div>
+                  <label className="text-xs font-semibold text-muted-foreground mb-2 block">
+                    {geminiPool.length > 0 ? "Add Another Key (optional, for rotation)" : "Enter Gemini API Key"}
+                  </label>
+                  <div className="relative">
+                    <Input
+                      type={geminiVisible ? "text" : "password"}
+                      placeholder="AIzaSy…"
+                      value={geminiKey}
+                      onChange={(e) => setGeminiKey(e.target.value)}
+                      className="pr-10 font-mono h-10"
+                    />
+                    <button type="button"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      onClick={() => setGeminiVisible(v => !v)}>
+                      {geminiVisible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
                 </div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Go to <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="text-primary underline">aistudio.google.com</a> → Sign in → Create API Key → Copy & paste here
-                </p>
+                <div>
+                  <label className="text-xs font-semibold text-muted-foreground mb-2 block">Label (optional)</label>
+                  <Input
+                    placeholder={`Key ${geminiPool.length + 1}`}
+                    value={geminiLabel}
+                    onChange={(e) => setGeminiLabel(e.target.value)}
+                    className="h-10"
+                  />
+                </div>
               </div>
+              <p className="text-xs text-muted-foreground -mt-2">
+                Go to <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="text-primary underline">aistudio.google.com</a> → Sign in → Create API Key → Copy & paste here.
+                {geminiPool.length > 0 && " Adding more keys is optional — each request will rotate automatically across all saved keys to help spread out free-tier rate limits."}
+              </p>
 
-              <Button onClick={saveGeminiKey} disabled={saving || !geminiKey.trim()} className="gap-2 w-full">
+              <Button onClick={addGeminiKey} disabled={saving || !geminiKey.trim()} className="gap-2 w-full">
                 {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                {saving ? "Saving…" : "Save API Key"}
+                {saving ? "Saving…" : geminiPool.length > 0 ? "Add Key to Rotation" : "Save API Key"}
               </Button>
             </>
           )}

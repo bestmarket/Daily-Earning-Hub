@@ -38,6 +38,117 @@ function maskKey(val: string): string {
   return "••••••••" + val.slice(-4);
 }
 
+// ─── Gemini API key pool (multiple keys, rotational) ───────────────────────
+
+const GEMINI_POOL_CONFIG_KEY = "GEMINI_API_KEYS";
+
+type GeminiPoolEntry = { id: string; key: string; label?: string; addedAt: string };
+
+let geminiRotationIndex = 0;
+
+async function readGeminiPool(): Promise<GeminiPoolEntry[]> {
+  const rows = await db
+    .select()
+    .from(siteConfigTable)
+    .where(eq(siteConfigTable.key, GEMINI_POOL_CONFIG_KEY))
+    .limit(1);
+
+  if (rows[0]?.value) {
+    try {
+      const parsed = JSON.parse(rows[0].value);
+      if (Array.isArray(parsed)) return parsed;
+    } catch {}
+  }
+
+  // Migrate legacy single GEMINI_API_KEY into the pool, if present
+  const legacy = await getConfigKey("GEMINI_API_KEY");
+  if (legacy) {
+    const migrated: GeminiPoolEntry[] = [
+      { id: randomId(), key: legacy, label: "Key 1", addedAt: new Date().toISOString() },
+    ];
+    await writeGeminiPool(migrated);
+    return migrated;
+  }
+
+  return [];
+}
+
+async function writeGeminiPool(pool: GeminiPoolEntry[]): Promise<void> {
+  const value = JSON.stringify(pool);
+  const existing = await db
+    .select()
+    .from(siteConfigTable)
+    .where(eq(siteConfigTable.key, GEMINI_POOL_CONFIG_KEY))
+    .limit(1);
+
+  if (existing.length > 0) {
+    await db
+      .update(siteConfigTable)
+      .set({ value, updatedAt: new Date() })
+      .where(eq(siteConfigTable.key, GEMINI_POOL_CONFIG_KEY));
+  } else {
+    await db.insert(siteConfigTable).values({ key: GEMINI_POOL_CONFIG_KEY, value });
+  }
+}
+
+function randomId(): string {
+  return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+}
+
+router.get("/admin/gemini-keys", requireAdmin, async (req, res) => {
+  try {
+    const integrationKey = process.env.AI_INTEGRATIONS_GEMINI_API_KEY;
+    if (integrationKey) {
+      res.json({ viaIntegration: true, keys: [] });
+      return;
+    }
+    const pool = await readGeminiPool();
+    res.json({
+      viaIntegration: false,
+      keys: pool.map((k) => ({ id: k.id, label: k.label || "Key", masked: maskKey(k.key), addedAt: k.addedAt })),
+    });
+  } catch (err) {
+    req.log.error({ err }, "Get gemini-keys error");
+    res.status(500).json({ error: "Failed to load Gemini keys" });
+  }
+});
+
+router.post("/admin/gemini-keys", requireAdmin, async (req, res) => {
+  try {
+    const { apiKey, label } = req.body ?? {};
+    if (!apiKey || typeof apiKey !== "string" || !apiKey.trim()) {
+      res.status(400).json({ error: "API key is required" });
+      return;
+    }
+    const pool = await readGeminiPool();
+    const entry: GeminiPoolEntry = {
+      id: randomId(),
+      key: apiKey.trim(),
+      label: label?.trim() || `Key ${pool.length + 1}`,
+      addedAt: new Date().toISOString(),
+    };
+    pool.push(entry);
+    await writeGeminiPool(pool);
+    res.json({ success: true, id: entry.id, count: pool.length });
+  } catch (err) {
+    req.log.error({ err }, "Add gemini-key error");
+    res.status(500).json({ error: "Failed to save Gemini key" });
+  }
+});
+
+router.delete("/admin/gemini-keys/:id", requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const pool = await readGeminiPool();
+    const next = pool.filter((k) => k.id !== id);
+    await writeGeminiPool(next);
+    res.json({ success: true, count: next.length });
+  } catch (err) {
+    req.log.error({ err }, "Delete gemini-key error");
+    res.status(500).json({ error: "Failed to delete Gemini key" });
+  }
+});
+
 router.get("/admin/api-keys", requireAdmin, async (req, res) => {
   try {
     const rows = await db
@@ -144,7 +255,8 @@ export async function getConfigKey(key: string): Promise<string | undefined> {
   return undefined;
 }
 
-// Returns a ready GoogleGenAI instance using the best available key + base URL
+// Returns a ready GoogleGenAI instance using the best available key + base URL.
+// When multiple manual keys are configured, rotates round-robin across them.
 export async function getGeminiAI() {
   const { GoogleGenAI } = await import("@google/genai");
   // Prefer Replit integration (has managed base URL)
@@ -156,10 +268,12 @@ export async function getGeminiAI() {
       ...(integrationBase ? { httpOptions: { apiVersion: "", baseUrl: integrationBase } } : {}),
     });
   }
-  // Fall back to manually saved key
-  const manualKey = await getConfigKey("GEMINI_API_KEY");
-  if (manualKey) {
-    return new GoogleGenAI({ apiKey: manualKey });
+  // Fall back to the rotational pool of manually saved keys
+  const pool = await readGeminiPool();
+  if (pool.length > 0) {
+    const entry = pool[geminiRotationIndex % pool.length];
+    geminiRotationIndex = (geminiRotationIndex + 1) % pool.length;
+    return new GoogleGenAI({ apiKey: entry.key });
   }
   throw new Error("Gemini AI not configured. Add your API key in Admin → AI Setup.");
 }

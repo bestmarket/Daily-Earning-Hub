@@ -1,2 +1,3 @@
 - [Brevo SMTP debugging](brevo-smtp-debugging.md) — "not routed"/silent failures on api-server SMTP usually mean the key is missing, not that code is broken; verify with a fake-credential test first.
 - [Email credential validation](email-credential-validation.md) — provider format checks (Gmail 16-char app password, SendGrid/Resend fixed usernames) must be enforced in both API routes and admin UI forms to stay in sync.
+- [Gemini key routing](gemini-key-routing.md) — AI test endpoint is /api/ai/recommend not /api/tools-ai/recommend; Gemini keys rotate through a pool, integration key always wins.
