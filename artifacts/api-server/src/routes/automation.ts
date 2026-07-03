@@ -3,7 +3,7 @@ import nodemailer from "nodemailer";
 import { db, emailAccountsTable, automationSettingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { getGeminiAI } from "./api-keys";
-import { sendMail as brevoSendMail } from "../lib/brevo-mailer";
+import { sendMail as brevoSendMail, brevoTransporter } from "../lib/brevo-mailer";
 
 const router = Router();
 
@@ -68,10 +68,26 @@ function cleanPassword(password: string): string {
   return (password || "").replace(/\s/g, "");
 }
 
+function validateCredentials(provider: string, cleanedPassword: string, user: string): string | null {
+  if (provider === "gmail" && cleanedPassword.length !== 16) {
+    return `Gmail requires a 16-character App Password (not your regular password). You provided ${cleanedPassword.length} characters. Generate one at myaccount.google.com/apppasswords.`;
+  }
+  if (provider === "sendgrid" && user.trim().toLowerCase() !== "apikey") {
+    return `SendGrid requires the username to be exactly "apikey", not your email address.`;
+  }
+  if (provider === "resend" && user.trim().toLowerCase() !== "resend") {
+    return `Resend requires the username to be exactly "resend".`;
+  }
+  return null;
+}
+
 router.post("/automation/email-accounts", async (req, res) => {
   const { label, provider, host, port, secure, user, password, fromName, fromEmail, imapEnabled, imapHost, imapPort } = req.body;
   if (!user) { res.status(400).json({ error: "user (email address) is required" }); return; }
   if (!password || !password.trim()) { res.status(400).json({ error: "Password / API key is required" }); return; }
+  const cleanedPassword = cleanPassword(password);
+  const validationError = validateCredentials(provider || "gmail", cleanedPassword, user);
+  if (validationError) { res.status(400).json({ error: validationError }); return; }
   const inserted = await db.insert(emailAccountsTable).values({
     label: label || user,
     provider: provider || "gmail",
@@ -95,6 +111,13 @@ router.put("/automation/email-accounts/:id", async (req, res) => {
   const { label, provider, host, port, secure, user, password, fromName, fromEmail, imapEnabled, imapHost, imapPort, active } = req.body;
   const existing = await db.select().from(emailAccountsTable).where(eq(emailAccountsTable.id, id)).limit(1);
   if (!existing.length) { res.status(404).json({ error: "Account not found" }); return; }
+  const effectiveProvider = provider !== undefined ? provider : existing[0].provider;
+  const effectiveUser = user !== undefined ? user : existing[0].user;
+  if (password && password !== "••••••••") {
+    const cleanedPassword = cleanPassword(password);
+    const validationError = validateCredentials(effectiveProvider, cleanedPassword, effectiveUser);
+    if (validationError) { res.status(400).json({ error: validationError }); return; }
+  }
   const updated = await db.update(emailAccountsTable).set({
     ...(label !== undefined && { label }),
     ...(provider !== undefined && { provider }),

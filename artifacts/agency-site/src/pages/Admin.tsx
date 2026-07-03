@@ -1629,6 +1629,8 @@ function AutomationTab() {
 
   const addAccount = async () => {
     if (!newAcct.user) return;
+    const validationError = validateCredentials(newAcct.provider, newAcct.password, newAcct.user);
+    if (validationError) { setMsg({ type: "error", text: `⚠ ${validationError}` }); return; }
     setAddingAcct(true); setMsg(null);
     try {
       const r = await fetch(`${apiBase()}/api/automation/email-accounts`, {
@@ -1672,13 +1674,18 @@ function AutomationTab() {
 
   const saveEditAccount = async () => {
     if (!editAcct) return;
+    if (editPass && editPass !== "••••••••") {
+      const validationError = validateCredentials(editAcct.provider, editPass, editAcct.user);
+      if (validationError) { setMsg({ type: "error", text: `⚠ ${validationError}` }); return; }
+    }
     setSavingAcct(true);
     try {
       const body: any = { label: editAcct.label, fromName: editAcct.fromName, fromEmail: editAcct.fromEmail, active: editAcct.active, imapEnabled: editAcct.imapEnabled };
       if (editPass && editPass !== "••••••••") body.password = editPass;
-      await fetch(`${apiBase()}/api/automation/email-accounts/${editAcct.id}`, {
+      const r = await fetch(`${apiBase()}/api/automation/email-accounts/${editAcct.id}`, {
         method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       });
+      if (!r.ok) { const d = await r.json(); throw new Error(d.error); }
       setEditAcct(null); setEditPass("");
       setMsg({ type: "success", text: "Account updated." });
       await load();
@@ -1686,6 +1693,20 @@ function AutomationTab() {
   };
 
   const BLANK_ACCT = { label: "", user: "", password: "", fromName: "DevStudio", fromEmail: "", imapEnabled: false };
+
+  function validateCredentials(provider: string, password: string, user: string): string | null {
+    const cleaned = password.replace(/\s/g, "");
+    if (provider === "gmail" && cleaned.length > 0 && cleaned.length !== 16) {
+      return `App Passwords are exactly 16 characters. You entered ${cleaned.length}.`;
+    }
+    if (provider === "sendgrid" && user.trim().length > 0 && user.trim().toLowerCase() !== "apikey") {
+      return `SendGrid requires the username to be exactly "apikey".`;
+    }
+    if (provider === "resend" && user.trim().length > 0 && user.trim().toLowerCase() !== "resend") {
+      return `Resend requires the username to be exactly "resend".`;
+    }
+    return null;
+  }
 
   const applyProviderPreset = (provider: string) => {
     const presets: Record<string, { provider: string; host: string; port: number; secure: boolean; user: string }> = {
@@ -2102,6 +2123,9 @@ function AutomationTab() {
                       <div>
                         <label className="text-xs font-semibold text-muted-foreground mb-1 block">New Password (leave blank to keep)</label>
                         <Input type="password" value={editPass} onChange={e => setEditPass(e.target.value)} placeholder="••••••••" />
+                        {editPass && validateCredentials(editAcct.provider, editPass, editAcct.user) && (
+                          <p className="text-xs text-red-600 mt-1">⚠ {validateCredentials(editAcct.provider, editPass, editAcct.user)}</p>
+                        )}
                       </div>
                     </div>
                     <div className="flex items-center gap-4">
