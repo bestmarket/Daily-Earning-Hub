@@ -279,8 +279,8 @@ function AccountDialog({ account, onSave, onClose }: {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
       });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error || "Save failed");
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error((d as any).error || "Save failed");
       onSave(d.account);
     } catch (e: any) {
       setStatus({ type: "error", msg: e.message });
@@ -295,8 +295,8 @@ function AccountDialog({ account, onSave, onClose }: {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ to: testTo || form.user }),
       });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error);
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error((d as any).error || `Request failed (${r.status})`);
       setStatus({ type: "success", msg: `Test email sent to ${testTo || form.user}` });
     } catch (e: any) {
       setStatus({ type: "error", msg: e.message });
@@ -437,7 +437,7 @@ function EmailSettingsPanel() {
   const load = useCallback(async () => {
     try {
       const r = await fetch(`${apiBase()}/api/crm/email-accounts`);
-      const d = await r.json();
+      const d = await r.json().catch(() => ([]));
       setAccounts(Array.isArray(d) ? d : []);
     } catch { /* ignore */ } finally { setLoading(false); }
   }, []);
@@ -459,8 +459,8 @@ function EmailSettingsPanel() {
         method: "PUT", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ active: true, resetFailures: true }),
       });
-      const d = await r.json();
-      if (r.ok && d.account) {
+      const d = await r.json().catch(() => ({}));
+      if (r.ok && (d as any).account) {
         setAccounts(prev => prev.map(a => a.id === acct.id ? d.account : a));
       }
     } catch { /* ignore */ }
@@ -482,8 +482,8 @@ function EmailSettingsPanel() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ to: acct.user }),
       });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error);
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error((d as any).error || `Request failed (${r.status})`);
       setTestStatus(prev => ({ ...prev, [acct.id]: { type: "success", msg: "Test email sent!" } }));
     } catch (e: any) {
       setTestStatus(prev => ({ ...prev, [acct.id]: { type: "error", msg: e.message } }));
@@ -1238,8 +1238,8 @@ function OutreachPanel({ prospect, onUpdate }: { prospect: Prospect; onUpdate: (
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ to: prospect.email, prospectName: prospect.businessName, proposal: prospect.proposal, agencyName: AGENCY_NAME }),
       });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error);
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error((d as any).error || `Request failed (${r.status})`);
       onUpdate({ ...prospect, status: "proposal_sent" });
       setSendStatus({ type: "success", msg: `Proposal emailed to ${prospect.email}` });
     } catch (e: any) { setSendStatus({ type: "error", msg: e.message }); }
@@ -1276,8 +1276,8 @@ function OutreachPanel({ prospect, onUpdate }: { prospect: Prospect; onUpdate: (
           prospectName: prospect.businessName,
         }),
       });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error);
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error((d as any).error || `Request failed (${r.status})`);
       onUpdate({ ...prospect, status: "contacted", emailSentAt: new Date().toISOString() });
       setSendStatus({ type: "success", msg: `Email sent to ${prospect.email}` });
     } catch (e: any) {
@@ -1478,8 +1478,8 @@ function ProposalPanel({ prospect, onUpdate }: { prospect: Prospect; onUpdate: (
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ to: prospect.email, prospectName: prospect.businessName, proposal: prospect.proposal, agencyName: AGENCY_NAME }),
       });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error);
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error((d as any).error || `Request failed (${r.status})`);
       onUpdate({ ...prospect, status: "proposal_sent" });
       setSendStatus({ type: "success", msg: `HTML proposal sent to ${prospect.email}` });
     } catch (e: any) { setSendStatus({ type: "error", msg: e.message }); }

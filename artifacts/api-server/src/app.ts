@@ -1,4 +1,4 @@
-import express, { type Express } from "express";
+import express, { type Express, type Request, type Response, type NextFunction } from "express";
 import cors from "cors";
 import pinoHttp from "pino-http";
 import path from "path";
@@ -66,5 +66,18 @@ if (existsSync(staticDir)) {
     res.json({ ok: true, message: "API server running. Build the frontend to enable full-stack mode." });
   });
 }
+
+// ─── Global JSON error handler ───────────────────────────────────────────────
+// Must be registered AFTER all routes. Catches any error that escapes a route
+// handler (unhandled promise rejections in Express 5, thrown errors, etc.) and
+// always responds with JSON so the client never receives an HTML error page.
+app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+  const status = typeof err.status === "number" ? err.status : (typeof err.statusCode === "number" ? err.statusCode : 500);
+  const message = err.message || "Internal server error";
+  logger.error({ err }, "Unhandled error");
+  if (!res.headersSent) {
+    res.status(status).json({ error: message });
+  }
+});
 
 export default app;
