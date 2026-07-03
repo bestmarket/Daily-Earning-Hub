@@ -5,6 +5,7 @@ import { promises as dnsPromises } from "dns";
 import { getGeminiAI } from "./api-keys";
 import { db, emailAccountsTable, emailTrackingTable } from "@workspace/db";
 import { eq, inArray, sql } from "drizzle-orm";
+import { scrapeBusinessDirectories } from "../lib/business-scrapers";
 
 const router = Router();
 
@@ -141,11 +142,11 @@ async function filterLiveProspects(prospects: any[]): Promise<{ live: any[]; dea
   return { live, dead: results.length - live.length };
 }
 
-// ─── Google Places: real live business sourcing ───────────────────────────────
+// ─── Google Places API (optional enrichment) ──────────────────────────────────
 
 /**
  * Search Google Places API for real, operational businesses.
- * Returns an empty array if GOOGLE_PLACES_API_KEY is not set — caller falls back to AI.
+ * Returns an empty array if GOOGLE_PLACES_API_KEY is not set.
  */
 async function searchGooglePlaces(category: string, city: string, country: string, count: number): Promise<any[]> {
   const apiKey = process.env.GOOGLE_PLACES_API_KEY;
@@ -159,39 +160,15 @@ async function searchGooglePlaces(category: string, city: string, country: strin
         headers: {
           "Content-Type": "application/json",
           "X-Goog-Api-Key": apiKey,
-          "X-Goog-FieldMask": "places.displayName,places.formattedAddress,places.nationalPhoneNumber,places.websiteUri,places.businessStatus,places.id",
+          "X-Goog-FieldMask": "places.displayName,places.formattedAddress,places.nationalPhoneNumber,places.websiteUri,places.businessStatus",
         },
         body: JSON.stringify({ textQuery: query, maxResultCount: Math.min(count, 20), languageCode: "en" }),
       }),
       new Promise<never>((_, r) => setTimeout(() => r(new Error("timeout")), 10000)),
     ]) as Response;
     const data = await res.json() as any;
-    // Only return businesses confirmed operational
-    return (data.places || []).filter((p: any) =>
-      !p.businessStatus || p.businessStatus === "OPERATIONAL"
-    );
+    return (data.places || []).filter((p: any) => !p.businessStatus || p.businessStatus === "OPERATIONAL");
   } catch { return []; }
-}
-
-/**
- * Extract the first real email address found in a website's HTML.
- * Returns "" if none found or fetch fails.
- */
-async function extractEmailFromWebsite(url: string): Promise<string> {
-  if (!url || /^(none|n\/a|-)$/i.test(url.trim())) return "";
-  const fullUrl = url.startsWith("http") ? url : `https://${url}`;
-  try {
-    const res = await Promise.race([
-      fetch(fullUrl, { headers: { "User-Agent": "Mozilla/5.0 (compatible; DevStudio/1.0)" } }),
-      new Promise<never>((_, r) => setTimeout(() => r(new Error("timeout")), 8000)),
-    ]) as Response;
-    const html = await res.text();
-    // Match all emails, skip noreply/support/privacy addresses
-    const matches = html.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g) || [];
-    const skip = /noreply|no-reply|donotreply|support|privacy|legal|abuse|spam|example|test@/i;
-    const best = matches.find(e => !skip.test(e));
-    return best || "";
-  } catch { return ""; }
 }
 
 // ─── Placeholder filler ───────────────────────────────────────────────────────
@@ -705,7 +682,7 @@ router.get("/crm/track/history/:email", async (req, res) => {
   }
 });
 
-// ─── AI Business Hunter ───────────────────────────────────────────────────────
+// ─── Business Hunter ──────────────────────────────────────────────────────────
 
 router.post("/crm/hunt-businesses", async (req, res) => {
   const { category, city, country, count = 10, extraContext } = req.body as {
@@ -713,64 +690,106 @@ router.post("/crm/hunt-businesses", async (req, res) => {
   };
   if (!category || !city) { res.status(400).json({ error: "category and city are required" }); return; }
 
+  const needed = Math.min(Number(count) || 10, 20);
+
   try {
     let raw: any[] = [];
-    let source = "ai";
+    const sourceLog: string[] = [];
 
-    // ── Step 1: Try Google Places first (real, live, operational businesses) ──
-    const places = await searchGooglePlaces(category, city, country, count);
-    if (places.length > 0) {
-      source = "google_places";
-      // Convert Places format → prospect format; scrape each website for a real email
-      const converted = await Promise.all(
-        places.map(async (p: any) => {
-          const website = p.websiteUri || "";
-          const email = await extractEmailFromWebsite(website);
-          return {
-            businessName: p.displayName?.text || "",
-            ownerName: "",
-            category,
-            email,
-            phone: p.nationalPhoneNumber || "",
-            website,
-            city,
-            country: country || "",
-            instagram: "",
-            facebook: "",
-            linkedin: "",
-            softwareNeedScore: 5,
-            painPoint: "",
-            estimatedValue: 0,
-            notes: p.formattedAddress || "",
-            source: "google_places",
-          };
-        })
-      );
-      // Keep only entries where we found a real email from the website
-      raw = converted.filter(p => p.email);
+    // ── Step 1: Multi-source directory scraper (Yelp, YP, Google, Manta, ─────
+    // ──         Hotfrog, Yell, Foursquare, Bing) — all in parallel          ──
+    const { businesses: scraped, sources, errors } = await scrapeBusinessDirectories(category, city, country || "", needed);
 
-      // If Places found businesses but none had scrapeable emails, fall through to AI
-      // (raw remains empty, the block below will run the AI fallback)
+    if (scraped.length > 0) {
+      sourceLog.push(...sources);
+      raw = scraped
+        .filter(b => b.businessName)
+        .map(b => ({
+          businessName: b.businessName,
+          ownerName: "",
+          category: b.category || category,
+          email: b.email || "",
+          phone: b.phone || "",
+          website: b.website || "",
+          city: b.city || city,
+          country: b.country || country || "",
+          instagram: "",
+          facebook: "",
+          linkedin: "",
+          softwareNeedScore: 5,
+          painPoint: "",
+          estimatedValue: 0,
+          notes: b.address || "",
+          source: b.source,
+        }));
     }
 
-    // ── Step 2: AI fallback when no Places key or zero results ────────────────
-    if (raw.length === 0) {
-      source = "ai";
-      const prompt = `You are a business intelligence researcher. Generate a list of ${Math.min(count, 20)} realistic ${category} businesses in ${city}, ${country || ""}.
+    // Log scraper diagnostics to server console for debugging (never sent to client)
+    if (Object.keys(errors).length > 0) {
+      console.warn("[hunt-businesses] scraper errors:", errors);
+    }
+
+    // ── Step 2: Supplement with Google Places API if key is configured ────────
+    if (raw.length < needed && process.env.GOOGLE_PLACES_API_KEY) {
+      const places = await searchGooglePlaces(category, city, country, needed - raw.length);
+      if (places.length > 0) {
+        sourceLog.push("google_places");
+        raw.push(...places.map((p: any) => ({
+          businessName: p.displayName?.text || "",
+          ownerName: "",
+          category,
+          email: "",
+          phone: p.nationalPhoneNumber || "",
+          website: p.websiteUri || "",
+          city,
+          country: country || "",
+          instagram: "",
+          facebook: "",
+          linkedin: "",
+          softwareNeedScore: 5,
+          painPoint: "",
+          estimatedValue: 0,
+          notes: p.formattedAddress || "",
+          source: "google_places",
+        })));
+      }
+    }
+
+    // ── Step 3: AI fallback if directories came up short ──────────────────────
+    if (raw.length < Math.ceil(needed / 2)) {
+      sourceLog.push("ai_fallback");
+      const prompt = `You are a business intelligence researcher. Generate a list of ${needed - raw.length} realistic ${category} businesses in ${city}, ${country || ""}.
 ${extraContext ? `Additional context: ${extraContext}` : ""}
-These should look like real local businesses — use realistic local naming conventions, realistic email patterns (info@, hello@, contact@, owner first name, etc.), realistic phone formats for that region, and realistic website patterns.
-For each business, estimate how much they would benefit from custom software (1-10 score) and why.
-Return ONLY a JSON array with exactly ${Math.min(count, 20)} objects. Each object must have:
-{ "businessName":"string","ownerName":"string","category":"${category}","email":"string","phone":"string","website":"string","city":"${city}","country":"${country || ""}","instagram":"string","facebook":"string","linkedin":"string","softwareNeedScore":<1-10>,"painPoint":"string","estimatedValue":<number>,"notes":"string" }
-Make the data diverse: mix of businesses with websites and without, different owner names, different email styles. Be realistic for ${city}, ${country || ""}.`;
-      const text = await generateText(prompt);
-      const data = parseJSON(text);
-      raw = Array.isArray(data) ? data : data.businesses || [];
+Use realistic local naming, email patterns (info@, hello@, owner first name), phone formats, and websites for ${city}.
+For each, estimate how much they would benefit from custom software (softwareNeedScore 1-10) and describe their main pain point.
+Return ONLY a JSON array. Each object must have:
+{ "businessName":"string","ownerName":"string","category":"${category}","email":"string","phone":"string","website":"string","city":"${city}","country":"${country || ""}","instagram":"string","facebook":"string","linkedin":"string","softwareNeedScore":<1-10>,"painPoint":"string","estimatedValue":<number>,"notes":"string" }`;
+      try {
+        const text = await generateText(prompt);
+        const data = parseJSON(text);
+        const aiBizes: any[] = Array.isArray(data) ? data : data.businesses || [];
+        raw.push(...aiBizes.map(b => ({ ...b, source: "ai" })));
+      } catch {}
     }
 
-    // ── Step 3: DNS/MX verification ──────────────────────────────────────────
+    // ── Step 4: Deduplicate by normalized name ────────────────────────────────
+    const seen = new Set<string>();
+    raw = raw.filter(b => {
+      const key = b.businessName?.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 40);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    // ── Step 5: MX / DNS verification ────────────────────────────────────────
     const { live, dead } = await filterLiveProspects(raw);
-    res.json({ prospects: live, filtered: dead, total: raw.length, source });
+
+    res.json({
+      prospects: live,
+      filtered: dead,
+      total: raw.length,
+      sources: [...new Set(sourceLog)],
+    });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
