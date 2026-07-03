@@ -146,12 +146,45 @@ const STATUS_CONFIG: Record<LeadStatus, { label: string; color: string; bg: stri
 };
 
 const CATEGORIES = [
-  "Restaurant", "School", "Church", "Hospital", "Real Estate", "Hotel",
-  "Salon", "Lawyer", "Accountant", "Construction", "Supermarket",
-  "Pharmacy", "Gym", "Car Dealer", "Bakery", "Clinic", "Dentist",
-  "Auto Repair", "Travel Agency", "Insurance", "Consultant",
-  "Spa & Wellness", "Photography Studio", "Event Planner", "Florist",
-  "Catering", "Vet Clinic", "Optician", "Tutoring Center", "Other",
+  // Real Estate & Property
+  "Real Estate Agency", "Property Management", "Real Estate Developer",
+  "Mortgage Broker", "Interior Designer", "Architecture Firm",
+  // Food & Beverage
+  "Restaurant", "Bakery", "Café / Coffee Shop", "Bar & Lounge",
+  "Catering", "Food Truck", "Juice Bar", "Ice Cream Shop",
+  // Health & Medical
+  "Hospital", "Clinic", "Dentist", "Pharmacy", "Optician",
+  "Physiotherapy", "Chiropractic", "Mental Health Practice", "Vet Clinic",
+  // Beauty & Wellness
+  "Salon", "Barbershop", "Spa & Wellness", "Nail Studio", "Tattoo Studio",
+  // Fitness
+  "Gym", "Yoga Studio", "Pilates Studio", "Martial Arts School",
+  // Automotive
+  "Car Dealer", "Auto Repair", "Car Wash", "Car Rental",
+  // Professional Services
+  "Lawyer", "Accountant", "Insurance", "Consultant", "Financial Advisor",
+  "Recruiting Agency", "Marketing Agency", "Advertising Agency",
+  // Education
+  "School", "Tutoring Center", "Driving School", "Language School",
+  "Music School", "Dance Studio",
+  // Retail & Shopping
+  "Supermarket", "Clothing Store", "Electronics Store", "Furniture Store",
+  "Jewellery Store", "Pet Shop", "Book Store", "Gift Shop",
+  // Hospitality & Travel
+  "Hotel", "Guesthouse / B&B", "Hostel", "Travel Agency", "Tour Operator",
+  // Events & Creative
+  "Event Planner", "Photography Studio", "Videography Studio",
+  "Wedding Planner", "Florist",
+  // Home & Trade Services
+  "Construction", "Electrician", "Plumber", "Landscaping",
+  "Cleaning Service", "Security Company", "Pest Control",
+  // Logistics & Transport
+  "Logistics Company", "Courier Service", "Moving Company",
+  // Technology
+  "IT Services", "Printing & Design Studio", "Web Agency",
+  // Religion & Community
+  "Church", "Mosque", "Community Center", "NGO / Non-Profit",
+  "Other",
 ];
 
 const CHECK_LABELS: Record<string, string> = {
@@ -768,7 +801,7 @@ function AIHunterPanel({ onImport }: { onImport: (prospects: Omit<Prospect, "id"
             <label className="text-xs font-semibold text-muted-foreground mb-1 block">Business Category</label>
             <Select value={category} onValueChange={setCategory}>
               <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>{CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+              <SelectContent className="max-h-72 overflow-y-auto">{CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
             </Select>
           </div>
           <div>
@@ -1021,7 +1054,7 @@ function AddProspectDialog({ onAdd, editData, onClose }: {
             <label className="text-xs font-semibold text-muted-foreground mb-1 block">Category</label>
             <Select value={form.category} onValueChange={v => set("category", v)}>
               <SelectTrigger><SelectValue placeholder="Select category" /></SelectTrigger>
-              <SelectContent>{CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+              <SelectContent className="max-h-72 overflow-y-auto">{CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
             </Select>
           </div>
           <div>
@@ -1824,7 +1857,7 @@ function ProspectList({ prospects, onSelect, onDelete, onUpdate }: {
         </Select>
         <Select value={categoryFilter} onValueChange={setCategoryFilter}>
           <SelectTrigger className="w-36"><SelectValue placeholder="All categories" /></SelectTrigger>
-          <SelectContent>
+          <SelectContent className="max-h-72 overflow-y-auto">
             <SelectItem value="all">All Categories</SelectItem>
             {CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
           </SelectContent>
