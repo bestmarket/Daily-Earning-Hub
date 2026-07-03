@@ -1957,7 +1957,7 @@ function AutomationTab() {
               <Select value={String(s.emailDelayMinutes)} onValueChange={v => setSettings(p => p ? { ...p, emailDelayMinutes: Number(v) } : p)}>
                 <SelectTrigger className="w-48"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {[["5","5 minutes"],["10","10 minutes"],["15","15 minutes"],["20","20 minutes"],["30","30 minutes"],["60","1 hour"]].map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
+                  {[["1","1 minute"],["2","2 minutes"],["3","3 minutes"],["4","4 minutes"],["5","5 minutes"],["10","10 minutes"],["15","15 minutes"],["20","20 minutes"],["30","30 minutes"],["60","1 hour"]].map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground mt-1.5">Emails rotate through your active accounts with this gap between each send.</p>
