@@ -154,7 +154,7 @@ async function getOrCreateSettings(): Promise<typeof automationSettingsTable.$in
 
 // ─── Email Accounts ───────────────────────────────────────────────────────────
 
-router.get("/automation/email-accounts", requireAdmin, async (_req, res) => {
+router.get("/automation/email-accounts", async (_req, res) => {
   const accounts = await db.select().from(emailAccountsTable).orderBy(emailAccountsTable.id);
   res.json(accounts.map(maskPassword));
 });
@@ -176,7 +176,7 @@ function validateCredentials(provider: string, cleanedPassword: string, user: st
   return null;
 }
 
-router.post("/automation/email-accounts", requireAdmin, async (req, res) => {
+router.post("/automation/email-accounts", async (req, res) => {
   const { label, provider, host, port, secure, user, password, fromName, fromEmail, imapEnabled, imapHost, imapPort } = req.body;
   if (!user) { res.status(400).json({ error: "user (email address) is required" }); return; }
   if (!password || !password.trim()) { res.status(400).json({ error: "Password / API key is required" }); return; }
@@ -201,7 +201,7 @@ router.post("/automation/email-accounts", requireAdmin, async (req, res) => {
   res.json(maskPassword(inserted[0]));
 });
 
-router.put("/automation/email-accounts/:id", requireAdmin, async (req, res) => {
+router.put("/automation/email-accounts/:id", async (req, res) => {
   const id = Number(req.params.id);
   const { label, provider, host, port, secure, user, password, fromName, fromEmail, imapEnabled, imapHost, imapPort, active } = req.body;
   const existing = await db.select().from(emailAccountsTable).where(eq(emailAccountsTable.id, id)).limit(1);
@@ -231,13 +231,13 @@ router.put("/automation/email-accounts/:id", requireAdmin, async (req, res) => {
   res.json(maskPassword(updated[0]));
 });
 
-router.delete("/automation/email-accounts/:id", requireAdmin, async (req, res) => {
+router.delete("/automation/email-accounts/:id", async (req, res) => {
   const id = Number(req.params.id);
   await db.delete(emailAccountsTable).where(eq(emailAccountsTable.id, id));
   res.json({ success: true });
 });
 
-router.post("/automation/email-accounts/:id/test", requireAdmin, async (req, res) => {
+router.post("/automation/email-accounts/:id/test", async (req, res) => {
   const id = Number(req.params.id);
   const rows = await db.select().from(emailAccountsTable).where(eq(emailAccountsTable.id, id)).limit(1);
   if (!rows.length) { res.status(404).json({ error: "Account not found" }); return; }
@@ -260,7 +260,7 @@ router.post("/automation/email-accounts/:id/test", requireAdmin, async (req, res
 
 // ─── Brevo fallback test (uses server-level Brevo credentials) ────────────────
 
-router.post("/automation/brevo-test", requireAdmin, async (req, res) => {
+router.post("/automation/brevo-test", async (req, res) => {
   const to = req.body.to;
   if (!to) { res.status(400).json({ error: "Missing 'to' email address" }); return; }
   try {
@@ -279,12 +279,12 @@ router.post("/automation/brevo-test", requireAdmin, async (req, res) => {
 
 // ─── Automation Settings ──────────────────────────────────────────────────────
 
-router.get("/automation/settings", requireAdmin, async (_req, res) => {
+router.get("/automation/settings", async (_req, res) => {
   const settings = await getOrCreateSettings();
   res.json(settings);
 });
 
-router.put("/automation/settings", requireAdmin, async (req, res) => {
+router.put("/automation/settings", async (req, res) => {
   const current = await getOrCreateSettings();
   const {
     autoHuntEnabled, huntCategory, huntCity, huntCountry, huntCount,
@@ -318,7 +318,7 @@ router.put("/automation/settings", requireAdmin, async (req, res) => {
 
 // ─── Automation Status (live run info) ───────────────────────────────────────
 
-router.get("/automation/status", requireAdmin, async (_req, res) => {
+router.get("/automation/status", async (_req, res) => {
   const settings = await getOrCreateSettings();
   const accounts = await db.select().from(emailAccountsTable).where(eq(emailAccountsTable.active, true));
   res.json({
@@ -332,7 +332,7 @@ router.get("/automation/status", requireAdmin, async (_req, res) => {
 
 // ─── Manual trigger ───────────────────────────────────────────────────────────
 
-router.post("/automation/run-now", requireAdmin, async (req, res) => {
+router.post("/automation/run-now", async (req, res) => {
   // Kick off without awaiting — respond immediately
   res.json({ success: true, message: "Automation run started" });
   runAutomationCycle().catch(() => {});
@@ -636,7 +636,7 @@ Return ONLY JSON: { "classification": "...", "response": "..." }`;
   }
 }
 
-router.post("/automation/check-replies", requireAdmin, async (_req, res) => {
+router.post("/automation/check-replies", async (_req, res) => {
   try {
     const accounts = await db
       .select()
@@ -741,7 +741,7 @@ router.post("/automation/check-replies", requireAdmin, async (_req, res) => {
 });
 
 /** List stored inbox replies (newest first). */
-router.get("/automation/replies", requireAdmin, async (req, res) => {
+router.get("/automation/replies", async (req, res) => {
   try {
     const limit = Math.min(Number(req.query.limit) || 50, 200);
     const rows = await db
@@ -760,7 +760,7 @@ router.get("/automation/replies", requireAdmin, async (req, res) => {
 });
 
 /** Mark a reply as read. */
-router.patch("/automation/replies/:id/read", requireAdmin, async (req, res) => {
+router.patch("/automation/replies/:id/read", async (req, res) => {
   try {
     await db
       .update(inboxRepliesTable)
@@ -796,7 +796,7 @@ async function runHealthCheck() {
   }
 }
 
-router.post("/automation/health-check", requireAdmin, async (_req, res) => {
+router.post("/automation/health-check", async (_req, res) => {
   try {
     await runHealthCheck();
     res.json({ success: true });

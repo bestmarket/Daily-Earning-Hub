@@ -2187,6 +2187,256 @@ const CLASSIFICATION_META: Record<string, { label: string; color: string }> = {
   other:           { label: "Other",            color: "bg-sky-500/15    text-sky-400    border-sky-500/30" },
 };
 
+// ─── Automation Panel ─────────────────────────────────────────────────────────
+
+interface AutomationSettings {
+  autoHuntEnabled: boolean;
+  huntCategory: string;
+  huntCity: string;
+  huntCountry: string;
+  huntCount: number;
+  huntExtraContext: string;
+  huntIntervalHours: number;
+  autoScore: boolean;
+  autoEmail: boolean;
+  emailDelayMinutes: number;
+  autoReply: boolean;
+  followUpEnabled: boolean;
+  followUpDays: number;
+}
+
+interface AutomationStatus {
+  enabled: boolean;
+  lastRunAt: string | null;
+  nextRunAt: string | null;
+  activeAccounts: number;
+  stats: Record<string, any>;
+}
+
+function AutomationPanel() {
+  const [settings, setSettings] = useState<AutomationSettings | null>(null);
+  const [status, setStatus] = useState<AutomationStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const [sRes, stRes] = await Promise.all([
+        fetch(`${apiBase()}/api/automation/settings`),
+        fetch(`${apiBase()}/api/automation/status`),
+      ]);
+      if (sRes.ok)  setSettings(await sRes.json());
+      if (stRes.ok) setStatus(await stRes.json());
+    } finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const save = async (patch: Partial<AutomationSettings>) => {
+    if (!settings) return;
+    const next = { ...settings, ...patch };
+    setSettings(next);
+    setSaving(true); setMsg(null);
+    try {
+      const r = await fetch(`${apiBase()}/api/automation/settings`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      const updated = await r.json();
+      setSettings(updated);
+      // refresh status after toggle
+      const st = await fetch(`${apiBase()}/api/automation/status`);
+      if (st.ok) setStatus(await st.json());
+      setMsg({ type: "ok", text: "Saved" });
+    } catch (e: any) {
+      setMsg({ type: "err", text: e.message });
+    } finally { setSaving(false); }
+  };
+
+  const runNow = async () => {
+    setRunning(true); setMsg(null);
+    try {
+      const r = await fetch(`${apiBase()}/api/automation/run-now`, { method: "POST" });
+      const d = await r.json();
+      setMsg({ type: d.success ? "ok" : "err", text: d.message || "Started" });
+      setTimeout(load, 3000);
+    } catch (e: any) { setMsg({ type: "err", text: e.message }); }
+    finally { setRunning(false); }
+  };
+
+  if (loading) return <LoadingSpinner text="Loading automation settings…" />;
+  if (!settings) return <div className="text-center py-12 text-muted-foreground">Failed to load settings</div>;
+
+  const isReady = status && status.activeAccounts > 0;
+
+  return (
+    <div className="space-y-6">
+      {/* Status bar */}
+      <div className={`rounded-xl border p-4 flex items-center gap-4 ${settings.autoHuntEnabled ? "bg-green-50 border-green-200" : "bg-muted/30 border-border/50"}`}>
+        <div className={`w-3 h-3 rounded-full flex-shrink-0 ${settings.autoHuntEnabled ? "bg-green-500 animate-pulse" : "bg-gray-400"}`} />
+        <div className="flex-1">
+          <div className="font-bold text-sm">{settings.autoHuntEnabled ? "Automation is LIVE" : "Automation is OFF"}</div>
+          <div className="text-xs text-muted-foreground mt-0.5">
+            {status?.activeAccounts ?? 0} email account{status?.activeAccounts !== 1 ? "s" : ""} active
+            {status?.lastRunAt && ` · Last run ${new Date(status.lastRunAt).toLocaleString()}`}
+            {status?.nextRunAt && ` · Next run ${new Date(status.nextRunAt).toLocaleString()}`}
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <Button size="sm" variant="outline" onClick={runNow} disabled={running || !isReady}
+            className="gap-1.5 h-8 text-xs font-semibold">
+            {running ? <RefreshCw className="w-3 h-3 animate-spin" /> : <PlayCircle className="w-3.5 h-3.5" />}
+            Run Now
+          </Button>
+          <Switch checked={settings.autoHuntEnabled} disabled={saving || !isReady}
+            onCheckedChange={v => save({ autoHuntEnabled: v })} />
+        </div>
+      </div>
+
+      {!isReady && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 flex items-start gap-3">
+          <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+          <div>
+            <span className="font-bold">Add Gmail accounts first.</span> Go to <strong>Email Settings</strong> and add your Gmail accounts with App Passwords before enabling automation.
+          </div>
+        </div>
+      )}
+
+      {msg && (
+        <div className={`text-sm px-4 py-2 rounded-lg border ${msg.type === "ok" ? "bg-green-50 text-green-800 border-green-200" : "bg-red-50 text-red-700 border-red-200"}`}>
+          {msg.text}
+        </div>
+      )}
+
+      {/* Hunt Settings */}
+      <div className="rounded-xl border border-border/50 overflow-hidden">
+        <div className="p-3 bg-muted/20 border-b border-border/50 flex items-center gap-2">
+          <Radar className="w-4 h-4 text-primary" />
+          <h4 className="font-bold text-sm">Hunt Settings</h4>
+          <span className="text-xs text-muted-foreground ml-1">— who to find</span>
+        </div>
+        <div className="p-4 grid grid-cols-2 gap-4">
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground mb-1 block">Business Category</label>
+            <Select value={settings.huntCategory} onValueChange={v => save({ huntCategory: v })}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent className="max-h-72 overflow-y-auto">{CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground mb-1 block">Businesses per Run</label>
+            <Input type="number" min={5} max={100} value={settings.huntCount}
+              onChange={e => setSettings(s => s ? { ...s, huntCount: Number(e.target.value) } : s)}
+              onBlur={() => save({ huntCount: settings.huntCount })} />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground mb-1 block">City</label>
+            <Input value={settings.huntCity} placeholder="e.g. Lagos, London, Dubai"
+              onChange={e => setSettings(s => s ? { ...s, huntCity: e.target.value } : s)}
+              onBlur={() => save({ huntCity: settings.huntCity })} />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground mb-1 block">Country</label>
+            <Input value={settings.huntCountry} placeholder="e.g. Nigeria, UK, UAE"
+              onChange={e => setSettings(s => s ? { ...s, huntCountry: e.target.value } : s)}
+              onBlur={() => save({ huntCountry: settings.huntCountry })} />
+          </div>
+          <div className="col-span-2">
+            <label className="text-xs font-semibold text-muted-foreground mb-1 block">Extra Context (optional)</label>
+            <Input value={settings.huntExtraContext} placeholder="e.g. focus on mid-size, avoid chains"
+              onChange={e => setSettings(s => s ? { ...s, huntExtraContext: e.target.value } : s)}
+              onBlur={() => save({ huntExtraContext: settings.huntExtraContext })} />
+          </div>
+        </div>
+      </div>
+
+      {/* Schedule & Sending */}
+      <div className="rounded-xl border border-border/50 overflow-hidden">
+        <div className="p-3 bg-muted/20 border-b border-border/50 flex items-center gap-2">
+          <Clock className="w-4 h-4 text-primary" />
+          <h4 className="font-bold text-sm">Schedule & Sending</h4>
+        </div>
+        <div className="p-4 space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs font-semibold text-muted-foreground mb-1 block">Run Every (hours)</label>
+              <Input type="number" min={1} max={48} value={settings.huntIntervalHours}
+                onChange={e => setSettings(s => s ? { ...s, huntIntervalHours: Number(e.target.value) } : s)}
+                onBlur={() => save({ huntIntervalHours: settings.huntIntervalHours })} />
+              <p className="text-[10px] text-muted-foreground mt-1">24 = once/day. 12 = twice/day.</p>
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-muted-foreground mb-1 block">Delay Between Emails (mins)</label>
+              <Input type="number" min={0} max={30} value={settings.emailDelayMinutes}
+                onChange={e => setSettings(s => s ? { ...s, emailDelayMinutes: Number(e.target.value) } : s)}
+                onBlur={() => save({ emailDelayMinutes: settings.emailDelayMinutes })} />
+              <p className="text-[10px] text-muted-foreground mt-1">1–2 mins recommended to avoid spam flags.</p>
+            </div>
+          </div>
+
+          {/* Feature toggles */}
+          <div className="space-y-3 pt-2 border-t border-border/50">
+            {[
+              { key: "autoScore", label: "AI Analysis", desc: "Auto-analyze each business website before emailing" },
+              { key: "autoEmail", label: "Auto Send Emails", desc: "Automatically send the AI-generated cold email" },
+              { key: "autoReply", label: "Auto Reply", desc: "AI replies to interested leads automatically" },
+              { key: "followUpEnabled", label: "Follow-ups", desc: `Send a follow-up after ${settings.followUpDays} days if no reply` },
+            ].map(({ key, label, desc }) => (
+              <div key={key} className="flex items-center justify-between py-1">
+                <div>
+                  <div className="text-sm font-semibold">{label}</div>
+                  <div className="text-xs text-muted-foreground">{desc}</div>
+                </div>
+                <Switch checked={(settings as any)[key]}
+                  onCheckedChange={v => save({ [key]: v } as any)} />
+              </div>
+            ))}
+            {settings.followUpEnabled && (
+              <div className="pl-4 border-l-2 border-border/50">
+                <label className="text-xs font-semibold text-muted-foreground mb-1 block">Follow-up after (days)</label>
+                <Input type="number" min={1} max={30} value={settings.followUpDays} className="w-24"
+                  onChange={e => setSettings(s => s ? { ...s, followUpDays: Number(e.target.value) } : s)}
+                  onBlur={() => save({ followUpDays: settings.followUpDays })} />
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Stats */}
+      {status?.stats && Object.keys(status.stats).length > 0 && (
+        <div className="rounded-xl border border-border/50 overflow-hidden">
+          <div className="p-3 bg-muted/20 border-b border-border/50">
+            <h4 className="font-bold text-sm flex items-center gap-2"><TrendingUp className="w-4 h-4 text-primary" /> Run Stats</h4>
+          </div>
+          <div className="p-4 grid grid-cols-3 gap-3">
+            {Object.entries(status.stats).map(([k, v]) => (
+              <div key={k} className="text-center rounded-lg border border-border/50 p-3">
+                <div className="text-2xl font-extrabold text-primary">{String(v)}</div>
+                <div className="text-xs text-muted-foreground capitalize">{k.replace(/_/g, " ")}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Instructions */}
+      <div className="rounded-xl border border-border/50 bg-muted/10 p-4 text-sm text-muted-foreground space-y-2">
+        <p className="font-semibold text-foreground">How to start sending 1,000 emails/day:</p>
+        <ol className="list-decimal list-inside space-y-1.5 text-xs leading-relaxed">
+          <li>Go to <strong>Email Settings</strong> → add all 12 Gmail accounts with App Passwords, set daily limit to <strong>80</strong> each</li>
+          <li>Set <strong>GOOGLE_GENERATIVE_AI_API_KEY</strong> in Replit Secrets (free at aistudio.google.com)</li>
+          <li>Set <strong>Category</strong> and <strong>City</strong> above, turn on <strong>AI Analysis</strong> + <strong>Auto Send Emails</strong></li>
+          <li>Hit <strong>Run Now</strong> to test one cycle, then toggle automation <strong>ON</strong></li>
+        </ol>
+      </div>
+    </div>
+  );
+}
+
 function InboxPanel() {
   const [replies, setReplies] = useState<InboxReply[]>([]);
   const [loading, setLoading] = useState(false);
@@ -2410,6 +2660,9 @@ export default function CRM() {
             <TabsTrigger value="email-settings" className="flex-1 gap-1.5">
               <Settings className="w-4 h-4" /> Email Settings
             </TabsTrigger>
+            <TabsTrigger value="automation" className="flex-1 gap-1.5">
+              <Zap className="w-4 h-4" /> Automation
+            </TabsTrigger>
             <TabsTrigger value="inbox" className="flex-1 gap-1.5">
               <Inbox className="w-4 h-4" /> Inbox
             </TabsTrigger>
@@ -2434,6 +2687,10 @@ export default function CRM() {
 
           <TabsContent value="email-settings">
             <EmailSettingsPanel />
+          </TabsContent>
+
+          <TabsContent value="automation">
+            <AutomationPanel />
           </TabsContent>
 
           <TabsContent value="inbox">
