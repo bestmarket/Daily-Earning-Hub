@@ -731,7 +731,9 @@ function AIHunterPanel({ onImport }: { onImport: (prospects: Omit<Prospect, "id"
         });
         const businesses: HuntedBusiness[] = Array.isArray(resp) ? resp : (resp.prospects ?? []);
         const filtered: number = resp.filtered ?? 0;
-        const tagged = businesses.map((b: HuntedBusiness) => ({ ...b, selected: true, imported: false, importing: false }));
+        const tagged = businesses
+          .map((b: HuntedBusiness) => ({ ...b, selected: true, imported: false, importing: false }))
+          .sort((a, b) => (b.softwareNeedScore ?? 0) - (a.softwareNeedScore ?? 0));
         setResults(tagged);
         const cityResultsText = resp.cityResults
           ? Object.entries(resp.cityResults as Record<string, number>).map(([c, n]) => `${c}: ${n}`).join(", ")

@@ -18,6 +18,10 @@ export interface ScrapedBusiness {
   category: string;
   source: string;
   email: string;
+  /** 1-10: how strong the fit is for an AI agent / automation pitch, based on real website scan. Filled in during enrichment. */
+  aiOpportunityScore?: number;
+  /** Short, real, human-readable reason derived from what was (or wasn't) found on their site. Filled in during enrichment. */
+  aiOpportunityNote?: string;
 }
 
 // ─── Shared HTTP fetch ────────────────────────────────────────────────────────
@@ -677,16 +681,51 @@ async function scrapeBark(category: string, city: string, country: string, count
 
 // ─── Email extraction from websites ──────────────────────────────────────────
 
-const SKIP_EMAIL = /noreply|no-reply|donotreply|unsubscribe|privacy|legal|abuse|spam|webmaster|admin@|sentry\.io|cloudflare|wix\.com|squarespace|shopify|wordpress|example\.com|test@|@yelp\.|@manta\.|@hotfrog\.|@yell\.|foursquare|@tripadvisor\.|@bbb\.|@thumbtack\.|@bark\.|@superpages\.|@cylex\.|@yellowpages\./i;
+const SKIP_EMAIL = /noreply|no-reply|donotreply|unsubscribe|privacy|legal|abuse|spam|webmaster|admin@|sentry\.io|cloudflare|wix\.com|squarespace|shopify|wordpress|example\.com|test@|@yelp\.|@manta\.|@hotfrog\.|@yell\.|foursquare|@tripadvisor\.|@bbb\.|@thumbtack\.|@bark\.|@superpages\.|@cylex\.|@yellowpages\.|@domain\.com|@mystore\.com|@yourdomain\.com|@yourcompany\.com|@company\.com|@yoursite\.com|@website\.com|@email\.com|user@domain|name@domain|@mydomain\.com|@sample\.com|@placeholder|@dummy|@fake|you@|@somewhere\.com|@site\.com|sentry-next\.wixpress|@wixpress\.com|godaddy\.com|@squareup\.com|@mailinator\.com|@yopmail/i;
 
 // Directory domains whose URLs we should NOT try to scrape for a business email
 const SKIP_WEBSITE = /^https?:\/\/(?:www\.)?(yelp\.com|manta\.com|hotfrog\.|yell\.com|foursquare\.com|yellowpages\.|bing\.com|google\.com|facebook\.com|instagram\.com|twitter\.com|linkedin\.com|tripadvisor\.com|bbb\.org|thumbtack\.com|bark\.com|superpages\.com|cylex\.)/i;
 
-async function scrapeEmailFromSite(rawUrl: string): Promise<string> {
-  if (!rawUrl || SKIP_WEBSITE.test(rawUrl)) return "";
+// ─── AI-agent opportunity scanner ─────────────────────────────────────────────
+
+/** Known live-chat / conversational-AI widget signatures — if present, the business already has automation. */
+const CHAT_WIDGET_RE = /intercom|drift\.com|tawk\.to|tidio|crisp\.chat|livechatinc|zopim|zdassets\.com\/zendesk|hubspot.*conversations|manychat|chatbot\.com|freshchat|gorgias-chat|chatra|smartsupp|olark|purechat|liveperson/i;
+/** Known booking / scheduling widget signatures — indicates some workflow automation already exists. */
+const BOOKING_WIDGET_RE = /calendly\.com|acuityscheduling|squareup\.com\/appointments|setmore|booksy\.com|schedulicity|simplybook|appointy|square-online-booking/i;
+/** Signs of an online ordering / e-commerce checkout flow already in place. */
+const ORDER_WIDGET_RE = /toasttab\.com|clover\.com\/online-ordering|square-online|doordash\.com\/merchant|ubereats\.com|grubhub|shopify\.com\/checkouts/i;
+/** A real <form> element (vs. just a mailto/phone link) suggests some lead-capture already exists. */
+const FORM_RE = /<form[\s>]/i;
+
+/**
+ * Scan a business's homepage HTML for signals of whether they'd benefit from
+ * an AI agent (chatbot / booking assistant / auto-responder). This replaces
+ * a hardcoded guess with a real, verifiable read of what's actually on their site.
+ */
+function analyzeAIOpportunity(html: string): { score: number; note: string } {
+  const hasChat = CHAT_WIDGET_RE.test(html);
+  const hasBooking = BOOKING_WIDGET_RE.test(html);
+  const hasOrdering = ORDER_WIDGET_RE.test(html);
+  const hasForm = FORM_RE.test(html);
+
+  if (hasChat) {
+    return { score: 2, note: "Already running a live-chat widget — lower priority for an AI agent pitch." };
+  }
+  if (hasBooking || hasOrdering) {
+    return { score: 4, note: hasBooking ? "Has online booking but no chat/AI assistant — could upsell an AI booking agent." : "Has online ordering but no chat assistant — room for an AI agent upsell." };
+  }
+  if (!hasForm) {
+    return { score: 9, note: "No chat widget, no booking tool, no contact form — purely phone/email. Strong AI agent opportunity." };
+  }
+  return { score: 7, note: "Has a basic contact form but no chat, booking, or AI assistant — good AI agent opportunity." };
+}
+
+async function scrapeEmailFromSite(rawUrl: string): Promise<{ email: string; aiOpportunityScore: number; aiOpportunityNote: string }> {
+  const fallback = { email: "", aiOpportunityScore: 5, aiOpportunityNote: "Website could not be scanned — need unverified." };
+  if (!rawUrl || SKIP_WEBSITE.test(rawUrl)) return fallback;
   const fullUrl = rawUrl.startsWith("http") ? rawUrl : `https://${rawUrl}`;
 
-  const tryFetch = async (u: string): Promise<string> => {
+  const tryFetch = async (u: string): Promise<{ email: string; html: string } | null> => {
     try {
       const r = await Promise.race([
         fetch(u, {
@@ -697,41 +736,47 @@ async function scrapeEmailFromSite(rawUrl: string): Promise<string> {
         }),
         new Promise<never>((_, rj) => setTimeout(() => rj(new Error("timeout")), 8000)),
       ]) as Response;
-      if (!r.ok) return "";
+      if (!r.ok) return null;
       const html = await r.text();
 
       // Priority 1: explicit mailto: href links (most reliable — real contact emails)
       const mailtoRe = /href="mailto:([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})"/gi;
       let mm: RegExpExecArray | null;
       while ((mm = mailtoRe.exec(html)) !== null) {
-        if (!SKIP_EMAIL.test(mm[1])) return mm[1].toLowerCase();
+        if (!SKIP_EMAIL.test(mm[1])) return { email: mm[1].toLowerCase(), html };
       }
 
       // Priority 2: email addresses anywhere in the HTML
       const emails = html.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g) ?? [];
       const found = emails.find(e => !SKIP_EMAIL.test(e));
-      return found?.toLowerCase() ?? "";
-    } catch { return ""; }
+      return { email: found?.toLowerCase() ?? "", html };
+    } catch { return null; }
   };
 
-  // Try main page first
-  const fromMain = await tryFetch(fullUrl);
-  if (fromMain) return fromMain;
+  // Try main page first — this is also what we analyze for AI-opportunity signals.
+  const main = await tryFetch(fullUrl);
+  if (main) {
+    const { score, note } = analyzeAIOpportunity(main.html);
+    if (main.email) return { email: main.email, aiOpportunityScore: score, aiOpportunityNote: note };
 
-  // Probe common contact/about pages
-  try {
-    const origin = new URL(fullUrl).origin;
-    for (const path of [
-      "/contact", "/contact-us", "/contact-us/", "/contacts",
-      "/about", "/about-us", "/about/",
-      "/get-in-touch", "/reach-us", "/our-team", "/team", "/staff",
-    ]) {
-      const found = await tryFetch(`${origin}${path}`);
-      if (found) return found;
-    }
-  } catch {}
+    // Probe common contact/about pages for an email, but keep the homepage's opportunity read —
+    // the homepage is what a prospective client actually sees first.
+    try {
+      const origin = new URL(fullUrl).origin;
+      for (const path of [
+        "/contact", "/contact-us", "/contact-us/", "/contacts",
+        "/about", "/about-us", "/about/",
+        "/get-in-touch", "/reach-us", "/our-team", "/team", "/staff",
+      ]) {
+        const found = await tryFetch(`${origin}${path}`);
+        if (found?.email) return { email: found.email, aiOpportunityScore: score, aiOpportunityNote: note };
+      }
+    } catch {}
 
-  return "";
+    return { email: "", aiOpportunityScore: score, aiOpportunityNote: note };
+  }
+
+  return fallback;
 }
 
 // ─── SCRAPER 15: Google Maps (free — parses embedded place data) ──────────────
@@ -799,6 +844,86 @@ async function scrapeGoogleMaps(category: string, city: string, country: string,
   return dedup(businesses).slice(0, count);
 }
 
+// ─── SCRAPER 16: OpenStreetMap (free, public API — not subject to anti-bot blocking) ──
+
+/**
+ * OpenStreetMap's Nominatim (geocoding) + Overpass (POI query) are public,
+ * script-friendly APIs meant for programmatic use — unlike the directory sites
+ * above, they don't 403/429 requests from cloud IPs. This is real business data
+ * (name, phone, website, address) contributed by OSM mappers, so coverage varies
+ * by area, but it's a reliable, unblockable source to add to the mix.
+ */
+async function scrapeOpenStreetMap(category: string, city: string, country: string, count: number): Promise<ScrapedBusiness[]> {
+  try {
+    // 1. Geocode the city to a bounding box via Nominatim (free, no key).
+    const geoUrl = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(`${city}, ${country}`)}`;
+    const geoRes = await Promise.race([
+      fetch(geoUrl, { headers: { "User-Agent": "DevStudio-BusinessHunter/1.0 (contact via app)" } }),
+      new Promise<never>((_, rj) => setTimeout(() => rj(new Error("timeout")), 10000)),
+    ]) as Response;
+    if (!geoRes.ok) return [];
+    const geoData = await geoRes.json() as Array<{ boundingbox: [string, string, string, string] }>;
+    if (!geoData.length) return [];
+    const [south, north, west, east] = geoData[0].boundingbox.map(Number);
+
+    // 2. Map the free-text category to OSM tag keys/values (best-effort keyword match).
+    const cat = category.toLowerCase();
+    const tagMap: Array<[RegExp, string]> = [
+      [/restaurant|food|dining|eatery/, `node["amenity"="restaurant"]`],
+      [/cafe|coffee/, `node["amenity"="cafe"]`],
+      [/bar|pub/, `node["amenity"="bar"]`],
+      [/salon|hair|beauty/, `node["shop"="hairdresser"]`],
+      [/dentist/, `node["amenity"="dentist"]`],
+      [/doctor|clinic|medical/, `node["amenity"="clinic"]`],
+      [/lawyer|attorney|legal/, `node["office"="lawyer"]`],
+      [/plumber/, `node["craft"="plumber"]`],
+      [/electrician/, `node["craft"="electrician"]`],
+      [/gym|fitness/, `node["leisure"="fitness_centre"]`],
+      [/hotel|lodging/, `node["tourism"="hotel"]`],
+      [/auto|car repair|mechanic/, `node["shop"="car_repair"]`],
+      [/real\s*estate/, `node["office"="estate_agent"]`],
+      [/accounting|accountant/, `node["office"="accountant"]`],
+      [/insurance/, `node["office"="insurance"]`],
+      [/veterinar|vet\b/, `node["amenity"="veterinary"]`],
+      [/spa/, `node["shop"="beauty"]`],
+      [/bakery/, `node["shop"="bakery"]`],
+      [/florist/, `node["shop"="florist"]`],
+      [/retail|shop|store/, `node["shop"]`],
+    ];
+    const tag = tagMap.find(([re]) => re.test(cat))?.[1] ?? `node["shop"]`;
+
+    // 3. Query Overpass for POIs of that type within the bounding box.
+    const query = `[out:json][timeout:20];(${tag}(${south},${west},${north},${east}););out body ${Math.min(count * 3, 150)};`;
+    const overpassRes = await Promise.race([
+      fetch("https://overpass-api.de/api/interpreter", {
+        method: "POST",
+        headers: { "Content-Type": "text/plain", "User-Agent": "DevStudio-BusinessHunter/1.0" },
+        body: query,
+      }),
+      new Promise<never>((_, rj) => setTimeout(() => rj(new Error("timeout")), 20000)),
+    ]) as Response;
+    if (!overpassRes.ok) return [];
+    const data = await overpassRes.json() as { elements: Array<{ tags?: Record<string, string> }> };
+
+    const businesses: ScrapedBusiness[] = (data.elements ?? [])
+      .map(el => {
+        const t = el.tags ?? {};
+        const name = t.name;
+        if (!name) return null;
+        const website = t.website ?? t["contact:website"] ?? "";
+        const phone = t.phone ?? t["contact:phone"] ?? "";
+        const email = t.email ?? t["contact:email"] ?? "";
+        const address = [t["addr:housenumber"], t["addr:street"], t["addr:city"]].filter(Boolean).join(" ");
+        return { businessName: name, phone, website, address, city, country, category, source: "openstreetmap", email } as ScrapedBusiness;
+      })
+      .filter((b): b is ScrapedBusiness => b !== null);
+
+    return dedup(businesses).slice(0, count);
+  } catch {
+    return [];
+  }
+}
+
 // ─── Main orchestrator ────────────────────────────────────────────────────────
 
 export interface ScrapeResult {
@@ -849,6 +974,7 @@ export async function scrapeBusinessDirectories(
     ["cylex",        () => scrapeCylex(category, city, country, needed)],
     ["superpages",   () => scrapeSuperPages(category, city, country, needed)],
     ["bark",         () => scrapeBark(category, city, country, needed)],
+    ["openstreetmap", () => scrapeOpenStreetMap(category, city, country, needed)],
   ];
 
   const settled = await Promise.allSettled(scrapers.map(([, fn]) => fn()));
@@ -880,13 +1006,16 @@ export async function scrapeBusinessDirectories(
     return true;
   });
 
-  // Enrich with emails — 10 concurrent for speed
+  // Enrich with emails + AI-opportunity scan — 10 concurrent for speed
   const CONCURRENCY = 10;
   for (let i = 0; i < deduped.length; i += CONCURRENCY) {
     await Promise.all(
       deduped.slice(i, i + CONCURRENCY).map(async biz => {
-        if (!biz.email && biz.website) {
-          biz.email = await scrapeEmailFromSite(biz.website);
+        if (biz.website) {
+          const result = await scrapeEmailFromSite(biz.website);
+          if (!biz.email) biz.email = result.email;
+          biz.aiOpportunityScore = result.aiOpportunityScore;
+          biz.aiOpportunityNote = result.aiOpportunityNote;
         }
       })
     );
