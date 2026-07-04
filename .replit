@@ -11,60 +11,6 @@ args = ["pnpm", "store", "prune"]
 env = { "CI" = "true" }
 
 [workflows]
-runButton = "Project"
-
-[[workflows.workflow]]
-name = "Project"
-mode = "parallel"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "Custom Web Apps Agency"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "Tools4Biz"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "API Server"
-
-[[workflows.workflow]]
-name = "Custom Web Apps Agency"
-author = "agent"
-
-[workflows.workflow.metadata]
-outputType = "webview"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "PORT=19242 BASE_PATH=/ pnpm --filter @workspace/agency-site run dev"
-waitForPort = 19242
-
-[[workflows.workflow]]
-name = "Tools4Biz"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "PORT=22944 BASE_PATH=/tools4biz/ pnpm --filter @workspace/tools4biz run dev"
-waitForPort = 22944
-
-[workflows.workflow.metadata]
-outputType = "webview"
-
-[[workflows.workflow]]
-name = "API Server"
-author = "agent"
-
-[workflows.workflow.metadata]
-outputType = "console"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "PORT=8080 pnpm --filter @workspace/api-server run dev"
-waitForPort = 8080
 
 [agent]
 stack = "BEST_EFFORT_FALLBACK"
