@@ -51,6 +51,11 @@ interface Prospect {
   generatedWhatsApp?: string;
   generatedLinkedIn?: string;
   proposal?: ProposalData;
+  aiAgentType?: "receptionist" | "booking" | "sales" | "support" | "social";
+  aiAgentScore?: number;
+  aiAgentFitReason?: string;
+  aiAgentTopPain?: string;
+  pitchType?: "ai_agent" | "website" | "both";
 }
 
 interface HuntedBusiness {
@@ -72,6 +77,11 @@ interface HuntedBusiness {
   selected?: boolean;
   importing?: boolean;
   imported?: boolean;
+  aiAgentType?: string;
+  aiAgentScore?: number;
+  aiAgentFitReason?: string;
+  aiAgentTopPain?: string;
+  pitchType?: string;
 }
 
 interface WebsiteAnalysis {
@@ -817,6 +827,13 @@ function AIHunterPanel({ onImport }: { onImport: (prospects: Omit<Prospect, "id"
           if (generated.analysis?.estimatedValue) {
             prospect.expectedValue = Math.round((generated.analysis.estimatedValue.min + generated.analysis.estimatedValue.max) / 2);
           }
+          if (generated.aiAgent) {
+            prospect.aiAgentType     = generated.aiAgent.type;
+            prospect.aiAgentScore    = generated.aiAgent.score;
+            prospect.aiAgentFitReason = generated.aiAgent.fitReason;
+            prospect.aiAgentTopPain  = generated.aiAgent.topPain;
+          }
+          if (generated.pitchType) prospect.pitchType = generated.pitchType;
         } catch { /* continue without AI data */ }
       }
 
@@ -1274,6 +1291,47 @@ function AnalysisPanel({ prospect, onUpdate }: { prospect: Prospect; onUpdate: (
         ))}
       </div>
 
+      {/* AI Agent Opportunity card */}
+      {prospect.aiAgentType && AGENT_META[prospect.aiAgentType] && (() => {
+        const agent = AGENT_META[prospect.aiAgentType!];
+        const agentScore = safe(prospect.aiAgentScore);
+        const scoreColor2 = agentScore >= 70 ? "text-green-700 bg-green-50 border-green-200"
+          : agentScore >= 45 ? "text-amber-700 bg-amber-50 border-amber-200"
+          : "text-red-700 bg-red-50 border-red-200";
+        return (
+          <div className="rounded-xl border border-violet-200 bg-violet-50 overflow-hidden">
+            <div className="p-3 border-b border-violet-200 flex items-center gap-2">
+              <Bot className="w-4 h-4 text-violet-600" />
+              <h4 className="text-sm font-bold text-violet-900">AI Agent Opportunity</h4>
+              <span className={`ml-auto text-xs font-bold border rounded-full px-2 py-0.5 ${scoreColor2}`}>
+                Fit score {agentScore}/100
+              </span>
+            </div>
+            <div className="p-4 space-y-3">
+              <div className="flex items-center gap-3">
+                <span className={`text-sm font-bold border rounded-lg px-3 py-1.5 ${agent.color}`}>
+                  {agent.icon} {agent.label}
+                </span>
+                {prospect.pitchType && (
+                  <span className="text-xs text-muted-foreground border rounded-full px-2 py-0.5 bg-background">
+                    Pitch: {prospect.pitchType === "ai_agent" ? "AI Agent only" : prospect.pitchType === "both" ? "AI Agent + Website" : "Website only"}
+                  </span>
+                )}
+              </div>
+              {prospect.aiAgentTopPain && (
+                <div className="text-sm">
+                  <span className="font-semibold text-violet-900">Top pain: </span>
+                  <span className="text-violet-800">{prospect.aiAgentTopPain}</span>
+                </div>
+              )}
+              {prospect.aiAgentFitReason && (
+                <p className="text-xs text-muted-foreground italic">{prospect.aiAgentFitReason}</p>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
       <div className="rounded-xl border border-border/50 overflow-hidden">
         <div className="p-3 bg-muted/20 border-b border-border/50">
           <h4 className="text-sm font-bold">Feature Checklist</h4>
@@ -1395,6 +1453,8 @@ function OutreachPanel({ prospect, onUpdate }: { prospect: Prospect; onUpdate: (
         businessName: prospect.businessName, ownerName: prospect.ownerName,
         category: prospect.category, website: prospect.website,
         issues, opportunities, agencyName: AGENCY_NAME,
+        pitchType:   prospect.pitchType   || "both",
+        aiAgentType: prospect.aiAgentType || "",
       });
       onUpdate({ ...prospect, generatedEmail: data });
     } catch (e: any) { setError(e.message); }
@@ -1470,6 +1530,29 @@ function OutreachPanel({ prospect, onUpdate }: { prospect: Prospect; onUpdate: (
           {sendStatus.msg}
         </div>
       )}
+
+      {/* AI Agent / Pitch context banner */}
+      {(prospect.aiAgentType || prospect.pitchType) && (() => {
+        const agent = prospect.aiAgentType ? AGENT_META[prospect.aiAgentType] : null;
+        const pitchLabel = prospect.pitchType === "ai_agent" ? "AI Agent pitch" : prospect.pitchType === "both" ? "AI Agent + Website pitch" : "Website pitch";
+        return (
+          <div className="rounded-xl border border-violet-200 bg-violet-50 p-4 flex items-start gap-3">
+            <Bot className="w-5 h-5 text-violet-600 flex-shrink-0 mt-0.5" />
+            <div className="space-y-1 text-sm">
+              <div className="font-bold text-violet-900">
+                {agent ? `${agent.icon} ${agent.label}` : "AI Agent Opportunity"}
+                <span className="ml-2 font-normal text-violet-600 text-xs border border-violet-200 bg-violet-100 rounded-full px-2 py-0.5">{pitchLabel}</span>
+              </div>
+              {prospect.aiAgentTopPain && (
+                <p className="text-violet-800"><span className="font-semibold">Pain:</span> {prospect.aiAgentTopPain}</p>
+              )}
+              {prospect.aiAgentFitReason && (
+                <p className="text-violet-700 text-xs">{prospect.aiAgentFitReason}</p>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Email */}
       <div className="rounded-xl border border-border/50 overflow-hidden">
@@ -1919,24 +2002,34 @@ interface TrackingStats {
   count: number;
 }
 
-/** Composite AI opportunity score for an AI-agent pitch.
- *  Analysed prospects: weighted blend of leadScore (60%) + growthPotential (40%).
- *  Returns a value in [0, 100]. Always finite — guards against missing/corrupt data.
- *  Unanalysed prospects use a probability proxy capped at 49 so fully-analysed leads
- *  with a score of 50+ always sort above them; unanalysed leads still rank among
- *  themselves by probability.
- */
+/** Clamp any value to a finite number in [0, 100]. */
 function safe(n: unknown): number {
   const v = Number(n);
   return isFinite(v) ? Math.max(0, Math.min(100, v)) : 0;
 }
+
+/** Composite AI opportunity score — blends website lead quality + AI agent fit.
+ *  Analysed prospects: website signals (70%) + AI agent score bonus (30%).
+ *  Unanalysed prospects: best of aiAgentScore / probability, capped at 49 so
+ *  any fully-analysed lead with score ≥ 50 ranks above all unanalysed ones.
+ */
 function aiOpportunityScore(p: Prospect): number {
   if (p.analysis) {
-    return safe(p.analysis.leadScore) * 0.6 + safe(p.analysis.growthPotential) * 0.4;
+    const websiteSignal = safe(p.analysis.leadScore) * 0.5 + safe(p.analysis.growthPotential) * 0.2;
+    const agentSignal   = safe(p.aiAgentScore) * 0.3;
+    return Math.min(100, websiteSignal + agentSignal);
   }
-  // fallback: probability in [0, 100] capped at 49 so any analysed score ≥ 50 wins
-  return Math.min(49, safe(p.probability));
+  const fallback = Math.max(safe(p.aiAgentScore ?? 0), safe(p.probability));
+  return Math.min(49, fallback);
 }
+
+const AGENT_META: Record<string, { label: string; icon: string; color: string }> = {
+  receptionist: { label: "AI Receptionist", icon: "🤖", color: "bg-violet-50 text-violet-700 border-violet-200" },
+  booking:      { label: "Booking Bot",     icon: "📅", color: "bg-blue-50 text-blue-700 border-blue-200" },
+  sales:        { label: "Sales Bot",       icon: "💰", color: "bg-green-50 text-green-700 border-green-200" },
+  support:      { label: "Support Bot",     icon: "🎧", color: "bg-orange-50 text-orange-700 border-orange-200" },
+  social:       { label: "Social Bot",      icon: "📱", color: "bg-pink-50 text-pink-700 border-pink-200" },
+};
 
 type SortKey = "ai-score" | "value" | "added";
 
@@ -2030,6 +2123,11 @@ function ProspectList({ prospects, onSelect, onDelete, onUpdate }: {
                     <Badge className={`${cfg.bg} ${cfg.color} ${cfg.border} border text-xs h-5`}>{cfg.label}</Badge>
                     {p.priority === "high" && <span className="text-xs text-red-600 font-bold">🔴</span>}
                     {p.hunted && <span className="text-xs text-purple-600 font-bold flex items-center gap-0.5"><Radar className="w-3 h-3" /></span>}
+                    {p.aiAgentType && AGENT_META[p.aiAgentType] && (
+                      <span className={`text-xs font-semibold border rounded-full px-1.5 py-0.5 flex items-center gap-0.5 ${AGENT_META[p.aiAgentType].color}`}>
+                        {AGENT_META[p.aiAgentType].icon} {AGENT_META[p.aiAgentType].label}
+                      </span>
+                    )}
                     {p.analysis && (
                       <span className="text-xs text-purple-600 font-bold flex items-center gap-0.5">
                         <Sparkles className="w-3 h-3" />

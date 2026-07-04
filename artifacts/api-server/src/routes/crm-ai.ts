@@ -906,19 +906,43 @@ router.post("/crm/auto-generate", async (req, res) => {
     ? `\nReal website content scraped from ${website}:\n"""\n${siteContent}\n"""`
     : (website ? `\nWebsite ${website} could not be loaded.` : "\nNo website.");
 
-  const prompt = `You are a senior business analyst and sales copywriter at ${agencyName || "DevStudio"}, a custom software agency run by Daniel.
+  // ── Determine AI agent fit for this business category ─────────────────────
+  // High-volume-inquiry categories that benefit most from AI agents
+  const agentFitCategories: Record<string, string> = {
+    receptionist: "Restaurant,Café,Dentist,Clinic,Hospital,Salon,Barbershop,Spa,Gym,Hotel,Guesthouse,Law Firm,Real Estate,Physiotherapy,Vet Clinic,Auto Repair,Nail Studio",
+    booking:      "Restaurant,Café,Salon,Barbershop,Spa,Gym,Dentist,Clinic,Hotel,Physiotherapy,Nail Studio,Tattoo Studio,Personal Trainer",
+    sales:        "Real Estate,Mortgage Broker,Insurance,Car Dealership,E-commerce,Software,Marketing Agency",
+    support:      "E-commerce,Online Shop,Pharmacy,Telecom,Bank,Insurance,SaaS",
+    social:       "Restaurant,Café,Bar,Salon,Gym,Hotel,E-commerce,Bakery,Food Truck",
+  };
+  const catLower = (category || "").toLowerCase();
+  const agentTypeHint = Object.entries(agentFitCategories).find(([, cats]) =>
+    cats.toLowerCase().split(",").some(c => catLower.includes(c.trim().toLowerCase()))
+  )?.[0] || "receptionist";
+
+  const prompt = `You are a senior business analyst and sales copywriter at ${agencyName || "DevStudio"}, a digital agency run by Daniel that sells both custom software/websites AND AI agent solutions (AI receptionists, booking bots, sales bots, support bots, social media reply bots).
 Analyze this business and generate everything needed to start the sales process — all in one response.
 Business: ${businessName}, Category: ${category}, Location: ${city}, ${country}, Owner: ${ownerName || "the owner"}, Website: ${website || "No website"}, Known Pain Point: ${painPoint || "Manual processes, outdated systems"}${siteContext}
 
-For the cold email and WhatsApp/LinkedIn messages, follow this high-converting framework:
-1. ONE specific observation pulled directly from their real website content (name something real — an actual service, product, gap, or outdated element you noticed)
-2. The exact business problem that costs them money or customers right now
-3. What DevStudio would build to fix it (one sentence, concrete)
-4. CTA: End with one low-pressure question inviting them to reply by email — something like "Does this sound relevant to where you're at? Just hit reply." NO mention of a call whatsoever.
-RULES: Email body max 100 words. No "I hope this finds you well". No buzzwords. Sound like a real human, not a template. Subject line: max 6 words, curiosity-driven. Sign off as "Daniel, DevStudio". If no website content is available, make the observation specific to their business category.
+STEP 1 — Decide the best pitch angle for this specific business:
+- "ai_agent": Best when the business has high inbound volume (calls, bookings, DMs, walk-ins) but no automation — AI agent saves them time and captures lost revenue
+- "website": Best when they have a weak/no website that is costing them visibility and leads
+- "both": When both gaps are severe — lead with the AI agent (faster ROI, easier sell)
+
+STEP 2 — Pick the AI agent type that fits best:
+- "receptionist": answers FAQs, handles calls/chat, books appointments — best for ${agentTypeHint === "receptionist" ? "THIS category" : "clinics, salons, restaurants, hotels"}
+- "booking": takes reservations and sends reminders — best for booking-heavy businesses
+- "sales": qualifies leads, follows up — best for real estate, agencies, high-ticket services
+- "support": handles complaints, order status — best for e-commerce, pharmacies
+- "social": auto-replies to DMs and comments — best for brand-heavy businesses with active social
+
+STEP 3 — Write the cold outreach following this high-converting framework:
+If pitchType includes "ai_agent": Lead with their PAIN (missed calls, slow replies, lost bookings, zero follow-up) → name the COST (lost customers, revenue walking out the door) → one sentence: what the AI agent does to fix it → CTA: low-pressure reply invite. MAX 100 words. No fluff.
+If pitchType is "website": Lead with one specific observation from their real site/category → name the pain → one sentence fix → CTA.
+RULES: Max 100 words body. NEVER say "I hope this finds you well" or "I wanted to reach out". No buzzwords. Subject line: max 6 words, curiosity-driven. Sign off as "Daniel, DevStudio". Sound like a real human at 9am, not a template.
 
 Return ONLY a JSON object with this exact structure:
-{ "analysis":{"websiteScore":<0-100>,"leadScore":<0-100>,"conversionScore":<0-100>,"mobileScore":<0-100>,"seoScore":<0-100>,"growthPotential":<0-100>,"checks":{"responsiveDesign":<bool>,"sslCertificate":<bool>,"modernUI":<bool>,"whatsappButton":<bool>,"contactForm":<bool>,"bookingSystem":<bool>,"onlineOrdering":<bool>,"paymentIntegration":<bool>,"customerPortal":<bool>,"membershipArea":<bool>,"blog":<bool>,"seoBasics":<bool>,"analytics":<bool>,"socialMedia":<bool>,"emailCapture":<bool>,"liveChat":<bool>,"aiChatbot":<bool>,"callToAction":<bool>,"trustElements":<bool>},"issues":[{"title":"string","description":"string","priority":"high|medium|low"}],"opportunities":[{"title":"string","impact":"string","effort":"low|medium|high"}],"recommendedFeatures":["string"],"projectType":"Small Website|Medium Web App|Large SaaS","estimatedValue":{"min":<number>,"max":<number>},"deliveryWeeks":{"min":<number>,"max":<number>},"summary":"2-3 sentence plain English summary"}, "email":{"subject":"string","body":"string"},"whatsapp":"string","linkedin":"string" }
+{ "analysis":{"websiteScore":<0-100>,"leadScore":<0-100>,"conversionScore":<0-100>,"mobileScore":<0-100>,"seoScore":<0-100>,"growthPotential":<0-100>,"checks":{"responsiveDesign":<bool>,"sslCertificate":<bool>,"modernUI":<bool>,"whatsappButton":<bool>,"contactForm":<bool>,"bookingSystem":<bool>,"onlineOrdering":<bool>,"paymentIntegration":<bool>,"customerPortal":<bool>,"membershipArea":<bool>,"blog":<bool>,"seoBasics":<bool>,"analytics":<bool>,"socialMedia":<bool>,"emailCapture":<bool>,"liveChat":<bool>,"aiChatbot":<bool>,"callToAction":<bool>,"trustElements":<bool>},"issues":[{"title":"string","description":"string","priority":"high|medium|low"}],"opportunities":[{"title":"string","impact":"string","effort":"low|medium|high"}],"recommendedFeatures":["string"],"projectType":"Small Website|Medium Web App|Large SaaS","estimatedValue":{"min":<number>,"max":<number>},"deliveryWeeks":{"min":<number>,"max":<number>},"summary":"2-3 sentence plain English summary"}, "aiAgent":{"type":"receptionist|booking|sales|support|social","score":<0-100>,"fitReason":"1 sentence why this agent type fits their business","topPain":"the #1 pain this agent solves for them right now"}, "pitchType":"ai_agent|website|both", "email":{"subject":"string","body":"string"},"whatsapp":"string","linkedin":"string" }
 Be specific to a ${category} business in ${city}. If no website, give website scores of 5-25.`;
   try {
     const text = await generateText(prompt);
@@ -953,7 +977,7 @@ Be realistic and specific to a ${category} business. If no website is provided, 
 
 router.post("/crm/generate-email", async (req, res) => {
   try {
-    const { businessName, ownerName, category, website, issues, opportunities, agencyName } = req.body as Record<string, string>;
+    const { businessName, ownerName, category, website, issues, opportunities, agencyName, pitchType, aiAgentType } = req.body as Record<string, string>;
 
     // Scrape real website for genuine personalisation
     const siteContent = await scrapeWebsite(website);
@@ -961,16 +985,36 @@ router.post("/crm/generate-email", async (req, res) => {
       ? `\nReal content from their website:\n"""\n${siteContent}\n"""`
       : "";
 
-    const prompt = `Write a high-converting cold outreach email from Daniel at ${agencyName || "DevStudio"} to ${businessName}, a ${category || "business"}.
-Context: Owner: ${ownerName || "the owner"}, Website: ${website || "no website"}, Issues found: ${issues || "outdated systems, no online booking"}, Opportunity: ${opportunities || "custom software to save time and grow revenue"}${siteContext}
+    const isAgentPitch = pitchType === "ai_agent" || pitchType === "both";
+    const agentTypeLabels: Record<string, string> = {
+      receptionist: "AI receptionist (answers enquiries 24/7, handles FAQs, books appointments)",
+      booking:      "AI booking bot (takes reservations automatically, sends reminders)",
+      sales:        "AI sales bot (qualifies incoming leads, follows up automatically)",
+      support:      "AI support bot (handles complaints, order status, returns without staff)",
+      social:       "social media AI bot (auto-replies to DMs and comments instantly)",
+    };
+    const agentDesc = agentTypeLabels[aiAgentType || "receptionist"] || agentTypeLabels.receptionist;
 
-Framework (follow exactly):
-1. Open with ONE specific observation from their actual website or business type — name something real (a service, a gap, something you noticed)
-2. Name the exact pain point this causes (lost bookings, manual work, missed revenue)
+    const agentFramework = `
+Framework — AI AGENT PITCH (follow exactly, 100 words max body):
+1. Open with their SPECIFIC pain: missed calls / unanswered bookings / slow DM replies — be concrete, name the gap you see for a ${category || "business"} like theirs
+2. Name the COST: customers going to a competitor, revenue slipping through after hours
+3. ONE sentence: "I built a ${agentDesc} that handles this automatically."
+4. CTA: Low-pressure reply invite — e.g. "Worth seeing how it works for a ${category}? Just hit reply." ZERO mention of a call.`;
+
+    const websiteFramework = `
+Framework — WEBSITE / SOFTWARE PITCH (follow exactly, 100 words max body):
+1. ONE specific observation from their actual site or business type (name something real)
+2. The exact pain this causes (lost leads, no bookings, no trust)
 3. One sentence: what you'd build to fix it
-4. CTA: A single low-pressure question asking them to reply by email — e.g. "Does any of this apply to you? Just hit reply." Do NOT mention a call at all.
+4. CTA: "Does any of this apply to you? Just reply." No call mention.`;
 
-RULES: Max 100 words body. NEVER say "I hope this finds you well", "I wanted to reach out", or any AI filler. No buzzwords. Subject: max 6 words, curiosity-driven. Sign off: "Daniel, DevStudio". Sound like a real person wrote this at 9am.
+    const framework = isAgentPitch ? agentFramework : websiteFramework;
+
+    const prompt = `Write a high-converting cold outreach email from Daniel at ${agencyName || "DevStudio"} to ${businessName}, a ${category || "business"}.
+Context: Owner: ${ownerName || "the owner"}, Website: ${website || "no website"}, Issues found: ${issues || "outdated systems, no automation"}, Opportunity: ${opportunities || "AI agent or custom software to save time and grow revenue"}${siteContext}
+${framework}
+RULES: Max 100 words body. NEVER say "I hope this finds you well", "I wanted to reach out", or any AI filler. No buzzwords. Subject: max 6 words, curiosity-driven. Sign off: "Daniel, DevStudio". Sound like a real person wrote this at 9am. If no website content — make the opening specific to their ${category} business type.
 Return JSON: { "subject":"string","body":"string" }`;
     const text = await generateText(prompt);
     const data = parseJSON(text);
