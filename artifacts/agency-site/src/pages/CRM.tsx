@@ -1919,6 +1919,20 @@ interface TrackingStats {
   count: number;
 }
 
+/** Composite AI opportunity score for an AI-agent pitch.
+ *  Analysed prospects: weighted blend of leadScore (60%) + growthPotential (40%).
+ *  Unanalysed prospects: coarse proxy from probability so they still sort reasonably.
+ */
+function aiOpportunityScore(p: Prospect): number {
+  if (p.analysis) {
+    return p.analysis.leadScore * 0.6 + p.analysis.growthPotential * 0.4;
+  }
+  // fallback: probability (0-100) scaled to max ~45 so analysed leads always rank higher
+  return p.probability * 0.45;
+}
+
+type SortKey = "ai-score" | "value" | "added";
+
 function ProspectList({ prospects, onSelect, onDelete, onUpdate }: {
   prospects: Prospect[];
   onSelect: (p: Prospect) => void;
@@ -1928,6 +1942,7 @@ function ProspectList({ prospects, onSelect, onDelete, onUpdate }: {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
+  const [sortBy, setSortBy] = useState<SortKey>("ai-score");
   const [trackingStats, setTrackingStats] = useState<Record<string, TrackingStats>>({});
 
   useEffect(() => {
@@ -1939,13 +1954,20 @@ function ProspectList({ prospects, onSelect, onDelete, onUpdate }: {
       .catch(() => {});
   }, [prospects]);
 
-  const filtered = prospects.filter(p => {
-    const q = search.toLowerCase();
-    const matchSearch = !q || p.businessName.toLowerCase().includes(q) || p.email.toLowerCase().includes(q) || p.city.toLowerCase().includes(q) || p.category.toLowerCase().includes(q);
-    const matchStatus = statusFilter === "all" || p.status === statusFilter;
-    const matchCat = categoryFilter === "all" || p.category === categoryFilter;
-    return matchSearch && matchStatus && matchCat;
-  });
+  const filtered = prospects
+    .filter(p => {
+      const q = search.toLowerCase();
+      const matchSearch = !q || p.businessName.toLowerCase().includes(q) || p.email.toLowerCase().includes(q) || p.city.toLowerCase().includes(q) || p.category.toLowerCase().includes(q);
+      const matchStatus = statusFilter === "all" || p.status === statusFilter;
+      const matchCat = categoryFilter === "all" || p.category === categoryFilter;
+      return matchSearch && matchStatus && matchCat;
+    })
+    .sort((a, b) => {
+      if (sortBy === "ai-score") return aiOpportunityScore(b) - aiOpportunityScore(a);
+      if (sortBy === "value") return (b.expectedValue ?? 0) - (a.expectedValue ?? 0);
+      // "added" — newest first
+      return new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime();
+    });
 
   return (
     <div className="space-y-4">
@@ -1966,6 +1988,17 @@ function ProspectList({ prospects, onSelect, onDelete, onUpdate }: {
           <SelectContent className="max-h-72 overflow-y-auto">
             <SelectItem value="all">All Categories</SelectItem>
             {CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={sortBy} onValueChange={v => setSortBy(v as SortKey)}>
+          <SelectTrigger className="w-40">
+            <Sparkles className="w-3.5 h-3.5 mr-1.5 text-purple-500" />
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="ai-score">AI Score ↓</SelectItem>
+            <SelectItem value="value">Deal Value ↓</SelectItem>
+            <SelectItem value="added">Date Added ↓</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -1990,7 +2023,12 @@ function ProspectList({ prospects, onSelect, onDelete, onUpdate }: {
                     <Badge className={`${cfg.bg} ${cfg.color} ${cfg.border} border text-xs h-5`}>{cfg.label}</Badge>
                     {p.priority === "high" && <span className="text-xs text-red-600 font-bold">🔴</span>}
                     {p.hunted && <span className="text-xs text-purple-600 font-bold flex items-center gap-0.5"><Radar className="w-3 h-3" /></span>}
-                    {p.analysis && <span className="text-xs text-purple-600 font-bold">✓ Analyzed</span>}
+                    {p.analysis && (
+                      <span className="text-xs text-purple-600 font-bold flex items-center gap-0.5">
+                        <Sparkles className="w-3 h-3" />
+                        {Math.round(aiOpportunityScore(p))}
+                      </span>
+                    )}
                     {p.emailSentAt && <span className="text-xs text-green-600 font-bold">✓ Emailed</span>}
                     {p.email && trackingStats[p.email]?.opens > 0 && (
                       <span className="text-xs font-bold text-blue-600 flex items-center gap-0.5">
