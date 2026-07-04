@@ -11,24 +11,9 @@ import {
   UpdateToolParams,
   DeleteToolParams,
 } from "@workspace/api-zod";
+import { ADMIN_SECRET, requireAdmin } from "../lib/admin-auth";
 
 const router = Router();
-
-const ADMIN_SECRET = process.env.ADMIN_PASSWORD ?? process.env.SESSION_SECRET;
-if (!ADMIN_SECRET) {
-  console.error("FATAL: ADMIN_PASSWORD or SESSION_SECRET env var must be set");
-  process.exit(1);
-}
-
-function requireAdmin(req: any, res: any, next: any) {
-  const auth = req.headers["authorization"] ?? "";
-  const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-  if (token !== ADMIN_SECRET) {
-    res.status(401).json({ error: "Unauthorized" });
-    return;
-  }
-  next();
-}
 
 router.post("/admin/login", async (req, res) => {
   try {

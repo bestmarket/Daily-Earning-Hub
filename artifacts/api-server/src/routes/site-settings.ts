@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { requireAdmin } from "../lib/admin-auth";
 
 const router = Router();
 
@@ -77,23 +78,13 @@ router.get("/site-settings", (_req, res) => {
 });
 
 // Admin: update pricing plans
-router.put("/admin/site-settings/pricing", (req, res) => {
-  const token = req.headers.authorization?.replace("Bearer ", "");
-  if (token !== process.env.ADMIN_TOKEN && token !== "devstudio-admin") {
-    res.status(401).json({ error: "Unauthorized" });
-    return;
-  }
+router.put("/admin/site-settings/pricing", requireAdmin, (req, res) => {
   siteSettings.pricing = req.body;
   res.json({ success: true, pricing: siteSettings.pricing });
 });
 
 // Admin: update a single pricing plan
-router.patch("/admin/site-settings/pricing/:id", (req, res) => {
-  const token = req.headers.authorization?.replace("Bearer ", "");
-  if (token !== process.env.ADMIN_TOKEN && token !== "devstudio-admin") {
-    res.status(401).json({ error: "Unauthorized" });
-    return;
-  }
+router.patch("/admin/site-settings/pricing/:id", requireAdmin, (req, res) => {
   const idx = siteSettings.pricing.findIndex((p) => p.id === req.params.id);
   if (idx === -1) {
     res.status(404).json({ error: "Plan not found" });
@@ -104,34 +95,19 @@ router.patch("/admin/site-settings/pricing/:id", (req, res) => {
 });
 
 // Admin: update payment methods
-router.put("/admin/site-settings/payment-methods", (req, res) => {
-  const token = req.headers.authorization?.replace("Bearer ", "");
-  if (token !== process.env.ADMIN_TOKEN && token !== "devstudio-admin") {
-    res.status(401).json({ error: "Unauthorized" });
-    return;
-  }
+router.put("/admin/site-settings/payment-methods", requireAdmin, (req, res) => {
   siteSettings.paymentMethods = req.body;
   res.json({ success: true, paymentMethods: siteSettings.paymentMethods });
 });
 
 // Admin: update contact info
-router.patch("/admin/site-settings/contact", (req, res) => {
-  const token = req.headers.authorization?.replace("Bearer ", "");
-  if (token !== process.env.ADMIN_TOKEN && token !== "devstudio-admin") {
-    res.status(401).json({ error: "Unauthorized" });
-    return;
-  }
+router.patch("/admin/site-settings/contact", requireAdmin, (req, res) => {
   siteSettings.contact = { ...siteSettings.contact, ...req.body };
   res.json({ success: true, contact: siteSettings.contact });
 });
 
 // Admin: update hero content
-router.patch("/admin/site-settings/hero", (req, res) => {
-  const token = req.headers.authorization?.replace("Bearer ", "");
-  if (token !== process.env.ADMIN_TOKEN && token !== "devstudio-admin") {
-    res.status(401).json({ error: "Unauthorized" });
-    return;
-  }
+router.patch("/admin/site-settings/hero", requireAdmin, (req, res) => {
   siteSettings.hero = { ...siteSettings.hero, ...req.body };
   res.json({ success: true, hero: siteSettings.hero });
 });
