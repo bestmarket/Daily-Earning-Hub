@@ -734,6 +734,71 @@ async function scrapeEmailFromSite(rawUrl: string): Promise<string> {
   return "";
 }
 
+// ─── SCRAPER 15: Google Maps (free — parses embedded place data) ──────────────
+
+/**
+ * Scrapes Google Maps search results by extracting business names embedded in
+ * place URLs and any JSON-LD blocks present on the page.
+ * No API key required. Runs alongside all other directory scrapers.
+ */
+async function scrapeGoogleMaps(category: string, city: string, country: string, count: number): Promise<ScrapedBusiness[]> {
+  const q = `${category} in ${city}${country ? ", " + country : ""}`;
+  const businesses: ScrapedBusiness[] = [];
+
+  try {
+    const url = `https://www.google.com/maps/search/${encodeURIComponent(q)}?hl=en`;
+    const html = await browserFetch(url, 22000);
+
+    // JSON-LD structured data (sometimes present in Maps pages)
+    businesses.push(...schemasToBusinesses(extractJsonLd(html), category, city, country, "google_maps"));
+
+    // Primary: extract business names from embedded place URLs.
+    // Google Maps embeds links like /maps/place/Business+Name/@lat,lng or /maps/place/Name-ChIJ...
+    const placeRe = /\/maps\/place\/([A-Za-z0-9%+\-_.~!*'(),]+)(?:\/@|\/data|-[A-Z0-9]{10,})/g;
+    const nameSeen = new Set<string>();
+    let m: RegExpExecArray | null;
+    while ((m = placeRe.exec(html)) !== null) {
+      try {
+        const raw = decodeURIComponent(m[1]).replace(/\+/g, " ").trim();
+        if (raw.length >= 3 && raw.length <= 80 && !nameSeen.has(raw) && /[A-Za-z]/.test(raw)) {
+          nameSeen.add(raw);
+          businesses.push({
+            businessName: raw,
+            phone: "", website: "", address: "", city, country, category,
+            source: "google_maps", email: "",
+          });
+        }
+      } catch { /* skip malformed URL segment */ }
+    }
+
+    // Secondary: pull phone-like strings and website URLs from the page HTML
+    // and heuristically assign them to businesses in order.
+    const phoneRe = /"(\+?[\d()\-\s.]{8,20})"/g;
+    const phones: string[] = [];
+    while ((m = phoneRe.exec(html)) !== null) {
+      const p = m[1].replace(/\s+/g, " ").trim();
+      if (/\d{7,}/.test(p)) phones.push(p);
+    }
+
+    const websiteRe = /"(https?:\/\/(?!(?:maps|www)\.google\.com|goo\.gl|googleapis\.com)[^\s"]{6,80})"/g;
+    const websites: string[] = [];
+    while ((m = websiteRe.exec(html)) !== null) {
+      const w = m[1];
+      if (!/\.(png|jpg|gif|ico|svg|css|js|woff|ttf)(\?|$)/i.test(w) && !websites.includes(w)) {
+        websites.push(w);
+      }
+    }
+
+    let pi = 0, wi = 0;
+    for (const b of businesses) {
+      if (!b.phone && phones[pi]) { b.phone = phones[pi]; pi++; }
+      if (!b.website && websites[wi]) { b.website = websites[wi]; wi++; }
+    }
+  } catch { /* Google Maps blocks aggressively — best-effort, silent fail */ }
+
+  return dedup(businesses).slice(0, count);
+}
+
 // ─── Main orchestrator ────────────────────────────────────────────────────────
 
 export interface ScrapeResult {
@@ -772,6 +837,7 @@ export async function scrapeBusinessDirectories(
     ["yelp",         () => scrapeYelp(category, city, country, needed)],
     ["yellowpages",  () => scrapeYellowPages(category, city, country, needed)],
     ["google",       () => scrapeGoogleLocal(category, city, country, needed)],
+    ["google_maps",  () => scrapeGoogleMaps(category, city, country, needed)],
     ["manta",        () => scrapeManta(category, city, country, needed)],
     ["hotfrog",      () => scrapeHotfrog(category, city, country, needed)],
     ["yell",         () => scrapeYell(category, city, country, needed)],

@@ -549,18 +549,46 @@ function EmailSettingsPanel() {
         </Button>
       </div>
 
-      {activeAccounts.length > 1 && (
-        <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-sm text-green-800">
-          <RefreshCw className="w-4 h-4 flex-shrink-0" />
-          <span><strong>Rotation active</strong> — outreach cycles across {activeAccounts.length} accounts, always sending from whichever has sent the least.</span>
-        </div>
-      )}
-      {activeAccounts.length === 1 && (
-        <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-sm text-blue-800">
-          <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
-          <span><strong>1 active account</strong> — add another to enable rotation and higher daily sending limits.</span>
-        </div>
-      )}
+      {activeAccounts.length > 0 && (() => {
+        const totalCapacity = activeAccounts.reduce((s, a) => s + (a.dailyLimit > 0 ? a.dailyLimit : 0), 0);
+        const hasUnlimited = activeAccounts.some(a => a.dailyLimit <= 0);
+        const sentToday = activeAccounts.reduce((s, a) => s + (a.sentToday || 0), 0);
+        const capacityLabel = hasUnlimited ? "Unlimited" : totalCapacity.toLocaleString() + "/day";
+        return (
+          <div className="rounded-xl border border-border/50 overflow-hidden">
+            <div className="p-3 bg-muted/20 border-b border-border/30 flex items-center gap-2">
+              <Zap className="w-4 h-4 text-purple-600" />
+              <span className="font-bold text-sm">Sending Capacity</span>
+            </div>
+            <div className="grid grid-cols-3 divide-x divide-border/30">
+              <div className="p-3 text-center">
+                <div className="font-extrabold text-lg text-purple-700">{activeAccounts.length}</div>
+                <div className="text-xs text-muted-foreground">Active Accounts</div>
+              </div>
+              <div className="p-3 text-center">
+                <div className="font-extrabold text-lg text-green-700">{capacityLabel}</div>
+                <div className="text-xs text-muted-foreground">Daily Limit</div>
+              </div>
+              <div className="p-3 text-center">
+                <div className="font-extrabold text-lg">{sentToday.toLocaleString()}</div>
+                <div className="text-xs text-muted-foreground">Sent Today</div>
+              </div>
+            </div>
+            {activeAccounts.length > 1 && (
+              <div className="px-4 py-2 bg-green-50 border-t border-green-100 flex items-center gap-2 text-xs text-green-800">
+                <RefreshCw className="w-3 h-3" />
+                <span>Rotation active — cycles across {activeAccounts.length} accounts, always using the one with the least sent.</span>
+              </div>
+            )}
+            {activeAccounts.length === 1 && (
+              <div className="px-4 py-2 bg-blue-50 border-t border-blue-100 flex items-center gap-2 text-xs text-blue-800">
+                <CheckCircle2 className="w-3 h-3" />
+                <span>Add more accounts to multiply your daily capacity (e.g. 10 Gmail accounts = 5,000–20,000 emails/day).</span>
+              </div>
+            )}
+          </div>
+        );
+      })()}
       {activeAccounts.length === 0 && accounts.length > 0 && (
         <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800">
           <AlertTriangle className="w-4 h-4 flex-shrink-0" />
@@ -651,11 +679,16 @@ function EmailSettingsPanel() {
       </div>
 
       {accounts.length > 0 && (
-        <div className="text-xs text-muted-foreground bg-muted/30 rounded-lg p-3 border border-border/40 space-y-1">
-          <p className="font-semibold">Provider setup tips:</p>
-          <p>• <strong>Gmail:</strong> Enable 2FA → myaccount.google.com/apppasswords → generate a 16-char App Password</p>
-          <p>• <strong>Outlook / 365:</strong> Use your Microsoft account password, or an app password if 2FA is on</p>
-          <p>• <strong>Brevo:</strong> SMTP & API → SMTP Keys → generate key (use as password, login is your Brevo email)</p>
+        <div className="text-xs text-muted-foreground bg-muted/30 rounded-lg p-3 border border-border/40 space-y-2">
+          <p className="font-semibold text-foreground">Provider setup tips:</p>
+          <p>• <strong>Gmail:</strong> Enable 2FA → <span className="font-mono">myaccount.google.com/apppasswords</span> → generate a 16-char App Password (use that as the password here). Host: <span className="font-mono">smtp.gmail.com</span>, port 587. Each Gmail account sends up to 500 emails/day.</p>
+          <p>• <strong>Google Workspace (paid):</strong> Same steps as Gmail but limit is 2,000/day per account. 10 Workspace accounts = 20,000 emails/day.</p>
+          <p>• <strong>Outlook / 365:</strong> Use your Microsoft account password, or an app password if 2FA is on. Host: <span className="font-mono">smtp.office365.com</span>, port 587.</p>
+          <p>• <strong>Brevo:</strong> SMTP & API → SMTP Keys → generate key (use as password, login is your Brevo email). Free tier = 300/day, paid = 20,000+/day from a single account.</p>
+          <div className="mt-2 pt-2 border-t border-border/30 text-green-800 bg-green-50 rounded p-2">
+            <p className="font-semibold">💡 To hit 20,000 emails/day:</p>
+            <p>Add 10 Google Workspace accounts (one per row). Each sends 2,000/day. The CRM automatically rotates across all of them. Use different Gmail addresses so each account stays independent.</p>
+          </div>
         </div>
       )}
 
@@ -671,7 +704,7 @@ function AIHunterPanel({ onImport }: { onImport: (prospects: Omit<Prospect, "id"
   const [category, setCategory] = useState("Restaurant");
   const [city, setCity] = useState("");
   const [country, setCountry] = useState("");
-  const [count, setCount] = useState("10");
+  const [count, setCount] = useState("50");
   const [extraContext, setExtraContext] = useState("");
   const [autoGenerate, setAutoGenerate] = useState(true);
   const [hunting, setHunting] = useState(false);
@@ -679,25 +712,51 @@ function AIHunterPanel({ onImport }: { onImport: (prospects: Omit<Prospect, "id"
   const [progress, setProgress] = useState("");
   const [error, setError] = useState("");
   const [selectAll, setSelectAll] = useState(true);
+  const [bulkMode, setBulkMode] = useState(false);
+  const [bulkCities, setBulkCities] = useState("");
 
   const hunt = async () => {
-    if (!city.trim()) { setError("Please enter a city to hunt in."); return; }
-    setHunting(true); setError(""); setResults([]); setProgress("🔍 AI is scanning for businesses…");
-
-    try {
-      const resp = await callCRM("hunt-businesses", {
-        category, city: city.trim(), country: country.trim(), count: Number(count), extraContext,
-      });
-      // API returns { prospects, filtered, total } — fall back to plain array for older builds
-      const businesses: HuntedBusiness[] = Array.isArray(resp) ? resp : (resp.prospects ?? []);
-      const filtered: number = resp.filtered ?? 0;
-      const tagged = businesses.map((b: HuntedBusiness) => ({ ...b, selected: true, imported: false, importing: false }));
-      setResults(tagged);
-      const filterNote = filtered > 0 ? ` (${filtered} with dead domains removed)` : "";
-      setProgress(`✓ Found ${tagged.length} ${category} businesses in ${city}${filterNote}`);
-    } catch (e: any) {
-      setError(e.message); setProgress("");
-    } finally { setHunting(false); }
+    if (bulkMode) {
+      const cityList = bulkCities.split(/[\n,]+/).map(c => c.trim()).filter(Boolean);
+      if (cityList.length === 0) { setError("Enter at least one city in the list."); return; }
+      setHunting(true); setError(""); setResults([]);
+      setProgress(`🌍 Bulk hunting across ${cityList.length} cities — this takes a few minutes…`);
+      try {
+        const resp = await callCRM("bulk-hunt", {
+          category,
+          cities: cityList,
+          country: country.trim(),
+          countPerCity: Number(count),
+          extraContext,
+        });
+        const businesses: HuntedBusiness[] = Array.isArray(resp) ? resp : (resp.prospects ?? []);
+        const filtered: number = resp.filtered ?? 0;
+        const tagged = businesses.map((b: HuntedBusiness) => ({ ...b, selected: true, imported: false, importing: false }));
+        setResults(tagged);
+        const cityResultsText = resp.cityResults
+          ? Object.entries(resp.cityResults as Record<string, number>).map(([c, n]) => `${c}: ${n}`).join(", ")
+          : "";
+        setProgress(`✓ Bulk hunt done — ${tagged.length} unique ${category} businesses across ${cityList.length} cities${filtered > 0 ? ` (${filtered} dead domains removed)` : ""}${cityResultsText ? ` · ${cityResultsText}` : ""}`);
+      } catch (e: any) {
+        setError(e.message); setProgress("");
+      } finally { setHunting(false); }
+    } else {
+      if (!city.trim()) { setError("Please enter a city to hunt in."); return; }
+      setHunting(true); setError(""); setResults([]); setProgress("🔍 AI is scanning for businesses…");
+      try {
+        const resp = await callCRM("hunt-businesses", {
+          category, city: city.trim(), country: country.trim(), count: Number(count), extraContext,
+        });
+        const businesses: HuntedBusiness[] = Array.isArray(resp) ? resp : (resp.prospects ?? []);
+        const filtered: number = resp.filtered ?? 0;
+        const tagged = businesses.map((b: HuntedBusiness) => ({ ...b, selected: true, imported: false, importing: false }));
+        setResults(tagged);
+        const filterNote = filtered > 0 ? ` (${filtered} with dead domains removed)` : "";
+        setProgress(`✓ Found ${tagged.length} ${category} businesses in ${city}${filterNote}`);
+      } catch (e: any) {
+        setError(e.message); setProgress("");
+      } finally { setHunting(false); }
+    }
   };
 
   const toggleSelect = (i: number) => setResults(prev => prev.map((b, idx) => idx === i ? { ...b, selected: !b.selected } : b));
@@ -809,25 +868,64 @@ function AIHunterPanel({ onImport }: { onImport: (prospects: Omit<Prospect, "id"
             </Select>
           </div>
           <div>
-            <label className="text-xs font-semibold text-muted-foreground mb-1 block">How Many</label>
-            <Select value={count} onValueChange={setCount}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {["10", "20", "30", "50", "75", "100", "150", "200"].map(n => <SelectItem key={n} value={n}>{n} businesses</SelectItem>)}
-              </SelectContent>
-            </Select>
+            <label className="text-xs font-semibold text-muted-foreground mb-1 block">
+              {bulkMode ? "Per-City Count" : "How Many"}
+            </label>
+            <Input
+              type="number"
+              min={10} max={10000} step={10}
+              value={count}
+              onChange={e => setCount(String(Math.max(10, Math.min(10000, Number(e.target.value) || 10))))}
+              placeholder="e.g. 100"
+            />
           </div>
-          <div>
-            <label className="text-xs font-semibold text-muted-foreground mb-1 block">City *</label>
-            <div className="relative">
-              <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-              <Input className="pl-8" value={city} onChange={e => setCity(e.target.value)} placeholder="e.g. Lagos, London, Miami" />
+
+          {/* Bulk Mode toggle */}
+          <div className="col-span-2 flex items-center justify-between p-3 bg-indigo-50 border border-indigo-200 rounded-xl">
+            <div>
+              <div className="text-sm font-bold text-indigo-900 flex items-center gap-2">
+                <Globe className="w-4 h-4" /> Bulk Hunt — Multiple Cities
+              </div>
+              <div className="text-xs text-indigo-700 mt-0.5">Hunt across many cities at once to rapidly build a large prospect list</div>
             </div>
+            <Switch checked={bulkMode} onCheckedChange={setBulkMode} />
           </div>
-          <div>
-            <label className="text-xs font-semibold text-muted-foreground mb-1 block">Country</label>
-            <Input value={country} onChange={e => setCountry(e.target.value)} placeholder="e.g. Nigeria, UK, USA" />
-          </div>
+
+          {bulkMode ? (
+            <div className="col-span-2">
+              <label className="text-xs font-semibold text-muted-foreground mb-1 block">Cities (one per line, up to 20)</label>
+              <Textarea
+                value={bulkCities}
+                onChange={e => setBulkCities(e.target.value)}
+                placeholder={"New York\nLos Angeles\nChicago\nHouston\nPhoenix\nLondon\nToronto\nSydney"}
+                rows={6}
+                className="text-sm font-mono resize-none"
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                {bulkCities.split(/[\n,]+/).filter(c => c.trim()).length} cities · {count} per city = ~{bulkCities.split(/[\n,]+/).filter(c => c.trim()).length * Number(count)} prospects
+              </p>
+            </div>
+          ) : (
+            <div>
+              <label className="text-xs font-semibold text-muted-foreground mb-1 block">City *</label>
+              <div className="relative">
+                <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                <Input className="pl-8" value={city} onChange={e => setCity(e.target.value)} placeholder="e.g. Lagos, London, Miami" />
+              </div>
+            </div>
+          )}
+          {!bulkMode && (
+            <div>
+              <label className="text-xs font-semibold text-muted-foreground mb-1 block">Country</label>
+              <Input value={country} onChange={e => setCountry(e.target.value)} placeholder="e.g. Nigeria, UK, USA" />
+            </div>
+          )}
+          {bulkMode && (
+            <div>
+              <label className="text-xs font-semibold text-muted-foreground mb-1 block">Country</label>
+              <Input value={country} onChange={e => setCountry(e.target.value)} placeholder="e.g. USA (applies to all cities)" />
+            </div>
+          )}
           <div className="col-span-2">
             <label className="text-xs font-semibold text-muted-foreground mb-1 block">Extra Context (optional)</label>
             <Input value={extraContext} onChange={e => setExtraContext(e.target.value)} placeholder="e.g. focus on mid-size businesses, avoid chains, luxury segment…" />
@@ -842,9 +940,11 @@ function AIHunterPanel({ onImport }: { onImport: (prospects: Omit<Prospect, "id"
         </div>
         <div className="px-4 pb-4">
           {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-3">{error}</div>}
-          <Button onClick={hunt} disabled={hunting || !city.trim()} className="w-full gap-2 btn-premium text-white font-bold h-11">
+          <Button onClick={hunt} disabled={hunting || (!bulkMode && !city.trim()) || (bulkMode && !bulkCities.trim())} className="w-full gap-2 btn-premium text-white font-bold h-11">
             {hunting
-              ? <><RefreshCw className="w-4 h-4 animate-spin" /> Hunting businesses…</>
+              ? <><RefreshCw className="w-4 h-4 animate-spin" /> {bulkMode ? "Bulk hunting across cities…" : "Hunting businesses…"}</>
+              : bulkMode
+              ? <><Globe className="w-4 h-4" /> Start Bulk Hunt ({bulkCities.split(/[\n,]+/).filter(c => c.trim()).length} cities × {count})</>
               : <><Radar className="w-4 h-4" /> Start AI Hunt</>}
           </Button>
         </div>

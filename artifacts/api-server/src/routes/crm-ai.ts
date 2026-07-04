@@ -690,15 +690,18 @@ router.post("/crm/hunt-businesses", async (req, res) => {
   };
   if (!category || !city) { res.status(400).json({ error: "category and city are required" }); return; }
 
-  const needed = Math.min(Number(count) || 10, 200);
+  const needed = Math.min(Number(count) || 10, 10000);
 
   try {
     let raw: any[] = [];
     const sourceLog: string[] = [];
 
-    // ── Step 1: Multi-source directory scraper (Yelp, YP, Google, Manta, ─────
-    // ──         Hotfrog, Yell, Foursquare, Bing) — all in parallel          ──
-    const { businesses: scraped, sources, errors } = await scrapeBusinessDirectories(category, city, country || "", needed);
+    // ── Step 1: All sources in parallel — 15 directory scrapers + Google Places ─
+    // Google Places always runs when the key is set (primary source, not fallback).
+    const [{ businesses: scraped, sources, errors }, googlePlaces] = await Promise.all([
+      scrapeBusinessDirectories(category, city, country || "", needed),
+      searchGooglePlaces(category, city, country, needed),
+    ]);
 
     if (scraped.length > 0) {
       sourceLog.push(...sources);
@@ -729,33 +732,30 @@ router.post("/crm/hunt-businesses", async (req, res) => {
       console.warn("[hunt-businesses] scraper errors:", errors);
     }
 
-    // ── Step 2: Supplement with Google Places API if key is configured ────────
-    if (raw.length < needed && process.env.GOOGLE_PLACES_API_KEY) {
-      const places = await searchGooglePlaces(category, city, country, needed - raw.length);
-      if (places.length > 0) {
-        sourceLog.push("google_places");
-        raw.push(...places.map((p: any) => ({
-          businessName: p.displayName?.text || "",
-          ownerName: "",
-          category,
-          email: "",
-          phone: p.nationalPhoneNumber || "",
-          website: p.websiteUri || "",
-          city,
-          country: country || "",
-          instagram: "",
-          facebook: "",
-          linkedin: "",
-          softwareNeedScore: 5,
-          painPoint: "",
-          estimatedValue: 0,
-          notes: p.formattedAddress || "",
-          source: "google_places",
-        })));
-      }
+    // Merge Google Places results (always-on primary source, runs in parallel above)
+    if (googlePlaces.length > 0) {
+      sourceLog.push("google_places");
+      raw.push(...googlePlaces.map((p: any) => ({
+        businessName: p.displayName?.text || "",
+        ownerName: "",
+        category,
+        email: "",
+        phone: p.nationalPhoneNumber || "",
+        website: p.websiteUri || "",
+        city,
+        country: country || "",
+        instagram: "",
+        facebook: "",
+        linkedin: "",
+        softwareNeedScore: 5,
+        painPoint: "",
+        estimatedValue: 0,
+        notes: p.formattedAddress || "",
+        source: "google_places",
+      })));
     }
 
-    // ── Step 3: AI fallback if directories came up short ──────────────────────
+    // ── Step 2: AI fallback if directories came up short ──────────────────────
     if (raw.length < Math.ceil(needed / 2)) {
       sourceLog.push("ai_fallback");
       const prompt = `You are a business intelligence researcher. Generate a list of ${needed - raw.length} realistic ${category} businesses in ${city}, ${country || ""}.
@@ -793,6 +793,105 @@ Return ONLY a JSON array. Each object must have:
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// ─── Bulk Business Hunter (multiple cities in one call) ──────────────────────
+
+/**
+ * Hunt businesses across multiple cities sequentially.
+ * Accepts up to 20 cities, runs the same pipeline as /crm/hunt-businesses for each,
+ * and returns globally deduplicated results (no same email/name across cities).
+ */
+router.post("/crm/bulk-hunt", async (req, res) => {
+  const { category, cities, country, countPerCity = 50, extraContext } = req.body as {
+    category: string;
+    cities: string[];
+    country?: string;
+    countPerCity?: number;
+    extraContext?: string;
+  };
+
+  if (!category || !Array.isArray(cities) || cities.length === 0) {
+    res.status(400).json({ error: "category and cities[] are required" });
+    return;
+  }
+
+  const cityList = cities.map((c: string) => c.trim()).filter(Boolean).slice(0, 20);
+  const needed = Math.min(Number(countPerCity) || 50, 1000);
+
+  const allProspects: any[] = [];
+  const globalNameSeen = new Set<string>();
+  const globalEmailSeen = new Set<string>();
+  const cityResults: Record<string, number> = {};
+
+  for (const city of cityList) {
+    try {
+      const [{ businesses: scraped, sources, errors }, googlePlaces] = await Promise.all([
+        scrapeBusinessDirectories(category, city, country || "", needed),
+        searchGooglePlaces(category, city, country || "", needed),
+      ]);
+
+      if (Object.keys(errors).length > 0) {
+        console.warn(`[bulk-hunt] scraper errors for ${city}:`, errors);
+      }
+
+      const cityRaw: any[] = [
+        ...scraped.filter(b => b.businessName).map(b => ({
+          businessName: b.businessName,
+          ownerName: "",
+          category: b.category || category,
+          email: b.email || "",
+          phone: b.phone || "",
+          website: b.website || "",
+          city: b.city || city,
+          country: b.country || country || "",
+          instagram: "", facebook: "", linkedin: "",
+          softwareNeedScore: 5,
+          painPoint: "", estimatedValue: 0,
+          notes: b.address || "",
+          source: b.source,
+        })),
+        ...googlePlaces.map((p: any) => ({
+          businessName: p.displayName?.text || "",
+          ownerName: "", category, email: "",
+          phone: p.nationalPhoneNumber || "",
+          website: p.websiteUri || "",
+          city, country: country || "",
+          instagram: "", facebook: "", linkedin: "",
+          softwareNeedScore: 5, painPoint: "", estimatedValue: 0,
+          notes: p.formattedAddress || "",
+          source: "google_places",
+        })),
+      ];
+
+      // Global dedup across all cities
+      let added = 0;
+      for (const b of cityRaw) {
+        const nameKey = b.businessName.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 40);
+        const emailKey = b.email ? b.email.toLowerCase() : "";
+        if (!nameKey || globalNameSeen.has(nameKey)) continue;
+        if (emailKey && globalEmailSeen.has(emailKey)) continue;
+        globalNameSeen.add(nameKey);
+        if (emailKey) globalEmailSeen.add(emailKey);
+        allProspects.push(b);
+        added++;
+      }
+      cityResults[city] = added;
+    } catch (err: any) {
+      console.error(`[bulk-hunt] error for city ${city}:`, err.message);
+      cityResults[city] = 0;
+    }
+  }
+
+  // MX / DNS verification across all accumulated prospects
+  const { live, dead } = await filterLiveProspects(allProspects);
+
+  res.json({
+    prospects: live,
+    filtered: dead,
+    total: allProspects.length,
+    cityResults,
+  });
 });
 
 // ─── Auto-analyze + generate everything for a hunted prospect ─────────────────
