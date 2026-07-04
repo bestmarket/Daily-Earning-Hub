@@ -469,12 +469,218 @@ async function scrapeBingLocal(category: string, city: string, country: string, 
   return dedup(businesses).slice(0, count);
 }
 
+// ─── SCRAPER 9: TripAdvisor ───────────────────────────────────────────────────
+
+async function scrapeTripAdvisor(category: string, city: string, country: string, count: number): Promise<ScrapedBusiness[]> {
+  const q = `${category} ${city} ${country}`;
+  const url = `https://www.tripadvisor.com/Search?q=${encodeURIComponent(q)}&searchSessionId=x&sid=x&blockRedirect=true`;
+  const html = await browserFetch(url);
+  const businesses: ScrapedBusiness[] = schemasToBusinesses(extractJsonLd(html), category, city, country, "tripadvisor");
+
+  // TripAdvisor search result cards: <div class="result-title">
+  const nameRe = /<div[^>]+class="[^"]*(?:result-title|listing_title|property_title)[^"]*"[^>]*>[\s\S]{0,60}?<a[^>]*>([^<]{2,80})<\/a>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = nameRe.exec(html)) !== null) {
+    const name = m[1].trim().replace(/^\d+\.\s*/, "");
+    if (name.length >= 2) {
+      businesses.push({ businessName: name, phone: "", website: "", address: "", city, country, category, source: "tripadvisor", email: "" });
+    }
+  }
+
+  // Also try: restaurant/attraction listing pages for the city
+  const cityUrl = `https://www.tripadvisor.com/Search?q=${encodeURIComponent(`${category} in ${city}`)}&geo=1`;
+  try {
+    const html2 = await browserFetch(cityUrl);
+    businesses.push(...schemasToBusinesses(extractJsonLd(html2), category, city, country, "tripadvisor"));
+    let m2: RegExpExecArray | null;
+    const re2 = /<a[^>]+class="[^"]*(?:BMQDV|property_title|listing_title)[^"]*"[^>]*>([^<]{2,80})<\/a>/gi;
+    while ((m2 = re2.exec(html2)) !== null) {
+      const name = m2[1].trim().replace(/^\d+\.\s*/, "");
+      if (name.length >= 2) businesses.push({ businessName: name, phone: "", website: "", address: "", city, country, category, source: "tripadvisor", email: "" });
+    }
+  } catch {}
+
+  return dedup(businesses).slice(0, count);
+}
+
+// ─── SCRAPER 10: BBB — Better Business Bureau (US/Canada) ────────────────────
+
+async function scrapeBBB(category: string, city: string, country: string, count: number): Promise<ScrapedBusiness[]> {
+  // BBB is primarily US/Canada
+  if (!/\b(usa|us|united states|america|canada)\b/i.test(country || "usa")) return [];
+  const url = `https://www.bbb.org/search?find_text=${encodeURIComponent(category)}&find_loc=${encodeURIComponent(city)}`;
+  const html = await browserFetch(url);
+  const businesses: ScrapedBusiness[] = schemasToBusinesses(extractJsonLd(html), category, city, country, "bbb");
+
+  // BBB result cards
+  const cards = html.split(/<div[^>]+class="[^"]*(?:result-card|SearchResults_result)[^"]*"/i).slice(1);
+  for (const card of cards) {
+    if (businesses.length >= count * 2) break;
+    const name =
+      (/<a[^>]+class="[^"]*(?:result-business-name|BusinessName)[^"]*"[^>]*>([^<]{2,80})<\/a>/i.exec(card))?.[1]?.trim() ??
+      (/<h3[^>]*>[\s\S]{0,20}<a[^>]*>([^<]{2,80})<\/a>/i.exec(card))?.[1]?.trim();
+    if (!name) continue;
+    const phone = (/<span[^>]+class="[^"]*phone[^"]*"[^>]*>([^<]+)<\/span>/i.exec(card))?.[1]?.trim() ?? "";
+    const website = (/<a[^>]+href="(https?:\/\/(?!www\.bbb\.org)[^"]+)"[^>]*>(?:Visit Website|Website)/i.exec(card))?.[1] ?? "";
+    const address = (/<address[^>]*>[\s\S]*?<span[^>]*>([^<]+)<\/span>/i.exec(card))?.[1]?.trim() ?? "";
+    businesses.push({ businessName: name, phone, website, address, city, country, category, source: "bbb", email: "" });
+  }
+
+  return dedup(businesses).slice(0, count);
+}
+
+// ─── SCRAPER 11: Thumbtack (US service businesses) ────────────────────────────
+
+async function scrapeThumbtrack(category: string, city: string, country: string, count: number): Promise<ScrapedBusiness[]> {
+  if (!/\b(usa|us|united states|america)\b/i.test(country || "usa")) return [];
+  const catSlug = category.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
+  const citySlug = city.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
+  const url = `https://www.thumbtack.com/k/${catSlug}/${citySlug}/`;
+  const html = await browserFetch(url);
+  const businesses: ScrapedBusiness[] = schemasToBusinesses(extractJsonLd(html), category, city, country, "thumbtack");
+
+  // Thumbtack Next.js data
+  const nextMatch = /<script id="__NEXT_DATA__"[^>]*>([\s\S]+?)<\/script>/i.exec(html);
+  if (nextMatch) {
+    try {
+      const data = JSON.parse(nextMatch[1]);
+      const pros: any[] =
+        data?.props?.pageProps?.pros ??
+        data?.props?.pageProps?.initialSearchState?.pros ??
+        data?.props?.pageProps?.data?.pros ?? [];
+      for (const pro of pros) {
+        if (!pro?.name) continue;
+        businesses.push({
+          businessName: pro.name,
+          phone: pro.phone ?? "",
+          website: pro.website ?? pro.websiteUrl ?? "",
+          address: pro.location?.address ?? "",
+          city, country, category, source: "thumbtack", email: pro.email ?? "",
+        });
+      }
+    } catch {}
+  }
+
+  // HTML fallback: pro card names
+  const nameRe = /<span[^>]+class="[^"]*(?:provider-name|pro-name|ProName)[^"]*"[^>]*>([^<]{2,80})<\/span>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = nameRe.exec(html)) !== null) {
+    const name = m[1].trim();
+    if (name.length >= 2) businesses.push({ businessName: name, phone: "", website: "", address: "", city, country, category, source: "thumbtack", email: "" });
+  }
+
+  return dedup(businesses).slice(0, count);
+}
+
+// ─── SCRAPER 12: Cylex (international business directory) ────────────────────
+
+async function scrapeCylex(category: string, city: string, country: string, count: number): Promise<ScrapedBusiness[]> {
+  // Cylex has country-specific domains
+  const domain = (/\b(uk|united kingdom|england)\b/i.test(country)) ? "cylex.co.uk"
+    : (/\b(canada)\b/i.test(country)) ? "cylex.ca"
+    : (/\b(australia)\b/i.test(country)) ? "cylex.com.au"
+    : (/\b(germany|deutschland)\b/i.test(country)) ? "cylex.de"
+    : "cylex.us.com";
+  const url = `https://www.${domain}/results/${encodeURIComponent(city)}/${encodeURIComponent(category)}.html`;
+  const html = await browserFetch(url);
+  const businesses: ScrapedBusiness[] = schemasToBusinesses(extractJsonLd(html), category, city, country, "cylex");
+
+  // Cylex listing cards
+  const cards = html.split(/<(?:div|li)[^>]+class="[^"]*(?:m-result|result-item|module-provider)[^"]*"/i).slice(1);
+  for (const card of cards) {
+    if (businesses.length >= count * 2) break;
+    const name =
+      (/<h2[^>]*>[\s\S]{0,20}<a[^>]*>([^<]{2,80})<\/a>/i.exec(card))?.[1]?.trim() ??
+      (/<a[^>]+class="[^"]*(?:company-name|entry-name)[^"]*"[^>]*>([^<]{2,80})<\/a>/i.exec(card))?.[1]?.trim();
+    if (!name) continue;
+    const phone = (/href="tel:([^"]+)"/i.exec(card))?.[1]?.trim() ?? "";
+    const website = (/<a[^>]+(?:class="[^"]*website[^"]*"|rel="nofollow external")[^>]+href="(https?:\/\/(?!www\.cylex)[^"]+)"/i.exec(card))?.[1] ?? "";
+    const address = (/<span[^>]+class="[^"]*(?:address|street)[^"]*"[^>]*>([^<]{5,100})<\/span>/i.exec(card))?.[1]?.trim() ?? "";
+    businesses.push({ businessName: name, phone: phone.replace(/^tel:/, ""), website, address, city, country, category, source: "cylex", email: "" });
+  }
+
+  return dedup(businesses).slice(0, count);
+}
+
+// ─── SCRAPER 13: SuperPages (US) ─────────────────────────────────────────────
+
+async function scrapeSuperPages(category: string, city: string, country: string, count: number): Promise<ScrapedBusiness[]> {
+  if (!/\b(usa|us|united states|america)\b/i.test(country || "usa")) return [];
+  const url = `https://www.superpages.com/search?search_terms=${encodeURIComponent(category)}&geo_location_terms=${encodeURIComponent(city)}`;
+  const html = await browserFetch(url);
+  const businesses: ScrapedBusiness[] = schemasToBusinesses(extractJsonLd(html), category, city, country, "superpages");
+
+  const cards = html.split(/<div[^>]+class="[^"]*(?:v-card|search-result-item)[^"]*"/i).slice(1);
+  for (const card of cards) {
+    if (businesses.length >= count * 2) break;
+    const name =
+      (/<a[^>]+class="[^"]*business-name[^"]*"[^>]*>([^<]{2,80})<\/a>/i.exec(card))?.[1]?.trim() ??
+      (/<span[^>]+class="[^"]*business-name[^"]*"[^>]*>([^<]{2,80})<\/span>/i.exec(card))?.[1]?.trim();
+    if (!name) continue;
+    const phone = (/<a[^>]+href="tel:([^"]+)"/i.exec(card))?.[1]?.trim() ??
+      (/<div[^>]+class="[^"]*phones[^"]*"[^>]*>[\s\S]{0,50}?([+\d][(\d\s\-)\.]{6,18}\d)/i.exec(card))?.[1]?.trim() ?? "";
+    const website = (/<a[^>]+class="[^"]*track-visit-website[^"]*"[^>]+href="([^"]+)"/i.exec(card))?.[1]?.trim() ?? "";
+    const address = (/<span[^>]+class="[^"]*street-address[^"]*"[^>]*>([^<]+)<\/span>/i.exec(card))?.[1]?.trim() ?? "";
+    businesses.push({ businessName: name, phone, website, address, city, country, category, source: "superpages", email: "" });
+  }
+
+  return dedup(businesses).slice(0, count);
+}
+
+// ─── SCRAPER 14: Bark.com (global service marketplace) ───────────────────────
+
+async function scrapeBark(category: string, city: string, country: string, count: number): Promise<ScrapedBusiness[]> {
+  const countryCode = (/\b(uk|united kingdom|england|scotland|wales)\b/i.test(country)) ? "gb"
+    : (/\b(canada)\b/i.test(country)) ? "ca"
+    : (/\b(australia)\b/i.test(country)) ? "au"
+    : (/\b(ireland)\b/i.test(country)) ? "ie"
+    : "us";
+  const catSlug = category.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
+  const citySlug = city.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
+  const url = `https://www.bark.com/en/${countryCode}/near-me/${catSlug}/${citySlug}/`;
+  const html = await browserFetch(url);
+  const businesses: ScrapedBusiness[] = schemasToBusinesses(extractJsonLd(html), category, city, country, "bark");
+
+  // Bark Next.js data
+  const nextMatch = /<script id="__NEXT_DATA__"[^>]*>([\s\S]+?)<\/script>/i.exec(html);
+  if (nextMatch) {
+    try {
+      const data = JSON.parse(nextMatch[1]);
+      const pros: any[] =
+        data?.props?.pageProps?.profiles ??
+        data?.props?.pageProps?.professionals ??
+        data?.props?.pageProps?.sellers ?? [];
+      for (const pro of pros) {
+        const name = pro?.name ?? pro?.display_name ?? pro?.businessName;
+        if (!name) continue;
+        businesses.push({
+          businessName: String(name),
+          phone: pro.phone ?? "",
+          website: pro.website ?? pro.url ?? "",
+          address: pro.location ?? pro.address ?? "",
+          city, country, category, source: "bark", email: pro.email ?? "",
+        });
+      }
+    } catch {}
+  }
+
+  // HTML fallback
+  const nameRe = /<(?:h[23]|span)[^>]+class="[^"]*(?:profile-name|seller-name|pro-name)[^"]*"[^>]*>([^<]{2,80})<\/(?:h[23]|span)>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = nameRe.exec(html)) !== null) {
+    const name = m[1].trim();
+    if (name.length >= 2) businesses.push({ businessName: name, phone: "", website: "", address: "", city, country, category, source: "bark", email: "" });
+  }
+
+  return dedup(businesses).slice(0, count);
+}
+
 // ─── Email extraction from websites ──────────────────────────────────────────
 
-const SKIP_EMAIL = /noreply|no-reply|donotreply|unsubscribe|privacy|legal|abuse|spam|webmaster|admin@|sentry\.io|cloudflare|wix\.com|squarespace|shopify|wordpress|example\.com|test@|@yelp\.|@manta\.|@hotfrog\.|@yell\.|foursquare/i;
+const SKIP_EMAIL = /noreply|no-reply|donotreply|unsubscribe|privacy|legal|abuse|spam|webmaster|admin@|sentry\.io|cloudflare|wix\.com|squarespace|shopify|wordpress|example\.com|test@|@yelp\.|@manta\.|@hotfrog\.|@yell\.|foursquare|@tripadvisor\.|@bbb\.|@thumbtack\.|@bark\.|@superpages\.|@cylex\.|@yellowpages\./i;
 
 // Directory domains whose URLs we should NOT try to scrape for a business email
-const SKIP_WEBSITE = /^https?:\/\/(?:www\.)?(yelp\.com|manta\.com|hotfrog\.|yell\.com|foursquare\.com|yellowpages\.|bing\.com|google\.com|facebook\.com|instagram\.com|twitter\.com|linkedin\.com)/i;
+const SKIP_WEBSITE = /^https?:\/\/(?:www\.)?(yelp\.com|manta\.com|hotfrog\.|yell\.com|foursquare\.com|yellowpages\.|bing\.com|google\.com|facebook\.com|instagram\.com|twitter\.com|linkedin\.com|tripadvisor\.com|bbb\.org|thumbtack\.com|bark\.com|superpages\.com|cylex\.)/i;
 
 async function scrapeEmailFromSite(rawUrl: string): Promise<string> {
   if (!rawUrl || SKIP_WEBSITE.test(rawUrl)) return "";
@@ -493,8 +699,18 @@ async function scrapeEmailFromSite(rawUrl: string): Promise<string> {
       ]) as Response;
       if (!r.ok) return "";
       const html = await r.text();
+
+      // Priority 1: explicit mailto: href links (most reliable — real contact emails)
+      const mailtoRe = /href="mailto:([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})"/gi;
+      let mm: RegExpExecArray | null;
+      while ((mm = mailtoRe.exec(html)) !== null) {
+        if (!SKIP_EMAIL.test(mm[1])) return mm[1].toLowerCase();
+      }
+
+      // Priority 2: email addresses anywhere in the HTML
       const emails = html.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g) ?? [];
-      return emails.find(e => !SKIP_EMAIL.test(e)) ?? "";
+      const found = emails.find(e => !SKIP_EMAIL.test(e));
+      return found?.toLowerCase() ?? "";
     } catch { return ""; }
   };
 
@@ -502,10 +718,14 @@ async function scrapeEmailFromSite(rawUrl: string): Promise<string> {
   const fromMain = await tryFetch(fullUrl);
   if (fromMain) return fromMain;
 
-  // Probe /contact and /contact-us
+  // Probe common contact/about pages
   try {
     const origin = new URL(fullUrl).origin;
-    for (const path of ["/contact", "/contact-us", "/about", "/about-us"]) {
+    for (const path of [
+      "/contact", "/contact-us", "/contact-us/", "/contacts",
+      "/about", "/about-us", "/about/",
+      "/get-in-touch", "/reach-us", "/our-team", "/team", "/staff",
+    ]) {
       const found = await tryFetch(`${origin}${path}`);
       if (found) return found;
     }
@@ -528,23 +748,41 @@ export interface ScrapeResult {
  * Run all 8 directory scrapers in parallel, merge + deduplicate results,
  * then enrich each business with a real contact email scraped from its website.
  */
+/**
+ * Run all 14 directory scrapers in parallel, merge + deduplicate results,
+ * then enrich each business with a real contact email scraped from its website.
+ *
+ * Sources:
+ *  1  Yelp          6  Yell.com (UK)       11 Thumbtack (US)
+ *  2  Yellow Pages  7  Foursquare          12 Cylex (intl)
+ *  3  Google GMB    8  Bing Local          13 SuperPages (US)
+ *  4  Manta         9  TripAdvisor         14 Bark.com (global)
+ *  5  Hotfrog       10 BBB (US/CA)
+ */
 export async function scrapeBusinessDirectories(
   category: string,
   city: string,
   country: string,
   count: number
 ): Promise<ScrapeResult> {
-  const needed = Math.min(count, 20);
+  // No artificial cap — caller decides how many it wants
+  const needed = count;
 
   const scrapers: Array<[string, () => Promise<ScrapedBusiness[]>]> = [
-    ["yelp",        () => scrapeYelp(category, city, country, needed)],
-    ["yellowpages", () => scrapeYellowPages(category, city, country, needed)],
-    ["google",      () => scrapeGoogleLocal(category, city, country, needed)],
-    ["manta",       () => scrapeManta(category, city, country, needed)],
-    ["hotfrog",     () => scrapeHotfrog(category, city, country, needed)],
-    ["yell",        () => scrapeYell(category, city, country, needed)],
-    ["foursquare",  () => scrapeFoursquare(category, city, country, needed)],
-    ["bing",        () => scrapeBingLocal(category, city, country, needed)],
+    ["yelp",         () => scrapeYelp(category, city, country, needed)],
+    ["yellowpages",  () => scrapeYellowPages(category, city, country, needed)],
+    ["google",       () => scrapeGoogleLocal(category, city, country, needed)],
+    ["manta",        () => scrapeManta(category, city, country, needed)],
+    ["hotfrog",      () => scrapeHotfrog(category, city, country, needed)],
+    ["yell",         () => scrapeYell(category, city, country, needed)],
+    ["foursquare",   () => scrapeFoursquare(category, city, country, needed)],
+    ["bing",         () => scrapeBingLocal(category, city, country, needed)],
+    ["tripadvisor",  () => scrapeTripAdvisor(category, city, country, needed)],
+    ["bbb",          () => scrapeBBB(category, city, country, needed)],
+    ["thumbtack",    () => scrapeThumbtrack(category, city, country, needed)],
+    ["cylex",        () => scrapeCylex(category, city, country, needed)],
+    ["superpages",   () => scrapeSuperPages(category, city, country, needed)],
+    ["bark",         () => scrapeBark(category, city, country, needed)],
   ];
 
   const settled = await Promise.allSettled(scrapers.map(([, fn]) => fn()));
@@ -565,13 +803,22 @@ export async function scrapeBusinessDirectories(
     }
   });
 
-  // Cross-source dedup, then cap at needed * 3 before email enrichment
-  const deduped = dedup(all).slice(0, needed * 3);
+  // Cross-source dedup by name, then also by email to avoid duplicate outreach
+  const nameDeduped = dedup(all);
+  const emailSeen = new Set<string>();
+  const deduped = nameDeduped.filter(b => {
+    if (!b.email) return true; // keep — email will be found during enrichment
+    const key = b.email.toLowerCase();
+    if (emailSeen.has(key)) return false;
+    emailSeen.add(key);
+    return true;
+  });
 
-  // Enrich with emails — 5 concurrent to avoid hammering servers
-  for (let i = 0; i < deduped.length; i += 5) {
+  // Enrich with emails — 10 concurrent for speed
+  const CONCURRENCY = 10;
+  for (let i = 0; i < deduped.length; i += CONCURRENCY) {
     await Promise.all(
-      deduped.slice(i, i + 5).map(async biz => {
+      deduped.slice(i, i + CONCURRENCY).map(async biz => {
         if (!biz.email && biz.website) {
           biz.email = await scrapeEmailFromSite(biz.website);
         }
@@ -579,5 +826,15 @@ export async function scrapeBusinessDirectories(
     );
   }
 
-  return { businesses: deduped, sources, errors };
+  // Final dedup by email after enrichment (multiple businesses may share a domain)
+  const finalEmailSeen = new Set<string>();
+  const finalBusinesses = deduped.filter(b => {
+    if (!b.email) return true;
+    const key = b.email.toLowerCase();
+    if (finalEmailSeen.has(key)) return false;
+    finalEmailSeen.add(key);
+    return true;
+  });
+
+  return { businesses: finalBusinesses, sources, errors };
 }

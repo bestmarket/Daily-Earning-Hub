@@ -813,7 +813,7 @@ function AIHunterPanel({ onImport }: { onImport: (prospects: Omit<Prospect, "id"
             <Select value={count} onValueChange={setCount}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
-                {["5", "10", "15", "20"].map(n => <SelectItem key={n} value={n}>{n} businesses</SelectItem>)}
+                {["10", "20", "30", "50", "75", "100", "150", "200"].map(n => <SelectItem key={n} value={n}>{n} businesses</SelectItem>)}
               </SelectContent>
             </Select>
           </div>

@@ -690,7 +690,7 @@ router.post("/crm/hunt-businesses", async (req, res) => {
   };
   if (!category || !city) { res.status(400).json({ error: "category and city are required" }); return; }
 
-  const needed = Math.min(Number(count) || 10, 20);
+  const needed = Math.min(Number(count) || 10, 200);
 
   try {
     let raw: any[] = [];
