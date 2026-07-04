@@ -1921,14 +1921,21 @@ interface TrackingStats {
 
 /** Composite AI opportunity score for an AI-agent pitch.
  *  Analysed prospects: weighted blend of leadScore (60%) + growthPotential (40%).
- *  Unanalysed prospects: coarse proxy from probability so they still sort reasonably.
+ *  Returns a value in [0, 100]. Always finite — guards against missing/corrupt data.
+ *  Unanalysed prospects use a probability proxy capped at 49 so fully-analysed leads
+ *  with a score of 50+ always sort above them; unanalysed leads still rank among
+ *  themselves by probability.
  */
+function safe(n: unknown): number {
+  const v = Number(n);
+  return isFinite(v) ? Math.max(0, Math.min(100, v)) : 0;
+}
 function aiOpportunityScore(p: Prospect): number {
   if (p.analysis) {
-    return p.analysis.leadScore * 0.6 + p.analysis.growthPotential * 0.4;
+    return safe(p.analysis.leadScore) * 0.6 + safe(p.analysis.growthPotential) * 0.4;
   }
-  // fallback: probability (0-100) scaled to max ~45 so analysed leads always rank higher
-  return p.probability * 0.45;
+  // fallback: probability in [0, 100] capped at 49 so any analysed score ≥ 50 wins
+  return Math.min(49, safe(p.probability));
 }
 
 type SortKey = "ai-score" | "value" | "added";

@@ -4,16 +4,29 @@ A pnpm monorepo with two public-facing sites (agency marketing site + software t
 
 ## Run & Operate
 
+Managed artifact workflows are configured and start automatically in the Replit UI:
+
 | Workflow | Command | Port |
 |---|---|---|
-| Custom Web Apps Agency | `pnpm --filter @workspace/agency-site run dev` | 19242 |
-| Tools4Biz | `pnpm --filter @workspace/tools4biz run dev` | 22944 |
-| API Server | `pnpm --filter @workspace/api-server run dev` | 8080 |
+| `artifacts/agency-site: web` | `pnpm --filter @workspace/agency-site run dev` | 19242 |
+| `artifacts/tools4biz: web` | `pnpm --filter @workspace/tools4biz run dev` | 3000 |
+| `artifacts/api-server: API Server` | `pnpm --filter @workspace/api-server run dev` | 8080 |
+| `artifacts/mockup-sandbox: Component Preview Server` | `pnpm --filter @workspace/mockup-sandbox run dev` | — |
 
-- `pnpm install` — install all workspace dependencies
+Start order: **API Server first**, then the front-end sites (agency-site proxies `/api` to port 8080).
+
+- `pnpm install` — install all workspace dependencies (run after clone; handled by `scripts/post-merge.sh` on merge)
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
+- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only; run by `scripts/post-merge.sh` on merge)
+
+## Setup status (last verified 2026-07-04)
+
+- ✅ `pnpm install` completed — all workspace dependencies installed
+- ✅ DB schema pushed — `lib/db` schema applied to the Replit-managed PostgreSQL instance
+- ✅ `ADMIN_PASSWORD` secret set — required by api-server on startup
+- ✅ Managed artifact workflows configured — agency-site (19242), api-server (8080), tools4biz (3000)
+- ⚠️ `GOOGLE_GENERATIVE_AI_API_KEY` not yet set — AI analysis and email generation will return 500s without it
 
 ## Stack
 
