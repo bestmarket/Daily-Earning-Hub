@@ -199,29 +199,37 @@ async function scrapeYelp(category: string, city: string, country: string, count
 async function scrapeYellowPages(category: string, city: string, country: string, count: number): Promise<ScrapedBusiness[]> {
   const isCA = /\b(canada|ontario|british columbia|alberta|quebec|manitoba|nova scotia|new brunswick|newfoundland|saskatchewan|prince edward)\b/i.test(country);
   const domain = isCA ? "yellowpages.ca" : "yellowpages.com";
-  const url = `https://www.${domain}/search?search_terms=${encodeURIComponent(category)}&geo_location_terms=${encodeURIComponent(city)}`;
-  const html = await browserFetch(url);
-  const businesses: ScrapedBusiness[] = schemasToBusinesses(extractJsonLd(html), category, city, country, "yellowpages");
+  const businesses: ScrapedBusiness[] = [];
 
-  // Split by result cards — both .organic and .sponsored
-  const sections = html.split(/<div[^>]+class="[^"]*(?:v-card|result)[^"]*"/i).slice(1);
-  for (const sec of sections) {
-    if (businesses.length >= count * 2) break;
+  function parseYPHtml(html: string) {
+    businesses.push(...schemasToBusinesses(extractJsonLd(html), category, city, country, "yellowpages"));
+    const sections = html.split(/<div[^>]+class="[^"]*(?:v-card|result)[^"]*"/i).slice(1);
+    for (const sec of sections) {
+      const name =
+        (/<a[^>]+class="[^"]*business-name[^"]*"[^>]*>(?:<span[^>]*>)?([^<]{2,80})(?:<\/span>)?<\/a>/i.exec(sec))?.[1]?.trim() ??
+        (/<h2[^>]*>[\s\S]{0,20}<a[^>]*>([^<]{2,80})<\/a>/i.exec(sec))?.[1]?.trim();
+      if (!name) continue;
+      const phone =
+        (/<div[^>]+class="[^"]*(?:phones|phone primary)[^"]*"[^>]*>[\s\S]*?([+\d][(\d\s\-)\.]{6,18}\d)/i.exec(sec))?.[1]?.trim() ?? "";
+      const website =
+        (/<a[^>]+class="[^"]*track-visit-website[^"]*"[^>]+href="([^"]+)"/i.exec(sec))?.[1]?.trim() ??
+        (/rel="noopener nofollow"[^>]+href="([^"]+)"/i.exec(sec))?.[1]?.trim() ?? "";
+      const address =
+        (/<span[^>]+class="[^"]*street-address[^"]*"[^>]*>([^<]+)<\/span>/i.exec(sec))?.[1]?.trim() ?? "";
+      businesses.push({ businessName: name, phone, website, address, city, country, category, source: "yellowpages", email: "" });
+    }
+  }
 
-    const name =
-      (/<a[^>]+class="[^"]*business-name[^"]*"[^>]*>(?:<span[^>]*>)?([^<]{2,80})(?:<\/span>)?<\/a>/i.exec(sec))?.[1]?.trim() ??
-      (/<h2[^>]*>[\s\S]{0,20}<a[^>]*>([^<]{2,80})<\/a>/i.exec(sec))?.[1]?.trim();
-    if (!name) continue;
+  // Scrape up to 5 pages in parallel
+  const pages = Math.min(Math.ceil(count / 15), 5);
+  const urls = Array.from({ length: pages }, (_, i) => {
+    const base = `https://www.${domain}/search?search_terms=${encodeURIComponent(category)}&geo_location_terms=${encodeURIComponent(city)}`;
+    return i === 0 ? base : `${base}&page=${i + 1}`;
+  });
 
-    const phone =
-      (/<div[^>]+class="[^"]*(?:phones|phone primary)[^"]*"[^>]*>[\s\S]*?([+\d][(\d\s\-)\.]{6,18}\d)/i.exec(sec))?.[1]?.trim() ?? "";
-    const website =
-      (/<a[^>]+class="[^"]*track-visit-website[^"]*"[^>]+href="([^"]+)"/i.exec(sec))?.[1]?.trim() ??
-      (/rel="noopener nofollow"[^>]+href="([^"]+)"/i.exec(sec))?.[1]?.trim() ?? "";
-    const address =
-      (/<span[^>]+class="[^"]*street-address[^"]*"[^>]*>([^<]+)<\/span>/i.exec(sec))?.[1]?.trim() ?? "";
-
-    businesses.push({ businessName: name, phone, website, address, city, country, category, source: "yellowpages", email: "" });
+  const results = await Promise.allSettled(urls.map(u => browserFetch(u)));
+  for (const r of results) {
+    if (r.status === "fulfilled") parseYPHtml(r.value);
   }
 
   return dedup(businesses).slice(0, count);
@@ -859,66 +867,123 @@ async function scrapeOpenStreetMap(category: string, city: string, country: stri
     const geoUrl = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(`${city}, ${country}`)}`;
     const geoRes = await Promise.race([
       fetch(geoUrl, { headers: { "User-Agent": "DevStudio-BusinessHunter/1.0 (contact via app)" } }),
-      new Promise<never>((_, rj) => setTimeout(() => rj(new Error("timeout")), 10000)),
+      new Promise<never>((_, rj) => setTimeout(() => rj(new Error("timeout")), 12000)),
     ]) as Response;
     if (!geoRes.ok) return [];
     const geoData = await geoRes.json() as Array<{ boundingbox: [string, string, string, string] }>;
     if (!geoData.length) return [];
     const [south, north, west, east] = geoData[0].boundingbox.map(Number);
 
-    // 2. Map the free-text category to OSM tag keys/values (best-effort keyword match).
+    // 2. Map the free-text category to multiple OSM tag filters — nwr covers
+    //    node (point POI), way (building footprint), relation (compound venue).
+    //    Using multiple filters for the same category improves recall significantly.
     const cat = category.toLowerCase();
-    const tagMap: Array<[RegExp, string]> = [
-      [/restaurant|food|dining|eatery/, `node["amenity"="restaurant"]`],
-      [/cafe|coffee/, `node["amenity"="cafe"]`],
-      [/bar|pub/, `node["amenity"="bar"]`],
-      [/salon|hair|beauty/, `node["shop"="hairdresser"]`],
-      [/dentist/, `node["amenity"="dentist"]`],
-      [/doctor|clinic|medical/, `node["amenity"="clinic"]`],
-      [/lawyer|attorney|legal/, `node["office"="lawyer"]`],
-      [/plumber/, `node["craft"="plumber"]`],
-      [/electrician/, `node["craft"="electrician"]`],
-      [/gym|fitness/, `node["leisure"="fitness_centre"]`],
-      [/hotel|lodging/, `node["tourism"="hotel"]`],
-      [/auto|car repair|mechanic/, `node["shop"="car_repair"]`],
-      [/real\s*estate/, `node["office"="estate_agent"]`],
-      [/accounting|accountant/, `node["office"="accountant"]`],
-      [/insurance/, `node["office"="insurance"]`],
-      [/veterinar|vet\b/, `node["amenity"="veterinary"]`],
-      [/spa/, `node["shop"="beauty"]`],
-      [/bakery/, `node["shop"="bakery"]`],
-      [/florist/, `node["shop"="florist"]`],
-      [/retail|shop|store/, `node["shop"]`],
+    const tagMap: Array<[RegExp, string[]]> = [
+      [/restaurant|food|dining|eatery|fast.?food|takeaway/,
+        [`nwr["amenity"="restaurant"]`, `nwr["amenity"="fast_food"]`, `nwr["amenity"="food_court"]`, `nwr["cuisine"]`]],
+      [/cafe|coffee/, [`nwr["amenity"="cafe"]`, `nwr["shop"="coffee"]`]],
+      [/bar|pub|lounge|nightclub/,
+        [`nwr["amenity"="bar"]`, `nwr["amenity"="pub"]`, `nwr["amenity"="nightclub"]`, `nwr["amenity"="biergarten"]`]],
+      [/salon|hair|barber|barbershop/,
+        [`nwr["shop"="hairdresser"]`, `nwr["shop"="barber"]`, `nwr["amenity"="hairdresser"]`]],
+      [/beauty|spa|nail|wellness|massage|wax/,
+        [`nwr["shop"="beauty"]`, `nwr["leisure"="spa"]`, `nwr["shop"="massage"]`, `nwr["shop"="nail_salon"]`]],
+      [/dentist|dental/,
+        [`nwr["amenity"="dentist"]`, `nwr["healthcare"="dentist"]`]],
+      [/doctor|clinic|medical|health|gp\b|physician|hospital/,
+        [`nwr["amenity"="clinic"]`, `nwr["amenity"="doctors"]`, `nwr["amenity"="hospital"]`, `nwr["healthcare"]`]],
+      [/pharmacy|chemist|drug/,
+        [`nwr["amenity"="pharmacy"]`, `nwr["shop"="chemist"]`]],
+      [/optician|optometrist|eye|vision/,
+        [`nwr["shop"="optician"]`, `nwr["healthcare"="optometrist"]`]],
+      [/physiotherapy|chiro|chiropract/,
+        [`nwr["healthcare"="physiotherapist"]`, `nwr["healthcare"="chiropractor"]`]],
+      [/veterinar|vet\b|animal/,
+        [`nwr["amenity"="veterinary"]`, `nwr["shop"="pet"]`]],
+      [/gym|fitness|crossfit|yoga|pilates|martial|karate/,
+        [`nwr["leisure"="fitness_centre"]`, `nwr["leisure"="sports_centre"]`, `nwr["leisure"="yoga"]`, `nwr["sport"="yoga"]`]],
+      [/hotel|motel|lodg|hostel/,
+        [`nwr["tourism"="hotel"]`, `nwr["tourism"="motel"]`, `nwr["tourism"="hostel"]`, `nwr["tourism"="guest_house"]`]],
+      [/auto|car.?repair|mechanic|garage|tyre|tire/,
+        [`nwr["shop"="car_repair"]`, `nwr["shop"="tyres"]`, `nwr["amenity"="car_repair"]`]],
+      [/car.?dealer|car.?sale|car.?show/,
+        [`nwr["shop"="car"]`, `nwr["shop"="car_dealer"]`]],
+      [/car.?wash/, [`nwr["amenity"="car_wash"]`, `nwr["shop"="car_wash"]`]],
+      [/real.?estate|estate.?agent|property|mortgage|realtor/,
+        [`nwr["office"="estate_agent"]`, `nwr["office"="real_estate_agent"]`]],
+      [/lawyer|attorney|legal|solicitor/,
+        [`nwr["office"="lawyer"]`, `nwr["office"="solicitor"]`]],
+      [/accountant|accounting|cpa\b|bookkeeping/,
+        [`nwr["office"="accountant"]`, `nwr["office"="tax_advisor"]`]],
+      [/insurance/, [`nwr["office"="insurance"]`]],
+      [/consultant|consulting/, [`nwr["office"="consulting"]`, `nwr["office"="company"]`]],
+      [/financial|finance|investment|wealth/,
+        [`nwr["office"="financial_advisor"]`, `nwr["amenity"="bank"]`]],
+      [/bakery|bread|pastry/, [`nwr["shop"="bakery"]`, `nwr["amenity"="bakery"]`]],
+      [/florist|flower/, [`nwr["shop"="florist"]`]],
+      [/grocery|supermarket|convenience/, [`nwr["shop"="supermarket"]`, `nwr["shop"="convenience"]`, `nwr["shop"="grocery"]`]],
+      [/clothing|fashion|boutique|tailor/,
+        [`nwr["shop"="clothes"]`, `nwr["shop"="fashion"]`, `nwr["shop"="tailor"]`]],
+      [/catering|event|wedding/, [`nwr["shop"="catering"]`, `nwr["amenity"="event_venue"]`]],
+      [/school|tutor|education/, [`nwr["amenity"="school"]`, `nwr["office"="educational_institution"]`]],
+      [/childcare|nursery|daycare/, [`nwr["amenity"="childcare"]`, `nwr["amenity"="kindergarten"]`]],
+      [/hotel|accommodation/, [`nwr["tourism"="hotel"]`, `nwr["tourism"="guest_house"]`]],
+      [/plumber|plumbing/, [`nwr["craft"="plumber"]`]],
+      [/electrician|electrical/, [`nwr["craft"="electrician"]`]],
+      [/tattoo/, [`nwr["shop"="tattoo"]`]],
+      [/photog|studio/, [`nwr["shop"="photo"]`, `nwr["leisure"="dance"]`]],
+      [/cleaning|laundry|dry.?clean/,
+        [`nwr["shop"="laundry"]`, `nwr["shop"="dry_cleaning"]`, `nwr["shop"="cleaning"]`]],
+      [/restaurant|cafe|bar|food|coffee/, [`nwr["amenity"~"^(restaurant|cafe|bar|pub|fast_food|food_court)$"]`]],
     ];
-    const tag = tagMap.find(([re]) => re.test(cat))?.[1] ?? `node["shop"]`;
 
-    // 3. Query Overpass for POIs of that type within the bounding box.
-    const query = `[out:json][timeout:20];(${tag}(${south},${west},${north},${east}););out body ${Math.min(count * 3, 150)};`;
-    const overpassRes = await Promise.race([
-      fetch("https://overpass-api.de/api/interpreter", {
-        method: "POST",
-        headers: { "Content-Type": "text/plain", "User-Agent": "DevStudio-BusinessHunter/1.0" },
-        body: query,
-      }),
-      new Promise<never>((_, rj) => setTimeout(() => rj(new Error("timeout")), 20000)),
-    ]) as Response;
-    if (!overpassRes.ok) return [];
-    const data = await overpassRes.json() as { elements: Array<{ tags?: Record<string, string> }> };
+    // Collect all matching tag filters (may be multiple for broad categories)
+    let tags: string[] = [];
+    for (const [re, t] of tagMap) {
+      if (re.test(cat)) { tags = t; break; }
+    }
+    // Fallback: generic local business / shop
+    if (!tags.length) tags = [`nwr["shop"]`, `nwr["office"]`, `nwr["amenity"~"^(restaurant|cafe|bar|pub|shop)$"]`];
 
-    const businesses: ScrapedBusiness[] = (data.elements ?? [])
-      .map(el => {
-        const t = el.tags ?? {};
-        const name = t.name;
-        if (!name) return null;
-        const website = t.website ?? t["contact:website"] ?? "";
-        const phone = t.phone ?? t["contact:phone"] ?? "";
-        const email = t.email ?? t["contact:email"] ?? "";
-        const address = [t["addr:housenumber"], t["addr:street"], t["addr:city"]].filter(Boolean).join(" ");
-        return { businessName: name, phone, website, address, city, country, category, source: "openstreetmap", email } as ScrapedBusiness;
-      })
-      .filter((b): b is ScrapedBusiness => b !== null);
+    // 3. Run one Overpass query per tag filter in parallel, then merge.
+    //    Each query uses nwr (node+way+relation) with a generous element limit.
+    const limit = Math.min(Math.max(count * 5, 300), 1000);
+    const overpassQueries = tags.slice(0, 4).map(tag =>
+      `[out:json][timeout:30];(${tag}(${south},${west},${north},${east}););out body ${limit};`
+    );
 
-    return dedup(businesses).slice(0, count);
+    const overpassResults = await Promise.allSettled(
+      overpassQueries.map(q =>
+        Promise.race([
+          fetch("https://overpass-api.de/api/interpreter", {
+            method: "POST",
+            headers: { "Content-Type": "text/plain", "User-Agent": "DevStudio-BusinessHunter/1.0" },
+            body: q,
+          }),
+          new Promise<never>((_, rj) => setTimeout(() => rj(new Error("timeout")), 30000)),
+        ]) as Promise<Response>
+      )
+    );
+
+    const allElements: ScrapedBusiness[] = [];
+    for (const r of overpassResults) {
+      if (r.status !== "fulfilled" || !r.value.ok) continue;
+      try {
+        const data = await r.value.json() as { elements: Array<{ tags?: Record<string, string> }> };
+        for (const el of data.elements ?? []) {
+          const t = el.tags ?? {};
+          const name = t.name;
+          if (!name || name.length < 2) continue;
+          const website = t.website ?? t["contact:website"] ?? t["url"] ?? "";
+          const phone   = t.phone   ?? t["contact:phone"]   ?? t["contact:mobile"] ?? "";
+          const email   = t.email   ?? t["contact:email"]   ?? "";
+          const address = [t["addr:housenumber"], t["addr:street"], t["addr:city"]].filter(Boolean).join(" ");
+          allElements.push({ businessName: name, phone, website, address, city, country, category, source: "openstreetmap", email });
+        }
+      } catch {}
+    }
+
+    return dedup(allElements).slice(0, count);
   } catch {
     return [];
   }
