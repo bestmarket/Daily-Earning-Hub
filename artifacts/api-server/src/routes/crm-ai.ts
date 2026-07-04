@@ -127,17 +127,29 @@ async function verifyEmailMx(email: string): Promise<boolean> {
  * MX records AND (if a website is listed) whose website domain resolves in DNS.
  */
 async function filterLiveProspects(prospects: any[]): Promise<{ live: any[]; dead: number }> {
-  const results = await Promise.all(
-    prospects
-      .filter(biz => biz && typeof biz === "object")
-      .map(async (biz) => {
+  // DNS lookups run on Node's libuv threadpool (default size 4). Firing hundreds
+  // of MX/A lookups at once queues most of them past their own 5s timeout, so
+  // everything reports "dead" once the prospect count gets large (e.g. 100+).
+  // Batch them in small concurrent groups so each lookup actually gets a thread
+  // in time to resolve within its timeout.
+  const CONCURRENCY = 8;
+  const valid = prospects.filter(biz => biz && typeof biz === "object");
+  const results: { biz: any; ok: boolean }[] = [];
+
+  for (let i = 0; i < valid.length; i += CONCURRENCY) {
+    const batch = valid.slice(i, i + CONCURRENCY);
+    const batchResults = await Promise.all(
+      batch.map(async (biz) => {
         const [emailOk, domainOk] = await Promise.all([
           verifyEmailMx(biz.email),
           verifyWebsiteDomain(biz.website),
         ]);
         return { biz, ok: emailOk && domainOk };
       })
-  );
+    );
+    results.push(...batchResults);
+  }
+
   const live = results.filter(r => r.ok).map(r => r.biz);
   return { live, dead: results.length - live.length };
 }
@@ -755,22 +767,11 @@ router.post("/crm/hunt-businesses", async (req, res) => {
       })));
     }
 
-    // ── Step 2: AI fallback if directories came up short ──────────────────────
-    if (raw.length < Math.ceil(needed / 2)) {
-      sourceLog.push("ai_fallback");
-      const prompt = `You are a business intelligence researcher. Generate a list of ${needed - raw.length} realistic ${category} businesses in ${city}, ${country || ""}.
-${extraContext ? `Additional context: ${extraContext}` : ""}
-Use realistic local naming, email patterns (info@, hello@, owner first name), phone formats, and websites for ${city}.
-For each, estimate how much they would benefit from custom software (softwareNeedScore 1-10) and describe their main pain point.
-Return ONLY a JSON array. Each object must have:
-{ "businessName":"string","ownerName":"string","category":"${category}","email":"string","phone":"string","website":"string","city":"${city}","country":"${country || ""}","instagram":"string","facebook":"string","linkedin":"string","softwareNeedScore":<1-10>,"painPoint":"string","estimatedValue":<number>,"notes":"string" }`;
-      try {
-        const text = await generateText(prompt);
-        const data = parseJSON(text);
-        const aiBizes: any[] = Array.isArray(data) ? data : data.businesses || [];
-        raw.push(...aiBizes.map(b => ({ ...b, source: "ai" })));
-      } catch {}
-    }
+    // Note: we intentionally do NOT pad short results with AI-generated ("fake")
+    // businesses here. Their emails/domains are fabricated and always fail the
+    // MX/DNS verification below, so they never survive to the final list —
+    // they just look like padding while silently producing zero real leads at
+    // large counts. Real, verifiable results only.
 
     // ── Step 4: Deduplicate by normalized name ────────────────────────────────
     const seen = new Set<string>();

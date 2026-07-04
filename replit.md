@@ -56,6 +56,9 @@ lib/
 
 - After import, run `pnpm install` before starting any workflow — node_modules are not committed.
 - `GOOGLE_GENERATIVE_AI_API_KEY` being absent causes 500s on AI endpoints in Tools4Biz; everything else works fine.
+- Admin panels (agency-site `/admin`, tools4biz `/admin`) use a single shared `ADMIN_PASSWORD` secret as the bearer token — must be set as a Replit Secret or the api-server refuses to start.
+- Every admin-only tab/fetch in `Admin.tsx` must send `Authorization: Bearer <token>`; a missing header 401s silently and looks like the tab "doesn't render" (fixed for the Automation tab).
+- The business hunter's real-result volume is capped by anti-bot blocking (403/429) on free directory sites from cloud IPs — not fixable in code without a paid Google Places API key.
 
 ## User preferences
 

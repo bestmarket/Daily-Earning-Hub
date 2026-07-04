@@ -198,7 +198,7 @@ export default function Admin() {
           <TabsContent value="waitlist"><WaitlistTab apiToken={apiToken} /></TabsContent>
           <TabsContent value="payments"><PaymentsTab apiToken={apiToken} /></TabsContent>
           <TabsContent value="ai"><AISetupTab apiToken={apiToken} /></TabsContent>
-          <TabsContent value="automation"><AutomationTab /></TabsContent>
+          <TabsContent value="automation"><AutomationTab apiToken={apiToken} /></TabsContent>
           <TabsContent value="settings"><SiteSettingsTab apiToken={apiToken} /></TabsContent>
         </Tabs>
       </div>
@@ -1626,7 +1626,8 @@ interface AutoSettings {
 
 function apiBase() { return API_BASE.replace("/agency-site", ""); }
 
-function AutomationTab() {
+function AutomationTab({ apiToken }: { apiToken: string }) {
+  const authHeader = { Authorization: `Bearer ${apiToken}` };
   const [accounts, setAccounts] = useState<EmailAccount[]>([]);
   const [settings, setSettings] = useState<AutoSettings | null>(null);
   const [status, setStatus] = useState<any>(null);
@@ -1649,9 +1650,9 @@ function AutomationTab() {
     setLoading(true);
     try {
       const [accts, setts, stat] = await Promise.all([
-        fetch(`${apiBase()}/api/automation/email-accounts`).then(r => r.json()),
-        fetch(`${apiBase()}/api/automation/settings`).then(r => r.json()),
-        fetch(`${apiBase()}/api/automation/status`).then(r => r.json()),
+        fetch(`${apiBase()}/api/automation/email-accounts`, { headers: authHeader }).then(r => r.json()),
+        fetch(`${apiBase()}/api/automation/settings`, { headers: authHeader }).then(r => r.json()),
+        fetch(`${apiBase()}/api/automation/status`, { headers: authHeader }).then(r => r.json()),
       ]);
       setAccounts(accts);
       setSettings(setts);
@@ -1667,7 +1668,7 @@ function AutomationTab() {
     setSavingSettings(true); setMsg(null);
     try {
       const r = await fetch(`${apiBase()}/api/automation/settings`, {
-        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch),
+        method: "PUT", headers: { "Content-Type": "application/json", ...authHeader }, body: JSON.stringify(patch),
       });
       const updated = await safeJson(r);
       if (!r.ok) throw new Error(updated.error || "Save failed");
@@ -1688,7 +1689,7 @@ function AutomationTab() {
   const runNow = async () => {
     setRunningNow(true); setMsg(null);
     try {
-      await fetch(`${apiBase()}/api/automation/run-now`, { method: "POST" });
+      await fetch(`${apiBase()}/api/automation/run-now`, { method: "POST", headers: authHeader });
       setMsg({ type: "success", text: "Automation run started! Check back in a few minutes for results." });
       setTimeout(load, 3000);
     } catch { setMsg({ type: "error", text: "Failed to trigger run" }); }
@@ -1702,7 +1703,7 @@ function AutomationTab() {
     setAddingAcct(true); setMsg(null);
     try {
       const r = await fetch(`${apiBase()}/api/automation/email-accounts`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(newAcct),
+        method: "POST", headers: { "Content-Type": "application/json", ...authHeader }, body: JSON.stringify(newAcct),
       });
       if (!r.ok) { const d = await safeJson(r); throw new Error(d.error); }
       setShowAddAccount(false);
@@ -1716,7 +1717,7 @@ function AutomationTab() {
   const testAccount = async (id: number) => {
     setTestingId(id); setMsg(null);
     try {
-      const r = await fetch(`${apiBase()}/api/automation/email-accounts/${id}/test`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+      const r = await fetch(`${apiBase()}/api/automation/email-accounts/${id}/test`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeader }, body: JSON.stringify({}) });
       const d = await safeJson(r);
       if (!r.ok) throw new Error(d.error);
       setMsg({ type: "success", text: "✓ Test email sent successfully! Check your inbox." });
@@ -1736,7 +1737,7 @@ function AutomationTab() {
   };
 
   const deleteAccount = async (id: number) => {
-    await fetch(`${apiBase()}/api/automation/email-accounts/${id}`, { method: "DELETE" });
+    await fetch(`${apiBase()}/api/automation/email-accounts/${id}`, { method: "DELETE", headers: authHeader });
     await load();
   };
 
@@ -1751,7 +1752,7 @@ function AutomationTab() {
       const body: any = { label: editAcct.label, fromName: editAcct.fromName, fromEmail: editAcct.fromEmail, active: editAcct.active, imapEnabled: editAcct.imapEnabled };
       if (editPass && editPass !== "••••••••") body.password = editPass;
       const r = await fetch(`${apiBase()}/api/automation/email-accounts/${editAcct.id}`, {
-        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+        method: "PUT", headers: { "Content-Type": "application/json", ...authHeader }, body: JSON.stringify(body),
       });
       if (!r.ok) { const d = await safeJson(r); throw new Error(d.error); }
       setEditAcct(null); setEditPass("");
