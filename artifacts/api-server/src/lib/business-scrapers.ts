@@ -417,37 +417,182 @@ async function scrapeYell(category: string, city: string, country: string, count
 
 // ─── SCRAPER 7: Foursquare ────────────────────────────────────────────────────
 
+/**
+ * Foursquare Places API v3 (real API — not a web scraper).
+ * Free tier: 1,000 calls/day, no credit card required.
+ * Sign up at https://developer.foursquare.com → Create App → copy the API key.
+ * Set env var: FOURSQUARE_API_KEY
+ *
+ * Each call returns up to 50 places.  We page through up to 10 pages = 500 results.
+ */
 async function scrapeFoursquare(category: string, city: string, country: string, count: number): Promise<ScrapedBusiness[]> {
-  const url = `https://foursquare.com/explore?mode=url&near=${encodeURIComponent(`${city}, ${country}`)}&q=${encodeURIComponent(category)}`;
-  const html = await browserFetch(url);
-  const businesses: ScrapedBusiness[] = schemasToBusinesses(extractJsonLd(html), category, city, country, "foursquare");
+  const apiKey = process.env.FOURSQUARE_API_KEY;
+  if (!apiKey) return [];   // skip gracefully when key not set
 
-  // Foursquare embeds all venue data in Next.js __NEXT_DATA__
-  const nextMatch = /<script id="__NEXT_DATA__"[^>]*>([\s\S]+?)<\/script>/i.exec(html);
-  if (nextMatch) {
+  const businesses: ScrapedBusiness[] = [];
+  const perPage = 50;
+  const pages = Math.min(Math.ceil(count / perPage), 10);
+
+  const baseUrl = new URL("https://api.foursquare.com/v3/places/search");
+  baseUrl.searchParams.set("query", category);
+  baseUrl.searchParams.set("near", `${city}, ${country}`);
+  baseUrl.searchParams.set("limit", String(perPage));
+  baseUrl.searchParams.set("fields", "name,location,tel,website,email,categories");
+
+  const headers = {
+    "Authorization": apiKey,
+    "Accept": "application/json",
+  };
+
+  for (let page = 0; page < pages && businesses.length < count; page++) {
     try {
-      const data = JSON.parse(nextMatch[1]);
-      // Explore results are nested under props.pageProps
-      const groups: any[] =
-        data?.props?.pageProps?.data?.explore?.groups ?? [];
-      for (const group of groups) {
-        for (const item of (group?.items ?? [])) {
-          const v = item?.venue;
-          if (!v?.name) continue;
-          businesses.push({
-            businessName: v.name,
-            phone: v.contact?.formattedPhone ?? v.contact?.phone ?? "",
-            website: v.url ?? v.contact?.facebookUrl ?? "",
-            address: v.location?.address ?? "",
-            city: v.location?.city ?? city,
-            country,
-            category,
-            source: "foursquare",
-            email: v.contact?.email ?? "",
-          });
-        }
+      const url = new URL(baseUrl.toString());
+      if (page > 0) url.searchParams.set("offset", String(page * perPage));
+
+      const res = await Promise.race([
+        fetch(url.toString(), { headers }),
+        new Promise<never>((_, rj) => setTimeout(() => rj(new Error("timeout")), 15000)),
+      ]) as Response;
+
+      if (!res.ok) break;   // bad key or rate-limited — stop paging
+
+      const data = await res.json() as {
+        results?: Array<{
+          name?: string;
+          tel?: string;
+          website?: string;
+          email?: string;
+          location?: { formatted_address?: string; address?: string; locality?: string };
+        }>
+      };
+
+      const results = data.results ?? [];
+      if (results.length === 0) break;   // no more pages
+
+      for (const p of results) {
+        if (!p.name) continue;
+        businesses.push({
+          businessName: p.name,
+          phone:   p.tel     ?? "",
+          website: p.website ?? "",
+          email:   p.email   ?? "",
+          address: p.location?.formatted_address ?? p.location?.address ?? "",
+          city:    p.location?.locality ?? city,
+          country,
+          category,
+          source: "foursquare_api",
+        });
       }
-    } catch {}
+    } catch { break; }
+  }
+
+  return dedup(businesses).slice(0, count);
+}
+
+// ISO-3166-1 alpha-2 lookup for the most common country inputs.
+// TomTom countrySet requires comma-separated ISO-2 codes.
+const COUNTRY_TO_ISO2: Record<string, string> = {
+  "afghanistan": "AF", "albania": "AL", "algeria": "DZ", "angola": "AO",
+  "argentina": "AR", "australia": "AU", "austria": "AT", "bahrain": "BH",
+  "bangladesh": "BD", "belgium": "BE", "brazil": "BR", "bulgaria": "BG",
+  "canada": "CA", "chile": "CL", "china": "CN", "colombia": "CO",
+  "croatia": "HR", "cyprus": "CY", "czech": "CZ", "czechia": "CZ",
+  "denmark": "DK", "egypt": "EG", "ethiopia": "ET", "finland": "FI",
+  "france": "FR", "germany": "DE", "ghana": "GH", "greece": "GR",
+  "hong kong": "HK", "hungary": "HU", "india": "IN", "indonesia": "ID",
+  "iran": "IR", "iraq": "IQ", "ireland": "IE", "israel": "IL",
+  "italy": "IT", "ivory coast": "CI", "côte d'ivoire": "CI",
+  "japan": "JP", "jordan": "JO", "kenya": "KE", "kuwait": "KW",
+  "lebanon": "LB", "libya": "LY", "malaysia": "MY", "mexico": "MX",
+  "morocco": "MA", "mozambique": "MZ", "netherlands": "NL", "new zealand": "NZ",
+  "nigeria": "NG", "norway": "NO", "pakistan": "PK", "peru": "PE",
+  "philippines": "PH", "poland": "PL", "portugal": "PT", "qatar": "QA",
+  "romania": "RO", "russia": "RU", "saudi arabia": "SA", "senegal": "SN",
+  "singapore": "SG", "slovakia": "SK", "south africa": "ZA", "south korea": "KR",
+  "spain": "ES", "sweden": "SE", "switzerland": "CH", "taiwan": "TW",
+  "tanzania": "TZ", "thailand": "TH", "tunisia": "TN", "turkey": "TR",
+  "turkiye": "TR", "uganda": "UG", "ukraine": "UA",
+  "united arab emirates": "AE", "uae": "AE", "dubai": "AE",
+  "united kingdom": "GB", "uk": "GB", "england": "GB", "britain": "GB",
+  "united states": "US", "usa": "US", "us": "US", "america": "US",
+  "venezuela": "VE", "vietnam": "VN", "zimbabwe": "ZW",
+};
+
+function countryToIso2(country: string): string {
+  const key = country.toLowerCase().trim();
+  // Direct match
+  if (COUNTRY_TO_ISO2[key]) return COUNTRY_TO_ISO2[key];
+  // Partial match — e.g. "United Kingdom of ..." → "GB"
+  for (const [k, v] of Object.entries(COUNTRY_TO_ISO2)) {
+    if (key.includes(k) || k.includes(key)) return v;
+  }
+  // Already an ISO-2 code?
+  if (/^[A-Z]{2}$/i.test(key)) return key.toUpperCase();
+  // Fallback: pass as-is and let TomTom handle it
+  return country;
+}
+
+/**
+ * TomTom Points-of-Interest Search API v2.
+ * Free tier: 2,500 requests/day, no credit card required.
+ * Sign up at https://developer.tomtom.com → My Apps → New App → copy API key.
+ * Set env var: TOMTOM_API_KEY
+ *
+ * Each page returns up to 100 POIs; pagination uses `ofs` (not `offset`).
+ * countrySet takes ISO-3166-1 alpha-2 codes — we normalise the free-text input.
+ */
+async function scrapeTomTom(category: string, city: string, country: string, count: number): Promise<ScrapedBusiness[]> {
+  const apiKey = process.env.TOMTOM_API_KEY;
+  if (!apiKey) return [];
+
+  const iso2 = countryToIso2(country);
+  const businesses: ScrapedBusiness[] = [];
+  const perPage = 100;
+  const pages = Math.min(Math.ceil(count / perPage), 5);
+
+  for (let page = 0; page < pages && businesses.length < count; page++) {
+    try {
+      const ofs = page * perPage;  // TomTom uses `ofs`, NOT `offset`
+      const q = encodeURIComponent(`${category} ${city}`);
+      const url =
+        `https://api.tomtom.com/search/2/poiSearch/${q}.json` +
+        `?key=${apiKey}&countrySet=${iso2}&limit=${perPage}&ofs=${ofs}&language=en-GB`;
+
+      const res = await Promise.race([
+        fetch(url, { headers: { "User-Agent": "DevStudio-BusinessHunter/1.0" } }),
+        new Promise<never>((_, rj) => setTimeout(() => rj(new Error("timeout")), 15000)),
+      ]) as Response;
+
+      // 429 = rate-limited; anything non-2xx = stop paging
+      if (res.status === 429) { await new Promise(r => setTimeout(r, 2000)); break; }
+      if (!res.ok) break;
+
+      const data = await res.json() as {
+        results?: Array<{
+          poi?: { name?: string; phone?: string; url?: string };
+          address?: { freeformAddress?: string; municipality?: string };
+        }>
+      };
+
+      const results = data.results ?? [];
+      if (results.length === 0) break;   // no more pages
+
+      for (const r of results) {
+        const name = r.poi?.name;
+        if (!name) continue;
+        businesses.push({
+          businessName: name,
+          phone:   r.poi?.phone ?? "",
+          website: r.poi?.url   ?? "",
+          email:   "",
+          address: r.address?.freeformAddress ?? "",
+          city:    r.address?.municipality ?? city,
+          country,
+          category,
+          source: "tomtom_api",
+        });
+      }
+    } catch { break; }
   }
 
   return dedup(businesses).slice(0, count);
@@ -1008,11 +1153,13 @@ export interface ScrapeResult {
  * then enrich each business with a real contact email scraped from its website.
  *
  * Sources:
- *  1  Yelp          6  Yell.com (UK)       11 Thumbtack (US)
- *  2  Yellow Pages  7  Foursquare          12 Cylex (intl)
- *  3  Google GMB    8  Bing Local          13 SuperPages (US)
- *  4  Manta         9  TripAdvisor         14 Bark.com (global)
- *  5  Hotfrog       10 BBB (US/CA)
+ *  1  Yelp              6  Yell.com (UK)      11 Thumbtack (US)
+ *  2  Yellow Pages      7  Foursquare API*    12 Cylex (intl)
+ *  3  Google GMB        8  Bing Local         13 SuperPages (US)
+ *  4  Manta             9  TripAdvisor        14 Bark.com (global)
+ *  5  Hotfrog          10  BBB (US/CA)        15 OpenStreetMap
+ *                                             16 TomTom API*
+ * * API-backed sources (key optional, huge volume when set)
  */
 export async function scrapeBusinessDirectories(
   category: string,
@@ -1032,6 +1179,7 @@ export async function scrapeBusinessDirectories(
     ["hotfrog",      () => scrapeHotfrog(category, city, country, needed)],
     ["yell",         () => scrapeYell(category, city, country, needed)],
     ["foursquare",   () => scrapeFoursquare(category, city, country, needed)],
+    ["tomtom",       () => scrapeTomTom(category, city, country, needed)],
     ["bing",         () => scrapeBingLocal(category, city, country, needed)],
     ["tripadvisor",  () => scrapeTripAdvisor(category, city, country, needed)],
     ["bbb",          () => scrapeBBB(category, city, country, needed)],

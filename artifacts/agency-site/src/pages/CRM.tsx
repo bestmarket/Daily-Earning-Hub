@@ -12,9 +12,10 @@ import {
   Search, Plus, Globe, Mail, Phone, Trash2, Star, ChevronRight,
   BarChart3, Send, MessageCircle, Linkedin, RefreshCw, CheckCircle2,
   AlertTriangle, Clock, TrendingUp, Users, Target, Sparkles, Download,
-  X, Copy, Check, Building, Zap, LayoutDashboard, Radar,
+  X, Copy, Check, Building, Zap, LayoutDashboard, Radar, ExternalLink,
   Settings, Eye, EyeOff, Wifi, WifiOff, PlayCircle, StopCircle,
   ChevronDown, ChevronUp, Bot, MapPin, Filter, Inbox, BotMessageSquare,
+  Database,
 } from "lucide-react";
 import API_BASE from "@/lib/api";
 
@@ -2213,22 +2214,33 @@ interface AutomationStatus {
   stats: Record<string, any>;
 }
 
+interface DatasourceStatus {
+  foursquare: boolean;
+  tomtom: boolean;
+  gemini: boolean;
+  estimatedYieldPerCity: number;
+}
+
 function AutomationPanel() {
   const [settings, setSettings] = useState<AutomationSettings | null>(null);
   const [status, setStatus] = useState<AutomationStatus | null>(null);
+  const [dsStatus, setDsStatus] = useState<DatasourceStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+  const [dsOpen, setDsOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const [sRes, stRes] = await Promise.all([
+      const [sRes, stRes, dsRes] = await Promise.all([
         fetch(`${apiBase()}/api/automation/settings`),
         fetch(`${apiBase()}/api/automation/status`),
+        fetch(`${apiBase()}/api/automation/datasource-status`),
       ]);
       if (sRes.ok)  setSettings(await sRes.json());
       if (stRes.ok) setStatus(await stRes.json());
+      if (dsRes.ok) setDsStatus(await dsRes.json());
     } finally { setLoading(false); }
   }, []);
 
@@ -2351,6 +2363,162 @@ function AutomationPanel() {
               onBlur={() => save({ huntExtraContext: settings.huntExtraContext })} />
           </div>
         </div>
+      </div>
+
+      {/* ── Data Sources ─────────────────────────────────────────────── */}
+      <div className="rounded-xl border border-border/50 overflow-hidden">
+        <button
+          className="w-full p-3 bg-muted/20 border-b border-border/50 flex items-center gap-2 text-left"
+          onClick={() => setDsOpen(o => !o)}
+        >
+          <Database className="w-4 h-4 text-primary" />
+          <h4 className="font-bold text-sm flex-1">Data Sources</h4>
+          {dsStatus && (
+            <span className="text-xs font-semibold text-muted-foreground mr-1">
+              ~{dsStatus.estimatedYieldPerCity} businesses/city
+            </span>
+          )}
+          {dsOpen ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+        </button>
+
+        {dsOpen && (
+          <div className="p-4 space-y-4">
+            {/* Source rows */}
+            {[
+              {
+                name: "OpenStreetMap",
+                desc: "Free public API — always on, global coverage",
+                active: true,
+                badge: "Always active",
+                badgeColor: "bg-green-100 text-green-700 border-green-200",
+                setup: null,
+              },
+              {
+                name: "Yellow Pages",
+                desc: "Web scrape — US & Canada only, 5 pages",
+                active: true,
+                badge: "Always active",
+                badgeColor: "bg-green-100 text-green-700 border-green-200",
+                setup: null,
+              },
+              {
+                name: "Foursquare Places API",
+                desc: "1,000 places/day free — no credit card required",
+                active: dsStatus?.foursquare ?? false,
+                badge: dsStatus?.foursquare ? "Active" : "Key missing",
+                badgeColor: dsStatus?.foursquare
+                  ? "bg-green-100 text-green-700 border-green-200"
+                  : "bg-amber-100 text-amber-700 border-amber-200",
+                setup: {
+                  url: "https://developer.foursquare.com",
+                  steps: [
+                    "Go to developer.foursquare.com → sign up (free, no card)",
+                    'Click "Create App" → give it any name',
+                    "Copy the API Key shown on the app page",
+                    'In Replit: click the 🔒 Secrets tab → add secret named FOURSQUARE_API_KEY → paste the key',
+                    "Restart the API Server workflow — yield jumps by +50 per city",
+                  ],
+                  secret: "FOURSQUARE_API_KEY",
+                },
+              },
+              {
+                name: "TomTom Search API",
+                desc: "2,500 POI lookups/day free — no credit card required",
+                active: dsStatus?.tomtom ?? false,
+                badge: dsStatus?.tomtom ? "Active" : "Key missing",
+                badgeColor: dsStatus?.tomtom
+                  ? "bg-green-100 text-green-700 border-green-200"
+                  : "bg-amber-100 text-amber-700 border-amber-200",
+                setup: {
+                  url: "https://developer.tomtom.com",
+                  steps: [
+                    "Go to developer.tomtom.com → Register (free, no card)",
+                    'Click "My Apps" → "New App" → tick "Search" → Create',
+                    "Copy the API Key from the app details page",
+                    'In Replit: Secrets tab → add TOMTOM_API_KEY → paste the key',
+                    "Restart the API Server workflow — yield jumps by +100 per city",
+                  ],
+                  secret: "TOMTOM_API_KEY",
+                },
+              },
+              {
+                name: "AI Analysis (Gemini)",
+                desc: "Scores websites and writes emails — free at aistudio.google.com",
+                active: dsStatus?.gemini ?? false,
+                badge: dsStatus?.gemini ? "Active" : "Key missing",
+                badgeColor: dsStatus?.gemini
+                  ? "bg-green-100 text-green-700 border-green-200"
+                  : "bg-red-100 text-red-700 border-red-200",
+                setup: {
+                  url: "https://aistudio.google.com/app/apikey",
+                  steps: [
+                    "Go to aistudio.google.com → sign in with Google",
+                    'Click "Get API Key" → Create API key → copy it',
+                    'In Replit: Secrets tab → add GOOGLE_GENERATIVE_AI_API_KEY → paste',
+                    "Restart the API Server — AI scoring and email generation now work",
+                  ],
+                  secret: "GOOGLE_GENERATIVE_AI_API_KEY",
+                },
+              },
+            ].map(src => (
+              <div key={src.name} className="rounded-lg border border-border/50 overflow-hidden">
+                {/* Row header */}
+                <div className="flex items-center gap-3 px-3 py-2.5">
+                  <div className={`w-2 h-2 rounded-full flex-shrink-0 ${src.active ? "bg-green-500" : "bg-amber-400"}`} />
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm font-semibold">{src.name}</span>
+                    <span className="text-xs text-muted-foreground ml-2">{src.desc}</span>
+                  </div>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${src.badgeColor}`}>
+                    {src.badge}
+                  </span>
+                </div>
+
+                {/* Setup guide — only shown when inactive */}
+                {!src.active && src.setup && (
+                  <div className="px-3 pb-3 pt-0 bg-amber-50/50 border-t border-amber-100">
+                    <ol className="list-decimal list-inside space-y-1 text-xs text-amber-900 leading-relaxed mt-2">
+                      {src.setup.steps.map((step, i) => (
+                        <li key={i}>{step}</li>
+                      ))}
+                    </ol>
+                    <a
+                      href={src.setup.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-amber-700 hover:text-amber-900 underline"
+                    >
+                      Open {src.name.split(" ")[0]} →
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  </div>
+                )}
+              </div>
+            ))}
+
+            {/* Yield calculator */}
+            {dsStatus && (
+              <div className="rounded-lg bg-muted/30 border border-border/50 p-3 text-xs text-muted-foreground space-y-1">
+                <p className="font-semibold text-foreground text-sm">Yield calculator</p>
+                <p>Current: <strong>{dsStatus.estimatedYieldPerCity} businesses</strong> per city per hunt</p>
+                <p>
+                  Bulk hunt 10 cities →{" "}
+                  <strong className="text-foreground">{dsStatus.estimatedYieldPerCity * 10} businesses per run</strong>
+                </p>
+                {dsStatus.estimatedYieldPerCity < 100 && (
+                  <p className="text-amber-700 font-medium mt-1">
+                    ↑ Add Foursquare + TomTom keys above to reach 1,000+ businesses per run.
+                  </p>
+                )}
+                {dsStatus.estimatedYieldPerCity >= 100 && (
+                  <p className="text-green-700 font-medium mt-1">
+                    ✓ You're on track for 1,000+ businesses per day with bulk hunt across 10 cities.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Schedule & Sending */}

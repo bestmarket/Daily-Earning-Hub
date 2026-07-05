@@ -316,6 +316,23 @@ router.put("/automation/settings", async (req, res) => {
   res.json(updated[0]);
 });
 
+// ─── Data-source key status ──────────────────────────────────────────────────
+// Returns which optional API keys are configured WITHOUT exposing values.
+
+router.get("/automation/datasource-status", (_req, res) => {
+  const foursquare = !!process.env.FOURSQUARE_API_KEY;
+  const tomtom     = !!process.env.TOMTOM_API_KEY;
+  const gemini     = !!process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+
+  // Rough per-hunt yield estimate (businesses per single-city hunt)
+  const baseYield = 10;               // OSM + Yellow Pages (always on)
+  const yieldPer  = baseYield
+    + (foursquare ? 50 : 0)           // Foursquare API: up to 50 per page
+    + (tomtom     ? 100 : 0);         // TomTom: up to 100 per page
+
+  res.json({ foursquare, tomtom, gemini, estimatedYieldPerCity: yieldPer });
+});
+
 // ─── Automation Status (live run info) ───────────────────────────────────────
 
 router.get("/automation/status", async (_req, res) => {
