@@ -317,20 +317,39 @@ router.put("/automation/settings", async (req, res) => {
 });
 
 // ─── Data-source key status ──────────────────────────────────────────────────
-// Returns which optional API keys are configured WITHOUT exposing values.
+// Reads live pool counts from DB — keys are managed in the CRM admin UI.
+// Deprecated path kept for backward compat; /api/api-pools/status is canonical.
 
-router.get("/automation/datasource-status", (_req, res) => {
-  const foursquare = !!process.env.FOURSQUARE_API_KEY;
-  const tomtom     = !!process.env.TOMTOM_API_KEY;
-  const gemini     = !!process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+import { readPool } from "../lib/api-key-pools";
 
-  // Rough per-hunt yield estimate (businesses per single-city hunt)
-  const baseYield = 10;               // OSM + Yellow Pages (always on)
-  const yieldPer  = baseYield
-    + (foursquare ? 50 : 0)           // Foursquare API: up to 50 per page
-    + (tomtom     ? 100 : 0);         // TomTom: up to 100 per page
+router.get("/automation/datasource-status", async (_req, res) => {
+  try {
+    const [fsPool, ttPool, herePool] = await Promise.all([
+      readPool("foursquare"),
+      readPool("tomtom"),
+      readPool("here"),
+    ]);
+    const baseYield = 10;
+    const active = (pool: Awaited<ReturnType<typeof readPool>>) => pool.length > 0;
+    const count  = (pool: Awaited<ReturnType<typeof readPool>>) =>
+      Math.max(pool.filter(k => k.id !== "__env__").length, active(pool) ? 1 : 0);
 
-  res.json({ foursquare, tomtom, gemini, estimatedYieldPerCity: yieldPer });
+    const estimatedYieldPerCity =
+      baseYield +
+      (active(fsPool)   ? 50  * count(fsPool)   : 0) +
+      (active(ttPool)   ? 100 * count(ttPool)    : 0) +
+      (active(herePool) ? 100 * count(herePool)  : 0);
+
+    res.json({
+      foursquare: active(fsPool),
+      tomtom:     active(ttPool),
+      here:       active(herePool),
+      gemini:     !!process.env.GOOGLE_GENERATIVE_AI_API_KEY,
+      estimatedYieldPerCity,
+    });
+  } catch {
+    res.json({ foursquare: false, tomtom: false, here: false, gemini: false, estimatedYieldPerCity: 10 });
+  }
 });
 
 // ─── Automation Status (live run info) ───────────────────────────────────────

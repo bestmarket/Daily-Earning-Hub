@@ -95,8 +95,21 @@ export const inboxRepliesTable = pgTable("inbox_replies", {
   read: boolean("read").notNull().default(false),
 });
 
+// ─── External API keys (stored in DB so admin can manage them in the UI) ─────
+// Supports multiple keys per provider for quota multiplication.
+
+export const externalApiKeysTable = pgTable("external_api_keys", {
+  id: serial("id").primaryKey(),
+  provider: text("provider").notNull(),          // 'foursquare' | 'tomtom' | 'here' | 'gemini'
+  label: text("label").notNull().default(""),    // user-given name, e.g. "Account 2"
+  apiKey: text("api_key").notNull(),             // the actual key (stored plaintext — single-user admin tool)
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 export type EmailAccount = typeof emailAccountsTable.$inferSelect;
 export type AutomationSettings = typeof automationSettingsTable.$inferSelect;
 export type EmailTracking = typeof emailTrackingTable.$inferSelect;
 export type FollowUpQueue = typeof followUpQueueTable.$inferSelect;
 export type InboxReply = typeof inboxRepliesTable.$inferSelect;
+export type ExternalApiKey = typeof externalApiKeysTable.$inferSelect;

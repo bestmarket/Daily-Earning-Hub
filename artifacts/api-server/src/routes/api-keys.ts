@@ -268,4 +268,103 @@ export async function getGeminiAI() {
   throw new Error("Gemini AI not configured. Add your API key in Admin → AI Setup.");
 }
 
+// ─── Generic provider key-pool routes ────────────────────────────────────────
+// Supports: foursquare | tomtom | here
+// GET    /api/api-pools/:provider         — list keys (masked)
+// POST   /api/api-pools/:provider         — add a key { apiKey, label? }
+// DELETE /api/api-pools/:provider/:id     — remove a key
+// GET    /api/api-pools/status            — counts for all providers + gemini
+
+import { readPool, addToPool, removeFromPool } from "../lib/api-key-pools";
+
+const SUPPORTED_PROVIDERS = ["foursquare", "tomtom", "here"] as const;
+
+function maskApiKey(key: string): string {
+  if (!key || key.length < 8) return "••••••••";
+  return key.slice(0, 4) + "••••••••" + key.slice(-4);
+}
+
+// Status endpoint — pool counts for all providers + gemini (no key values)
+router.get("/api-pools/status", requireAdmin, async (_req, res) => {
+  try {
+    const [fsPool, ttPool, herePool, gemPool] = await Promise.all([
+      readPool("foursquare"),
+      readPool("tomtom"),
+      readPool("here"),
+      readGeminiPool(),
+    ]);
+
+    const baseYield = 10; // OSM + Yellow Pages always on
+    const estimatedYieldPerCity =
+      baseYield +
+      (fsPool.length   > 0 ? 50  * fsPool.filter(k => k.id !== "__env__").length  || 50  : 0) +
+      (ttPool.length   > 0 ? 100 * ttPool.filter(k => k.id !== "__env__").length  || 100 : 0) +
+      (herePool.length > 0 ? 100 * herePool.filter(k => k.id !== "__env__").length || 100 : 0);
+
+    res.json({
+      foursquare: { count: fsPool.filter(k => k.id !== "__env__").length, active: fsPool.length > 0, envFallback: fsPool.some(k => k.id === "__env__") },
+      tomtom:     { count: ttPool.filter(k => k.id !== "__env__").length, active: ttPool.length > 0, envFallback: ttPool.some(k => k.id === "__env__") },
+      here:       { count: herePool.filter(k => k.id !== "__env__").length, active: herePool.length > 0, envFallback: herePool.some(k => k.id === "__env__") },
+      gemini:     { count: gemPool.length, active: gemPool.length > 0 },
+      estimatedYieldPerCity,
+    });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to load key pool status" });
+  }
+});
+
+// List keys for a provider (masked)
+router.get("/api-pools/:provider", requireAdmin, async (req, res) => {
+  const { provider } = req.params;
+  if (!SUPPORTED_PROVIDERS.includes(provider as any)) {
+    res.status(400).json({ error: "Unknown provider" });
+    return;
+  }
+  try {
+    const pool = await readPool(provider);
+    // Don't expose virtual env-var entries to the UI
+    const uiPool = pool
+      .filter(e => e.id !== "__env__")
+      .map(e => ({ id: e.id, label: e.label, masked: maskApiKey(e.key), addedAt: e.addedAt }));
+    res.json({ provider, keys: uiPool, envFallback: pool.some(e => e.id === "__env__") });
+  } catch {
+    res.status(500).json({ error: "Failed to load keys" });
+  }
+});
+
+// Add a key
+router.post("/api-pools/:provider", requireAdmin, async (req, res) => {
+  const { provider } = req.params;
+  if (!SUPPORTED_PROVIDERS.includes(provider as any)) {
+    res.status(400).json({ error: "Unknown provider" });
+    return;
+  }
+  const { apiKey, label } = req.body ?? {};
+  if (!apiKey || typeof apiKey !== "string" || !apiKey.trim()) {
+    res.status(400).json({ error: "apiKey is required" });
+    return;
+  }
+  try {
+    const entry = await addToPool(provider, apiKey, label);
+    res.json({ success: true, id: entry.id, label: entry.label, masked: maskApiKey(entry.key) });
+  } catch {
+    res.status(500).json({ error: "Failed to save key" });
+  }
+});
+
+// Delete a key
+router.delete("/api-pools/:provider/:id", requireAdmin, async (req, res) => {
+  const { provider, id } = req.params;
+  if (!SUPPORTED_PROVIDERS.includes(provider as any)) {
+    res.status(400).json({ error: "Unknown provider" });
+    return;
+  }
+  try {
+    await removeFromPool(provider, id);
+    res.json({ success: true });
+  } catch {
+    res.status(500).json({ error: "Failed to delete key" });
+  }
+});
+
 export default router;

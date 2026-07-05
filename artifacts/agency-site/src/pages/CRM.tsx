@@ -2214,12 +2214,160 @@ interface AutomationStatus {
   stats: Record<string, any>;
 }
 
+interface ProviderStatus { count: number; active: boolean; envFallback: boolean; }
 interface DatasourceStatus {
-  foursquare: boolean;
-  tomtom: boolean;
-  gemini: boolean;
+  foursquare: ProviderStatus;
+  tomtom:     ProviderStatus;
+  here:       ProviderStatus;
+  gemini:     { count: number; active: boolean };
   estimatedYieldPerCity: number;
 }
+
+// ─── Per-provider API key manager ─────────────────────────────────────────────
+
+interface StoredKey { id: string; label: string; masked: string; addedAt: string; }
+
+function ApiKeyPoolManager({
+  provider, title, desc, quotaPerAccount, signupUrl, signupLabel, onUpdated,
+}: {
+  provider: string; title: string; desc: string; quotaPerAccount: string;
+  signupUrl: string; signupLabel: string; onUpdated: () => void;
+}) {
+  const [keys, setKeys] = useState<StoredKey[]>([]);
+  const [loadingKeys, setLoadingKeys] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [newKey, setNewKey] = useState("");
+  const [newLabel, setNewLabel] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [error, setError] = useState("");
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const loadKeys = useCallback(async () => {
+    setLoadingKeys(true);
+    try {
+      const r = await fetch(`${apiBase()}/api/api-pools/${provider}`);
+      if (r.ok) { const d = await r.json(); setKeys(d.keys ?? []); }
+    } finally { setLoadingKeys(false); }
+  }, [provider]);
+
+  useEffect(() => { loadKeys(); }, [loadKeys]);
+
+  const addKey = async () => {
+    if (!newKey.trim()) return;
+    setAdding(true); setError("");
+    try {
+      const r = await fetch(`${apiBase()}/api/api-pools/${provider}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: newKey.trim(), label: newLabel.trim() || undefined }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setError(d.error || "Failed to save"); return; }
+      setKeys(k => [...k, { id: d.id, label: d.label, masked: d.masked, addedAt: new Date().toISOString() }]);
+      setNewKey(""); setNewLabel(""); setShowForm(false);
+      onUpdated();
+    } catch { setError("Network error"); }
+    finally { setAdding(false); }
+  };
+
+  const deleteKey = async (id: string) => {
+    setDeletingId(id);
+    try {
+      await fetch(`${apiBase()}/api/api-pools/${provider}/${id}`, { method: "DELETE" });
+      setKeys(k => k.filter(e => e.id !== id));
+      onUpdated();
+    } finally { setDeletingId(null); }
+  };
+
+  return (
+    <div className="rounded-lg border border-border/50 overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center gap-2.5 px-3 py-2.5 bg-card">
+        <div className={`w-2 h-2 rounded-full flex-shrink-0 ${keys.length > 0 ? "bg-green-500" : "bg-amber-400"}`} />
+        <div className="flex-1 min-w-0">
+          <span className="text-sm font-semibold">{title}</span>
+          <span className="text-xs text-muted-foreground ml-2 hidden sm:inline">{desc}</span>
+        </div>
+        {keys.length > 0 && (
+          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border bg-green-100 text-green-700 border-green-200">
+            {keys.length} acct{keys.length !== 1 ? "s" : ""}
+          </span>
+        )}
+        <Button size="sm" variant={showForm ? "ghost" : "outline"}
+          className="h-7 text-xs gap-1 px-2.5"
+          onClick={() => { setShowForm(s => !s); setError(""); }}>
+          {showForm ? <><X className="w-3 h-3" /> Cancel</> : <><Plus className="w-3 h-3" /> Add</>}
+        </Button>
+      </div>
+
+      {/* Keys list */}
+      {!loadingKeys && keys.length > 0 && (
+        <div className="border-t border-border/30 divide-y divide-border/20">
+          {keys.map(k => (
+            <div key={k.id} className="flex items-center gap-2 px-3 py-1.5">
+              <div className="w-1.5 h-1.5 rounded-full bg-green-400 flex-shrink-0" />
+              <span className="text-xs font-medium w-28 truncate text-muted-foreground">{k.label}</span>
+              <code className="flex-1 text-[11px] text-muted-foreground font-mono truncate">{k.masked}</code>
+              <button onClick={() => deleteKey(k.id)} disabled={deletingId === k.id}
+                className="p-1 rounded text-muted-foreground hover:text-red-600 transition-colors">
+                {deletingId === k.id
+                  ? <RefreshCw className="w-3 h-3 animate-spin" />
+                  : <Trash2 className="w-3 h-3" />}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Empty state */}
+      {!loadingKeys && keys.length === 0 && !showForm && (
+        <div className="px-3 py-2.5 bg-amber-50/60 border-t border-amber-100 text-xs text-amber-800 flex items-start gap-2">
+          <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+          <span>
+            No keys yet. Sign up free at{" "}
+            <a href={signupUrl} target="_blank" rel="noopener noreferrer"
+              className="underline font-semibold hover:text-amber-900 inline-flex items-center gap-0.5">
+              {signupLabel} <ExternalLink className="w-2.5 h-2.5" />
+            </a>{" "}→ create app → paste key.{" "}
+            <strong>{quotaPerAccount}</strong> free per account.
+          </span>
+        </div>
+      )}
+
+      {/* Add form */}
+      {showForm && (
+        <div className="border-t border-dashed border-primary/30 bg-primary/[0.02] p-3 space-y-2">
+          {keys.length === 0 && (
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Sign up at{" "}
+              <a href={signupUrl} target="_blank" rel="noopener noreferrer"
+                className="underline font-semibold inline-flex items-center gap-0.5">
+                {signupLabel} <ExternalLink className="w-2.5 h-2.5" />
+              </a>{" "}
+              (free, no card) → create app → copy the API key → paste below.
+              <strong className="block mt-1">{quotaPerAccount} free per account. Add as many accounts as you want.</strong>
+            </p>
+          )}
+          <div className="flex gap-2">
+            <Input placeholder={`Label (e.g. Account ${keys.length + 1})`} value={newLabel}
+              onChange={e => setNewLabel(e.target.value)} className="h-8 text-xs w-36 flex-shrink-0" />
+            <Input placeholder="Paste API key here" value={newKey}
+              onChange={e => setNewKey(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && addKey()}
+              className="h-8 text-xs font-mono flex-1" />
+            <Button size="sm" onClick={addKey} disabled={adding || !newKey.trim()} className="h-8 text-xs px-3 flex-shrink-0">
+              {adding ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3 mr-1" />}
+              {adding ? "" : "Save"}
+            </Button>
+          </div>
+          {error && <p className="text-xs text-red-600">{error}</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Automation panel ─────────────────────────────────────────────────────────
 
 function AutomationPanel() {
   const [settings, setSettings] = useState<AutomationSettings | null>(null);
@@ -2236,7 +2384,7 @@ function AutomationPanel() {
       const [sRes, stRes, dsRes] = await Promise.all([
         fetch(`${apiBase()}/api/automation/settings`),
         fetch(`${apiBase()}/api/automation/status`),
-        fetch(`${apiBase()}/api/automation/datasource-status`),
+        fetch(`${apiBase()}/api/api-pools/status`),
       ]);
       if (sRes.ok)  setSettings(await sRes.json());
       if (stRes.ok) setStatus(await stRes.json());
@@ -2372,149 +2520,102 @@ function AutomationPanel() {
           onClick={() => setDsOpen(o => !o)}
         >
           <Database className="w-4 h-4 text-primary" />
-          <h4 className="font-bold text-sm flex-1">Data Sources</h4>
+          <h4 className="font-bold text-sm flex-1">Data Sources & API Keys</h4>
           {dsStatus && (
-            <span className="text-xs font-semibold text-muted-foreground mr-1">
-              ~{dsStatus.estimatedYieldPerCity} businesses/city
+            <span className={`text-xs font-semibold mr-1 ${dsStatus.estimatedYieldPerCity >= 100 ? "text-green-600" : "text-muted-foreground"}`}>
+              ~{dsStatus.estimatedYieldPerCity}/city
             </span>
           )}
           {dsOpen ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
         </button>
 
         {dsOpen && (
-          <div className="p-4 space-y-4">
-            {/* Source rows */}
-            {[
-              {
-                name: "OpenStreetMap",
-                desc: "Free public API — always on, global coverage",
-                active: true,
-                badge: "Always active",
-                badgeColor: "bg-green-100 text-green-700 border-green-200",
-                setup: null,
-              },
-              {
-                name: "Yellow Pages",
-                desc: "Web scrape — US & Canada only, 5 pages",
-                active: true,
-                badge: "Always active",
-                badgeColor: "bg-green-100 text-green-700 border-green-200",
-                setup: null,
-              },
-              {
-                name: "Foursquare Places API",
-                desc: "1,000 places/day free — no credit card required",
-                active: dsStatus?.foursquare ?? false,
-                badge: dsStatus?.foursquare ? "Active" : "Key missing",
-                badgeColor: dsStatus?.foursquare
-                  ? "bg-green-100 text-green-700 border-green-200"
-                  : "bg-amber-100 text-amber-700 border-amber-200",
-                setup: {
-                  url: "https://developer.foursquare.com",
-                  steps: [
-                    "Go to developer.foursquare.com → sign up (free, no card)",
-                    'Click "Create App" → give it any name',
-                    "Copy the API Key shown on the app page",
-                    'In Replit: click the 🔒 Secrets tab → add secret named FOURSQUARE_API_KEY → paste the key',
-                    "Restart the API Server workflow — yield jumps by +50 per city",
-                  ],
-                  secret: "FOURSQUARE_API_KEY",
-                },
-              },
-              {
-                name: "TomTom Search API",
-                desc: "2,500 POI lookups/day free — no credit card required",
-                active: dsStatus?.tomtom ?? false,
-                badge: dsStatus?.tomtom ? "Active" : "Key missing",
-                badgeColor: dsStatus?.tomtom
-                  ? "bg-green-100 text-green-700 border-green-200"
-                  : "bg-amber-100 text-amber-700 border-amber-200",
-                setup: {
-                  url: "https://developer.tomtom.com",
-                  steps: [
-                    "Go to developer.tomtom.com → Register (free, no card)",
-                    'Click "My Apps" → "New App" → tick "Search" → Create',
-                    "Copy the API Key from the app details page",
-                    'In Replit: Secrets tab → add TOMTOM_API_KEY → paste the key',
-                    "Restart the API Server workflow — yield jumps by +100 per city",
-                  ],
-                  secret: "TOMTOM_API_KEY",
-                },
-              },
-              {
-                name: "AI Analysis (Gemini)",
-                desc: "Scores websites and writes emails — free at aistudio.google.com",
-                active: dsStatus?.gemini ?? false,
-                badge: dsStatus?.gemini ? "Active" : "Key missing",
-                badgeColor: dsStatus?.gemini
-                  ? "bg-green-100 text-green-700 border-green-200"
-                  : "bg-red-100 text-red-700 border-red-200",
-                setup: {
-                  url: "https://aistudio.google.com/app/apikey",
-                  steps: [
-                    "Go to aistudio.google.com → sign in with Google",
-                    'Click "Get API Key" → Create API key → copy it',
-                    'In Replit: Secrets tab → add GOOGLE_GENERATIVE_AI_API_KEY → paste',
-                    "Restart the API Server — AI scoring and email generation now work",
-                  ],
-                  secret: "GOOGLE_GENERATIVE_AI_API_KEY",
-                },
-              },
-            ].map(src => (
-              <div key={src.name} className="rounded-lg border border-border/50 overflow-hidden">
-                {/* Row header */}
-                <div className="flex items-center gap-3 px-3 py-2.5">
-                  <div className={`w-2 h-2 rounded-full flex-shrink-0 ${src.active ? "bg-green-500" : "bg-amber-400"}`} />
-                  <div className="flex-1 min-w-0">
-                    <span className="text-sm font-semibold">{src.name}</span>
-                    <span className="text-xs text-muted-foreground ml-2">{src.desc}</span>
-                  </div>
-                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${src.badgeColor}`}>
-                    {src.badge}
-                  </span>
-                </div>
+          <div className="p-4 space-y-3">
 
-                {/* Setup guide — only shown when inactive */}
-                {!src.active && src.setup && (
-                  <div className="px-3 pb-3 pt-0 bg-amber-50/50 border-t border-amber-100">
-                    <ol className="list-decimal list-inside space-y-1 text-xs text-amber-900 leading-relaxed mt-2">
-                      {src.setup.steps.map((step, i) => (
-                        <li key={i}>{step}</li>
-                      ))}
-                    </ol>
-                    <a
-                      href={src.setup.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-amber-700 hover:text-amber-900 underline"
-                    >
-                      Open {src.name.split(" ")[0]} →
-                      <ExternalLink className="w-3 h-3" />
-                    </a>
-                  </div>
-                )}
+            {/* Always-on sources */}
+            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/70">Always Active (no key needed)</p>
+            {[
+              { name: "OpenStreetMap / Overpass", desc: "Global POI database — free, unlimited, cloud-IP friendly" },
+              { name: "Yellow Pages",             desc: "US & Canada web scrape — 5 pages per hunt" },
+            ].map(src => (
+              <div key={src.name} className="rounded-lg border border-border/50 flex items-center gap-2.5 px-3 py-2.5">
+                <div className="w-2 h-2 rounded-full bg-green-500 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <span className="text-sm font-semibold">{src.name}</span>
+                  <span className="text-xs text-muted-foreground ml-2 hidden sm:inline">{src.desc}</span>
+                </div>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border bg-green-100 text-green-700 border-green-200">Active</span>
               </div>
             ))}
 
-            {/* Yield calculator */}
+            {/* API sources — manageable from the UI */}
+            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/70 pt-1">
+              API Sources — add multiple accounts to multiply daily quota
+            </p>
+
+            <ApiKeyPoolManager
+              provider="foursquare"
+              title="Foursquare Places API"
+              desc="1,000 places/day free"
+              quotaPerAccount="1,000 places/day"
+              signupUrl="https://developer.foursquare.com"
+              signupLabel="developer.foursquare.com"
+              onUpdated={load}
+            />
+
+            <ApiKeyPoolManager
+              provider="tomtom"
+              title="TomTom Search API"
+              desc="2,500 lookups/day free"
+              quotaPerAccount="2,500 POI lookups/day"
+              signupUrl="https://developer.tomtom.com"
+              signupLabel="developer.tomtom.com"
+              onUpdated={load}
+            />
+
+            <ApiKeyPoolManager
+              provider="here"
+              title="HERE Places API"
+              desc="1,000 lookups/day free"
+              quotaPerAccount="1,000 lookups/day"
+              signupUrl="https://developer.here.com"
+              signupLabel="developer.here.com"
+              onUpdated={load}
+            />
+
+            {/* Gemini — managed in existing Admin → AI Setup */}
+            <div className="rounded-lg border border-border/50 flex items-center gap-2.5 px-3 py-2.5">
+              <div className={`w-2 h-2 rounded-full flex-shrink-0 ${dsStatus?.gemini?.active ? "bg-green-500" : "bg-red-400"}`} />
+              <div className="flex-1 min-w-0">
+                <span className="text-sm font-semibold">Gemini AI</span>
+                <span className="text-xs text-muted-foreground ml-2">AI scoring + email writing — free at aistudio.google.com</span>
+              </div>
+              {dsStatus?.gemini?.active
+                ? <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border bg-green-100 text-green-700 border-green-200">{dsStatus.gemini.count} key{dsStatus.gemini.count !== 1 ? "s" : ""}</span>
+                : <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer"
+                    className="text-[10px] font-bold px-2 py-0.5 rounded-full border bg-red-100 text-red-700 border-red-200 hover:bg-red-200 inline-flex items-center gap-1">
+                    Get free key <ExternalLink className="w-2.5 h-2.5" />
+                  </a>
+              }
+            </div>
+
+            {/* Yield summary */}
             {dsStatus && (
-              <div className="rounded-lg bg-muted/30 border border-border/50 p-3 text-xs text-muted-foreground space-y-1">
-                <p className="font-semibold text-foreground text-sm">Yield calculator</p>
-                <p>Current: <strong>{dsStatus.estimatedYieldPerCity} businesses</strong> per city per hunt</p>
-                <p>
-                  Bulk hunt 10 cities →{" "}
-                  <strong className="text-foreground">{dsStatus.estimatedYieldPerCity * 10} businesses per run</strong>
-                </p>
-                {dsStatus.estimatedYieldPerCity < 100 && (
-                  <p className="text-amber-700 font-medium mt-1">
-                    ↑ Add Foursquare + TomTom keys above to reach 1,000+ businesses per run.
-                  </p>
-                )}
-                {dsStatus.estimatedYieldPerCity >= 100 && (
-                  <p className="text-green-700 font-medium mt-1">
-                    ✓ You're on track for 1,000+ businesses per day with bulk hunt across 10 cities.
-                  </p>
-                )}
+              <div className={`rounded-lg border p-3 text-xs space-y-1 ${dsStatus.estimatedYieldPerCity >= 100 ? "bg-green-50 border-green-200" : "bg-muted/30 border-border/50"}`}>
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-sm">Estimated yield</span>
+                  <span className={`font-bold text-base ${dsStatus.estimatedYieldPerCity >= 100 ? "text-green-700" : "text-foreground"}`}>
+                    {dsStatus.estimatedYieldPerCity} / city
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-muted-foreground">
+                  <span>Bulk hunt 10 cities</span>
+                  <span className="font-semibold text-foreground">{dsStatus.estimatedYieldPerCity * 10} businesses / run</span>
+                </div>
+                {dsStatus.estimatedYieldPerCity < 100
+                  ? <p className="text-amber-700 pt-1">↑ Add keys above to unlock 1,000+ per run. Each extra account multiplies the limit.</p>
+                  : <p className="text-green-700 pt-1">✓ On track for {dsStatus.estimatedYieldPerCity * 10}+ businesses per run with bulk hunt.</p>
+                }
               </div>
             )}
           </div>

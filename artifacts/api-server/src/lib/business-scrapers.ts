@@ -1,12 +1,16 @@
 /**
  * business-scrapers.ts
  *
- * Multi-source business directory scraper — no API keys required.
- * Runs 8 sources in parallel (Yelp, Yellow Pages, Google Local, Manta, Hotfrog,
- * Yell.com, Foursquare, Bing Local), extracts JSON-LD / embedded app state /
- * raw HTML from each, deduplicates across sources, then scrapes each website
- * for a real contact email before returning.
+ * Multi-source business directory scraper.
+ * Runs all sources in parallel, deduplicates, then enriches each with a
+ * real contact email scraped from the business website.
+ *
+ * API-backed sources (Foursquare, TomTom, HERE) read keys from the DB pool
+ * managed via the CRM admin UI — no Replit Secrets required.
+ * Multiple accounts per provider are supported and rotated round-robin.
  */
+
+import { getAllKeys } from "./api-key-pools";
 
 export interface ScrapedBusiness {
   businessName: string;
@@ -415,60 +419,53 @@ async function scrapeYell(category: string, city: string, country: string, count
   return dedup(businesses).slice(0, count);
 }
 
-// ─── SCRAPER 7: Foursquare ────────────────────────────────────────────────────
+// ─── SCRAPER 7: Foursquare Places API v3 ─────────────────────────────────────
+//
+// Free tier: 1,000 calls/day per account, no credit card required.
+// Add accounts at: Admin → Automation → Data Sources → Foursquare
+// Multiple accounts rotate round-robin to multiply daily quota.
 
-/**
- * Foursquare Places API v3 (real API — not a web scraper).
- * Free tier: 1,000 calls/day, no credit card required.
- * Sign up at https://developer.foursquare.com → Create App → copy the API key.
- * Set env var: FOURSQUARE_API_KEY
- *
- * Each call returns up to 50 places.  We page through up to 10 pages = 500 results.
- */
 async function scrapeFoursquare(category: string, city: string, country: string, count: number): Promise<ScrapedBusiness[]> {
-  const apiKey = process.env.FOURSQUARE_API_KEY;
-  if (!apiKey) return [];   // skip gracefully when key not set
+  const keys = await getAllKeys("foursquare");
+  if (keys.length === 0) return [];
 
   const businesses: ScrapedBusiness[] = [];
   const perPage = 50;
-  const pages = Math.min(Math.ceil(count / perPage), 10);
+  // Total pages = up to 10 per key (500 results/key); rotate key per page
+  const totalPages = Math.min(Math.ceil(count / perPage), 10 * keys.length);
 
-  const baseUrl = new URL("https://api.foursquare.com/v3/places/search");
-  baseUrl.searchParams.set("query", category);
-  baseUrl.searchParams.set("near", `${city}, ${country}`);
-  baseUrl.searchParams.set("limit", String(perPage));
-  baseUrl.searchParams.set("fields", "name,location,tel,website,email,categories");
+  const baseParams = new URLSearchParams({
+    query: category,
+    near: `${city}, ${country}`,
+    limit: String(perPage),
+    fields: "name,location,tel,website,email,categories",
+  });
 
-  const headers = {
-    "Authorization": apiKey,
-    "Accept": "application/json",
-  };
-
-  for (let page = 0; page < pages && businesses.length < count; page++) {
+  for (let page = 0; page < totalPages && businesses.length < count; page++) {
+    const apiKey = keys[page % keys.length];   // round-robin across accounts
     try {
-      const url = new URL(baseUrl.toString());
+      const url = new URL("https://api.foursquare.com/v3/places/search");
+      baseParams.forEach((v, k) => url.searchParams.set(k, v));
       if (page > 0) url.searchParams.set("offset", String(page * perPage));
 
       const res = await Promise.race([
-        fetch(url.toString(), { headers }),
+        fetch(url.toString(), {
+          headers: { "Authorization": apiKey, "Accept": "application/json" },
+        }),
         new Promise<never>((_, rj) => setTimeout(() => rj(new Error("timeout")), 15000)),
       ]) as Response;
 
-      if (!res.ok) break;   // bad key or rate-limited — stop paging
+      if (res.status === 429) { await new Promise(r => setTimeout(r, 1500)); continue; }
+      if (!res.ok) continue;   // try next page / key
 
       const data = await res.json() as {
         results?: Array<{
-          name?: string;
-          tel?: string;
-          website?: string;
-          email?: string;
+          name?: string; tel?: string; website?: string; email?: string;
           location?: { formatted_address?: string; address?: string; locality?: string };
         }>
       };
 
       const results = data.results ?? [];
-      if (results.length === 0) break;   // no more pages
-
       for (const p of results) {
         if (!p.name) continue;
         businesses.push({
@@ -478,12 +475,10 @@ async function scrapeFoursquare(category: string, city: string, country: string,
           email:   p.email   ?? "",
           address: p.location?.formatted_address ?? p.location?.address ?? "",
           city:    p.location?.locality ?? city,
-          country,
-          category,
-          source: "foursquare_api",
+          country, category, source: "foursquare_api",
         });
       }
-    } catch { break; }
+    } catch { continue; }
   }
 
   return dedup(businesses).slice(0, count);
@@ -532,27 +527,25 @@ function countryToIso2(country: string): string {
   return country;
 }
 
-/**
- * TomTom Points-of-Interest Search API v2.
- * Free tier: 2,500 requests/day, no credit card required.
- * Sign up at https://developer.tomtom.com → My Apps → New App → copy API key.
- * Set env var: TOMTOM_API_KEY
- *
- * Each page returns up to 100 POIs; pagination uses `ofs` (not `offset`).
- * countrySet takes ISO-3166-1 alpha-2 codes — we normalise the free-text input.
- */
+// ─── SCRAPER 8b: TomTom Search API v2 ────────────────────────────────────────
+//
+// Free tier: 2,500 requests/day per account, no credit card required.
+// Add accounts at: Admin → Automation → Data Sources → TomTom
+// Pagination uses `ofs` (NOT `offset`); countrySet takes ISO-3166-1 alpha-2.
+
 async function scrapeTomTom(category: string, city: string, country: string, count: number): Promise<ScrapedBusiness[]> {
-  const apiKey = process.env.TOMTOM_API_KEY;
-  if (!apiKey) return [];
+  const keys = await getAllKeys("tomtom");
+  if (keys.length === 0) return [];
 
   const iso2 = countryToIso2(country);
   const businesses: ScrapedBusiness[] = [];
   const perPage = 100;
-  const pages = Math.min(Math.ceil(count / perPage), 5);
+  const totalPages = Math.min(Math.ceil(count / perPage), 5 * keys.length);
 
-  for (let page = 0; page < pages && businesses.length < count; page++) {
+  for (let page = 0; page < totalPages && businesses.length < count; page++) {
+    const apiKey = keys[page % keys.length];
     try {
-      const ofs = page * perPage;  // TomTom uses `ofs`, NOT `offset`
+      const ofs = page * perPage;
       const q = encodeURIComponent(`${category} ${city}`);
       const url =
         `https://api.tomtom.com/search/2/poiSearch/${q}.json` +
@@ -563,9 +556,8 @@ async function scrapeTomTom(category: string, city: string, country: string, cou
         new Promise<never>((_, rj) => setTimeout(() => rj(new Error("timeout")), 15000)),
       ]) as Response;
 
-      // 429 = rate-limited; anything non-2xx = stop paging
-      if (res.status === 429) { await new Promise(r => setTimeout(r, 2000)); break; }
-      if (!res.ok) break;
+      if (res.status === 429) { await new Promise(r => setTimeout(r, 2000)); continue; }
+      if (!res.ok) continue;
 
       const data = await res.json() as {
         results?: Array<{
@@ -575,7 +567,7 @@ async function scrapeTomTom(category: string, city: string, country: string, cou
       };
 
       const results = data.results ?? [];
-      if (results.length === 0) break;   // no more pages
+      if (results.length === 0) break;
 
       for (const r of results) {
         const name = r.poi?.name;
@@ -587,12 +579,88 @@ async function scrapeTomTom(category: string, city: string, country: string, cou
           email:   "",
           address: r.address?.freeformAddress ?? "",
           city:    r.address?.municipality ?? city,
-          country,
-          category,
-          source: "tomtom_api",
+          country, category, source: "tomtom_api",
         });
       }
-    } catch { break; }
+    } catch { continue; }
+  }
+
+  return dedup(businesses).slice(0, count);
+}
+
+// ─── SCRAPER 8c: HERE Discover API ───────────────────────────────────────────
+//
+// Free tier: 1,000 calls/day per account, no credit card required.
+// Add accounts at: Admin → Automation → Data Sources → HERE
+// Signup: https://developer.here.com → Create app → copy API key.
+
+async function scrapeHere(category: string, city: string, country: string, count: number): Promise<ScrapedBusiness[]> {
+  const keys = await getAllKeys("here");
+  if (keys.length === 0) return [];
+
+  // Geocode city → lat,lon using Nominatim (same as OSM scraper — free, no key)
+  let lat: number, lon: number;
+  try {
+    const geoUrl = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(`${city}, ${country}`)}`;
+    const geoRes = await Promise.race([
+      fetch(geoUrl, { headers: { "User-Agent": "DevStudio-BusinessHunter/1.0" } }),
+      new Promise<never>((_, rj) => setTimeout(() => rj(new Error("timeout")), 10000)),
+    ]) as Response;
+    const geo = await geoRes.json() as Array<{ lat: string; lon: string }>;
+    if (!geo.length) return [];
+    lat = parseFloat(geo[0].lat);
+    lon = parseFloat(geo[0].lon);
+  } catch { return []; }
+
+  const businesses: ScrapedBusiness[] = [];
+  const perPage = 100;
+  // Run each key as a separate offset block in parallel for speed
+  const pagesPerKey = Math.min(Math.ceil(count / (perPage * keys.length)), 3);
+
+  const requests = keys.flatMap((apiKey, ki) =>
+    Array.from({ length: pagesPerKey }, (_, pi) => ({ apiKey, offset: (ki * pagesPerKey + pi) * perPage }))
+  );
+
+  const settled = await Promise.allSettled(
+    requests.map(({ apiKey, offset }) => {
+      const url =
+        `https://discover.search.hereapi.com/v1/discover` +
+        `?at=${lat},${lon}&q=${encodeURIComponent(category)}&limit=${perPage}&offset=${offset}&lang=en&apiKey=${apiKey}`;
+      return Promise.race([
+        fetch(url, { headers: { "User-Agent": "DevStudio-BusinessHunter/1.0" } }),
+        new Promise<never>((_, rj) => setTimeout(() => rj(new Error("timeout")), 15000)),
+      ]) as Promise<Response>;
+    })
+  );
+
+  for (const r of settled) {
+    if (r.status !== "fulfilled" || !r.value.ok) continue;
+    try {
+      const data = await r.value.json() as {
+        items?: Array<{
+          title?: string;
+          address?: { label?: string; city?: string };
+          contacts?: Array<{
+            phone?: Array<{ value?: string }>;
+            www?:   Array<{ value?: string }>;
+            email?: Array<{ value?: string }>;
+          }>;
+        }>
+      };
+      for (const item of data.items ?? []) {
+        if (!item.title) continue;
+        const contacts = item.contacts?.[0] ?? {};
+        businesses.push({
+          businessName: item.title,
+          phone:   contacts.phone?.[0]?.value ?? "",
+          website: contacts.www?.[0]?.value   ?? "",
+          email:   contacts.email?.[0]?.value ?? "",
+          address: item.address?.label ?? "",
+          city:    item.address?.city  ?? city,
+          country, category, source: "here_api",
+        });
+      }
+    } catch {}
   }
 
   return dedup(businesses).slice(0, count);
@@ -1180,6 +1248,7 @@ export async function scrapeBusinessDirectories(
     ["yell",         () => scrapeYell(category, city, country, needed)],
     ["foursquare",   () => scrapeFoursquare(category, city, country, needed)],
     ["tomtom",       () => scrapeTomTom(category, city, country, needed)],
+    ["here",         () => scrapeHere(category, city, country, needed)],
     ["bing",         () => scrapeBingLocal(category, city, country, needed)],
     ["tripadvisor",  () => scrapeTripAdvisor(category, city, country, needed)],
     ["bbb",          () => scrapeBBB(category, city, country, needed)],
