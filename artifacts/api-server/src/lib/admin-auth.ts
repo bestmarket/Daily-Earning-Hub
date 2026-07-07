@@ -6,10 +6,13 @@
  * Set ADMIN_PASSWORD as a Replit Secret to give the admin panel a known password.
  */
 
-export const ADMIN_SECRET = process.env.ADMIN_PASSWORD;
+export const ADMIN_SECRET =
+  process.env.ADMIN_PASSWORD ?? process.env.SESSION_SECRET;
 
 if (!ADMIN_SECRET) {
-  console.error("FATAL: ADMIN_PASSWORD env var must be set as a Replit Secret");
+  console.error(
+    "FATAL: ADMIN_PASSWORD env var must be set as a Replit Secret (SESSION_SECRET is used as a fallback)",
+  );
   process.exit(1);
 }
 
