@@ -7,6 +7,7 @@ import { eq, and, lte, isNull, desc } from "drizzle-orm";
 import { getGeminiAI } from "./api-keys";
 import { sendMail as brevoSendMail, brevoTransporter } from "../lib/brevo-mailer";
 import { requireAdmin } from "../lib/admin-auth";
+import { scrapeBusinessDirectories } from "../lib/business-scrapers";
 
 const router = Router();
 
@@ -105,17 +106,25 @@ async function verifyEmailMx(email: string): Promise<boolean> {
 }
 
 async function filterLiveProspects(prospects: any[]): Promise<any[]> {
-  const results = await Promise.all(
-    prospects
-      .filter(biz => biz && typeof biz === "object")
-      .map(async (biz) => {
+  // DNS lookups run on Node's libuv threadpool (default size 4). Firing all at
+  // once queues most past their 5s timeout so everything reports dead.
+  // Batch in small concurrent groups so each lookup gets a thread in time.
+  const CONCURRENCY = 8;
+  const valid = prospects.filter(biz => biz && typeof biz === "object");
+  const results: { biz: any; ok: boolean }[] = [];
+  for (let i = 0; i < valid.length; i += CONCURRENCY) {
+    const batch = valid.slice(i, i + CONCURRENCY);
+    const batchResults = await Promise.all(
+      batch.map(async (biz) => {
         const [emailOk, domainOk] = await Promise.all([
           verifyEmailMx(biz.email),
           verifyWebsiteDomain(biz.website),
         ]);
         return { biz, ok: emailOk && domainOk };
       })
-  );
+    );
+    results.push(...batchResults);
+  }
   return results.filter(r => r.ok).map(r => r.biz);
 }
 
@@ -443,21 +452,50 @@ export async function runAutomationCycle(overrides?: {
     } catch { /* follow-up errors don't block main cycle */ }
   }
 
-  // 1. Hunt businesses
+  // 1. Hunt businesses — use real directory scrapers (same pipeline as the manual hunter)
+  // We intentionally do NOT use AI to generate fake businesses here: AI-invented
+  // emails look plausible but have no real MX records and are filtered to zero by
+  // the DNS verification step below. Real scrapers return verifiable contacts.
   let businesses: any[] = [];
   try {
-    const huntPrompt = `You are a business intelligence researcher. Generate a list of ${Math.min(cfg.count, 20)} realistic ${cfg.category} businesses in ${cfg.city}, ${cfg.country || ""}.
-${cfg.extraContext ? `Additional context: ${cfg.extraContext}` : ""}
-Return ONLY a JSON array. Each object:
-{ "businessName":"string","ownerName":"string","category":"${cfg.category}","email":"string","phone":"string","website":"string","city":"${cfg.city}","country":"${cfg.country || ""}","instagram":"string","facebook":"string","linkedin":"string","softwareNeedScore":<1-10>,"painPoint":"string","estimatedValue":<number>,"notes":"string" }`;
-    const text = await generateText(huntPrompt);
-    businesses = parseJSON(text);
-    if (!Array.isArray(businesses)) businesses = [];
+    // Cap at 200 per cycle — each prospect triggers website scraping + AI calls,
+    // so very large values create long-running cycles that time out mid-way.
+    const needed = Math.min(Math.max(cfg.count ?? 50, 1), 200);
+    const { businesses: scraped } = await scrapeBusinessDirectories(
+      cfg.category || "business",
+      cfg.city,
+      cfg.country || "",
+      needed
+    );
+
+    businesses = scraped
+      .filter(b => b.businessName)
+      .map(b => ({
+        businessName: b.businessName,
+        ownerName: "",
+        category: b.category || cfg.category,
+        email: b.email || "",
+        phone: b.phone || "",
+        website: b.website || "",
+        city: b.city || cfg.city,
+        country: b.country || cfg.country || "",
+        instagram: "",
+        facebook: "",
+        linkedin: "",
+        softwareNeedScore: b.aiOpportunityScore ?? 5,
+        painPoint: b.aiOpportunityNote || "",
+        estimatedValue: 0,
+        notes: b.address || "",
+        source: b.source,
+      }));
+
     runStats.hunted = businesses.length;
 
-    // Filter: discard businesses whose email domain has no MX records or whose website domain doesn't resolve in DNS
+    // Filter: discard businesses whose email domain has no MX records or whose
+    // website domain doesn't resolve in DNS. Uses batched concurrency (8) to
+    // avoid saturating Node's libuv threadpool and timing out valid leads.
     businesses = await filterLiveProspects(businesses);
-    runStats.filtered = runStats.hunted - businesses.length;
+    runStats.filtered = (runStats.hunted as number) - businesses.length;
   } catch { runStats.errors++; }
 
   // 2. Auto-score + generate email content for each, then send
@@ -472,14 +510,17 @@ Return ONLY a JSON array. Each object:
     let analysis: any = null;
     let emailContent: { subject: string; body: string } | null = null;
 
+    // Scrape the website once per prospect — reused by both the scoring block and
+    // the fallback email block below to avoid fetching the same URL twice.
+    const siteContent = (settings.autoScore || settings.autoEmail)
+      ? await scrapeWebsite(biz.website)
+      : "";
+    const siteContext = siteContent
+      ? `\nReal website content scraped from ${biz.website}:\n"""\n${siteContent}\n"""`
+      : (biz.website ? `\nWebsite ${biz.website} could not be scraped.` : "\nNo website.");
+
     if (settings.autoScore) {
       try {
-        // Scrape the real website first — gives AI actual content to reference
-        const siteContent = await scrapeWebsite(biz.website);
-        const siteContext = siteContent
-          ? `\nReal website content scraped from ${biz.website}:\n"""\n${siteContent}\n"""`
-          : (biz.website ? `\nWebsite ${biz.website} could not be scraped.` : "\nNo website.");
-
         const autoPrompt = `You are a senior business analyst at DevStudio, a custom software development agency run by Daniel.
 Analyze this ${biz.category} business and generate analysis + a high-converting cold email.
 Business: ${biz.businessName}, Location: ${biz.city} ${biz.country}, Owner: ${biz.ownerName || "the owner"}, Website: ${biz.website || "No website"}, Pain Point: ${biz.painPoint || "manual processes"}${siteContext}
@@ -502,6 +543,32 @@ Return ONLY JSON: { "analysis": { "websiteScore":<0-100>,"leadScore":<0-100>,"co
             }
           : null;
         runStats.scored++;
+      } catch { runStats.errors++; }
+    }
+
+    // If autoScore is off (or the scoring prompt failed to return email content),
+    // generate a lightweight email so autoEmail can still function.
+    // Without this, emailContent stays null and no emails are ever sent when
+    // autoScore is disabled. Reuses the siteContent already fetched above.
+    if (!emailContent && settings.autoEmail && biz.email) {
+      try {
+        const emailOnlyPrompt = `Write a short, high-converting cold email from Daniel at DevStudio (a custom software agency) to ${biz.businessName}, a ${biz.category || "business"} in ${biz.city}.${biz.painPoint ? `\nKnown pain point: ${biz.painPoint}` : ""}${siteContext}
+
+Framework:
+1. ONE specific observation about their business or category
+2. The exact problem it causes (lost time / revenue)
+3. One-line fix: what DevStudio would build
+4. CTA: "Does any of this apply? Just hit reply." No call mention.
+RULES: Max 100 words body. No filler phrases. Curiosity-driven subject (6 words max). Sign off "Daniel, DevStudio".
+Return ONLY JSON: { "subject":"string","body":"string" }`;
+        const emailText = await generateText(emailOnlyPrompt);
+        const emailData = parseJSON(emailText);
+        if (emailData?.subject && emailData?.body) {
+          emailContent = {
+            subject: fillPlaceholders(emailData.subject),
+            body: fillPlaceholders(emailData.body),
+          };
+        }
       } catch { runStats.errors++; }
     }
 
