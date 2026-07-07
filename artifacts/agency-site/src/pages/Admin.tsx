@@ -1646,19 +1646,75 @@ function AutomationTab({ apiToken }: { apiToken: string }) {
   const [editPass, setEditPass] = useState("");
   const [savingAcct, setSavingAcct] = useState(false);
 
+  // Data Sources (Foursquare / TomTom / HERE API key pools)
+  type PoolKey = { id: string; label: string; maskedKey: string };
+  type PoolStatus = { count: number; active: boolean; envFallback: boolean };
+  const [poolStatus, setPoolStatus] = useState<{ foursquare: PoolStatus; tomtom: PoolStatus; here: PoolStatus } | null>(null);
+  const [openPool, setOpenPool] = useState<string | null>(null);
+  const [poolKeys, setPoolKeys] = useState<PoolKey[]>([]);
+  const [newPoolKey, setNewPoolKey] = useState("");
+  const [newPoolLabel, setNewPoolLabel] = useState("");
+  const [savingPool, setSavingPool] = useState(false);
+
   const load = async () => {
     setLoading(true);
     try {
-      const [accts, setts, stat] = await Promise.all([
+      const [accts, setts, stat, pstat] = await Promise.all([
         fetch(`${apiBase()}/api/automation/email-accounts`, { headers: authHeader }).then(r => r.json()),
         fetch(`${apiBase()}/api/automation/settings`, { headers: authHeader }).then(r => r.json()),
         fetch(`${apiBase()}/api/automation/status`, { headers: authHeader }).then(r => r.json()),
+        fetch(`${apiBase()}/api/api-pools/status`, { headers: authHeader }).then(r => r.json()).catch(() => null),
       ]);
       setAccounts(accts);
       setSettings(setts);
       setStatus(stat);
+      if (pstat) setPoolStatus(pstat);
     } catch { setMsg({ type: "error", text: "Failed to load automation settings" }); }
     finally { setLoading(false); }
+  };
+
+  const openPoolPanel = async (provider: string) => {
+    setOpenPool(provider);
+    setNewPoolKey(""); setNewPoolLabel("");
+    try {
+      const r = await fetch(`${apiBase()}/api/api-pools/${provider}`, { headers: authHeader });
+      const d = await r.json().catch(() => ({ keys: [] }));
+      // API returns { id, label, masked } — normalize to our PoolKey shape
+      const normalized: PoolKey[] = (d.keys ?? []).map((k: any) => ({
+        id: String(k.id ?? ""),
+        label: k.label || "Key",
+        maskedKey: k.masked || k.maskedKey || "",
+      }));
+      setPoolKeys(normalized);
+    } catch { setPoolKeys([]); }
+  };
+
+  const addPoolKey = async (provider: string) => {
+    if (!newPoolKey.trim()) return;
+    setSavingPool(true);
+    try {
+      const r = await fetch(`${apiBase()}/api/api-pools/${provider}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeader },
+        body: JSON.stringify({ apiKey: newPoolKey.trim(), label: newPoolLabel.trim() || undefined }),
+      });
+      if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || "Failed to save"); }
+      setNewPoolKey(""); setNewPoolLabel("");
+      await openPoolPanel(provider);
+      const ps = await fetch(`${apiBase()}/api/api-pools/status`, { headers: authHeader }).then(r => r.json()).catch(() => null);
+      if (ps) setPoolStatus(ps);
+    } catch (e: any) { setMsg({ type: "error", text: e.message }); }
+    finally { setSavingPool(false); }
+  };
+
+  const removePoolKey = async (provider: string, id: string) => {
+    try {
+      const r = await fetch(`${apiBase()}/api/api-pools/${provider}/${id}`, { method: "DELETE", headers: authHeader });
+      if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || `Delete failed (${r.status})`); }
+      await openPoolPanel(provider);
+      const ps = await fetch(`${apiBase()}/api/api-pools/status`, { headers: authHeader }).then(r2 => r2.json()).catch(() => null);
+      if (ps) setPoolStatus(ps);
+    } catch (e: any) { setMsg({ type: "error", text: e.message }); }
   };
 
   useEffect(() => { load(); }, []);
@@ -2269,6 +2325,99 @@ function AutomationTab({ apiToken }: { apiToken: string }) {
             ))}
           </div>
         )}
+      </div>
+
+      {/* Data Sources — third-party API key pools */}
+      <div className="rounded-xl border border-border/50 overflow-hidden">
+        <div className="p-4 bg-muted/20 border-b border-border/50">
+          <h3 className="font-bold flex items-center gap-2"><Globe className="w-4 h-4 text-blue-600" /> Data Sources</h3>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Optional API keys to unlock more business directories. The hunter always uses free sources (OpenStreetMap, Yellow Pages, etc.) — adding keys here boosts the number of results per run.
+          </p>
+        </div>
+        <div className="divide-y divide-border/30">
+          {([
+            { id: "foursquare", name: "Foursquare Places", desc: "Best for restaurants, retail & nightlife. 1,000 free calls/day.", signupUrl: "https://developer.foursquare.com/", label: "API Key" },
+            { id: "tomtom",     name: "TomTom Search",    desc: "Strong global coverage across all business categories. 2,500 free calls/day.", signupUrl: "https://developer.tomtom.com/", label: "API Key" },
+            { id: "here",       name: "HERE Places",      desc: "Excellent coverage in Europe, Africa & Asia. 1,000 free calls/day.", signupUrl: "https://developer.here.com/", label: "API Key" },
+          ] as { id: string; name: string; desc: string; signupUrl: string; label: string }[]).map(src => {
+            const st = poolStatus?.[src.id as keyof typeof poolStatus];
+            const isOpen = openPool === src.id;
+            return (
+              <div key={src.id}>
+                <div className="p-4 flex items-center gap-3">
+                  <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${st?.active ? "bg-green-100" : "bg-muted/40"}`}>
+                    <Key className={`w-4 h-4 ${st?.active ? "text-green-600" : "text-muted-foreground"}`} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold text-sm flex items-center gap-2">
+                      {src.name}
+                      {st?.active
+                        ? <span className="text-xs text-green-700 bg-green-100 px-2 py-0.5 rounded-full">{st.envFallback ? "via env" : `${st.count} key${st.count !== 1 ? "s" : ""}`} · active</span>
+                        : <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full">not configured</span>
+                      }
+                    </div>
+                    <div className="text-xs text-muted-foreground">{src.desc}</div>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <a href={src.signupUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline flex items-center gap-1"><ExternalLink className="w-3 h-3" />Get key</a>
+                    <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => isOpen ? setOpenPool(null) : openPoolPanel(src.id)}>
+                      {isOpen ? "Close" : "Manage"}
+                    </Button>
+                  </div>
+                </div>
+                {isOpen && (
+                  <div className="px-4 pb-4 space-y-3 bg-muted/10 border-t border-border/30">
+                    {/* Existing keys */}
+                    <div className="pt-3 space-y-1">
+                      {poolKeys.length > 0 ? poolKeys.map(k => (
+                        <div key={k.id} className="flex items-center gap-2 text-sm">
+                          <Key className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+                          <span className="flex-1 font-mono text-xs text-muted-foreground">{k.maskedKey}</span>
+                          <span className="text-xs text-muted-foreground">{k.label}</span>
+                          <button className="text-xs text-destructive/70 hover:text-destructive" onClick={() => removePoolKey(src.id, k.id)}>
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      )) : (
+                        <p className="text-xs text-muted-foreground">
+                          {st?.envFallback
+                            ? "✓ Using a key from environment variables (read-only — manage it in Replit Secrets)."
+                            : "No keys stored yet. Add one below to activate this source."}
+                        </p>
+                      )}
+                    </div>
+                    {/* Add new key */}
+                    <div className="pt-2 space-y-2">
+                      <div className="grid grid-cols-2 gap-2">
+                        <Input
+                          className="h-8 text-sm font-mono"
+                          placeholder={`Paste ${src.label}`}
+                          value={newPoolKey}
+                          onChange={e => setNewPoolKey(e.target.value)}
+                        />
+                        <Input
+                          className="h-8 text-sm"
+                          placeholder="Label (optional)"
+                          value={newPoolLabel}
+                          onChange={e => setNewPoolLabel(e.target.value)}
+                        />
+                      </div>
+                      <Button
+                        size="sm" className="h-7 text-xs gap-1.5"
+                        disabled={savingPool || !newPoolKey.trim()}
+                        onClick={() => addPoolKey(src.id)}
+                      >
+                        {savingPool ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+                        Add Key
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {/* Last Run Summary */}
