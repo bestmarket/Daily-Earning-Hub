@@ -22,7 +22,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { LogOut, LayoutDashboard, Wrench, Users, MessageSquare, Link2, Copy, ExternalLink, Target, Send, Plus, Trash2, Mail, RefreshCw, CheckCircle2, Clock, AlertCircle, Key, Eye, EyeOff, ShieldCheck, Zap, CreditCard, Brain } from "lucide-react";
+import { LogOut, LayoutDashboard, Wrench, Users, MessageSquare, Link2, Copy, ExternalLink, Target, Send, Plus, Trash2, Mail, RefreshCw, CheckCircle2, Clock, AlertCircle, Key, Eye, EyeOff, ShieldCheck, Zap, CreditCard, Brain, MapPin, Navigation, Globe, Search } from "lucide-react";
 import { toast } from "sonner";
 import API_BASE from "@/lib/api";
 
@@ -854,6 +854,228 @@ function SummaryCard({ title, value, subtitle, icon }: { title: string, value: s
   );
 }
 
+// ─── Hunter Scraper Pool Section ──────────────────────────────────────────────
+
+type PoolKey = { id: string; label: string; masked: string; addedAt: string };
+type PoolState = { keys: PoolKey[]; envFallback: boolean; loading: boolean };
+
+const HUNTER_PROVIDERS = [
+  {
+    id: "foursquare",
+    label: "Foursquare Places API",
+    color: "from-rose-50 to-pink-50 border-rose-200",
+    badge: "bg-rose-100 text-rose-700",
+    icon: <MapPin className="w-5 h-5 text-rose-500" />,
+    desc: "~50 results per search. Free tier at location.foursquare.com/developer.",
+    hint: "Starts with fsq3…",
+    docsUrl: "https://location.foursquare.com/developer/",
+  },
+  {
+    id: "tomtom",
+    label: "TomTom Search API",
+    color: "from-orange-50 to-amber-50 border-orange-200",
+    badge: "bg-orange-100 text-orange-700",
+    icon: <Navigation className="w-5 h-5 text-orange-500" />,
+    desc: "~100 results per search. Free tier at developer.tomtom.com.",
+    hint: "32-character hex string",
+    docsUrl: "https://developer.tomtom.com/",
+  },
+  {
+    id: "here",
+    label: "HERE Places API",
+    color: "from-teal-50 to-green-50 border-teal-200",
+    badge: "bg-teal-100 text-teal-700",
+    icon: <Globe className="w-5 h-5 text-teal-500" />,
+    desc: "~100 results per search. Free tier at platform.here.com.",
+    hint: "From HERE Developer portal",
+    docsUrl: "https://platform.here.com/",
+  },
+];
+
+function HunterPoolSection({ token }: { token: string }) {
+  const authHeader = { Authorization: `Bearer ${token}` };
+  const [pools, setPools] = useState<Record<string, PoolState>>({
+    foursquare: { keys: [], envFallback: false, loading: true },
+    tomtom:     { keys: [], envFallback: false, loading: true },
+    here:       { keys: [], envFallback: false, loading: true },
+  });
+  const [addValues, setAddValues] = useState<Record<string, { key: string; label: string }>>({});
+  const [adding, setAdding] = useState<Record<string, boolean>>({});
+  const [visible, setVisible] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    HUNTER_PROVIDERS.forEach(({ id }) => {
+      fetch(`${API_BASE}/api/api-pools/${id}`, { headers: authHeader })
+        .then(r => r.json())
+        .then(data => setPools(p => ({ ...p, [id]: { keys: data.keys ?? [], envFallback: !!data.envFallback, loading: false } })))
+        .catch(() => setPools(p => ({ ...p, [id]: { ...p[id], loading: false } })));
+    });
+  }, []);
+
+  const handleAdd = async (providerId: string) => {
+    const { key, label } = addValues[providerId] ?? { key: "", label: "" };
+    if (!key.trim()) { toast.error("API key is required"); return; }
+    setAdding(a => ({ ...a, [providerId]: true }));
+    try {
+      const res = await fetch(`${API_BASE}/api/api-pools/${providerId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeader },
+        body: JSON.stringify({ apiKey: key.trim(), label: label.trim() || undefined }),
+      });
+      if (!res.ok) throw new Error();
+      const entry = await res.json();
+      setPools(p => ({
+        ...p,
+        [providerId]: {
+          ...p[providerId],
+          keys: [...p[providerId].keys, { id: entry.id, label: entry.label, masked: entry.masked, addedAt: new Date().toISOString() }],
+        },
+      }));
+      setAddValues(v => ({ ...v, [providerId]: { key: "", label: "" } }));
+      toast.success(`Key added to ${providerId}`);
+    } catch {
+      toast.error("Failed to add key");
+    } finally {
+      setAdding(a => ({ ...a, [providerId]: false }));
+    }
+  };
+
+  const handleDelete = async (providerId: string, id: string, label: string) => {
+    if (!confirm(`Remove "${label}"?`)) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/api-pools/${providerId}/${id}`, { method: "DELETE", headers: authHeader });
+      if (!res.ok) throw new Error();
+      setPools(p => ({ ...p, [providerId]: { ...p[providerId], keys: p[providerId].keys.filter(k => k.id !== id) } }));
+      toast.success("Key removed");
+    } catch {
+      toast.error("Failed to remove key");
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3 pt-2">
+        <div className="h-px flex-1 bg-border" />
+        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+          <Search className="w-3.5 h-3.5" /> Business Hunter — API Key Pools
+        </span>
+        <div className="h-px flex-1 bg-border" />
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Add multiple keys per provider — they rotate round-robin to multiply your free-tier quota.
+        Each additional key roughly adds that provider's per-key result cap to every search.
+      </p>
+
+      {HUNTER_PROVIDERS.map(provider => {
+        const state = pools[provider.id] ?? { keys: [], envFallback: false, loading: true };
+        const addVal = addValues[provider.id] ?? { key: "", label: "" };
+        const isAdding = adding[provider.id];
+        const showKey = visible[provider.id];
+
+        return (
+          <div key={provider.id} className={`rounded-2xl border bg-gradient-to-br ${provider.color} p-5 space-y-4`}>
+            {/* Header */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-white/70 border border-white flex items-center justify-center shadow-sm">
+                  {provider.icon}
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm">{provider.label}</h3>
+                  <p className="text-xs text-muted-foreground">{provider.desc}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {state.envFallback && (
+                  <Badge variant="outline" className="text-xs gap-1 text-amber-700 border-amber-300 bg-amber-50">
+                    <AlertCircle className="w-3 h-3" /> Env fallback
+                  </Badge>
+                )}
+                <Badge className={`${provider.badge} text-xs font-semibold`}>
+                  {state.loading ? "…" : `${state.keys.length} key${state.keys.length !== 1 ? "s" : ""}`}
+                </Badge>
+              </div>
+            </div>
+
+            {/* Existing keys list */}
+            {state.loading ? (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Loading…
+              </div>
+            ) : state.keys.length > 0 ? (
+              <div className="space-y-2">
+                {state.keys.map(k => (
+                  <div key={k.id} className="flex items-center gap-2 px-3 py-2 bg-white/80 rounded-xl border border-white shadow-sm">
+                    <Key className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                    <span className="text-xs font-semibold text-foreground shrink-0 min-w-[80px]">{k.label}</span>
+                    <span className="font-mono text-xs text-muted-foreground flex-1 truncate">{k.masked}</span>
+                    <Badge className="bg-green-100 text-green-700 border-green-200 text-xs gap-1 shrink-0">
+                      <CheckCircle2 className="w-3 h-3" /> Active
+                    </Badge>
+                    <Button
+                      variant="ghost" size="sm"
+                      className="h-6 px-2 text-xs text-destructive/60 hover:text-destructive shrink-0"
+                      onClick={() => handleDelete(provider.id, k.id, k.label)}
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground italic">No keys added yet — this provider won't be queried during hunts.</p>
+            )}
+
+            {/* Add key form */}
+            <div className="bg-white/60 rounded-xl border border-white/80 p-3 space-y-2">
+              <p className="text-xs font-semibold text-muted-foreground">Add a key</p>
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Input
+                    type={showKey ? "text" : "password"}
+                    placeholder={provider.hint}
+                    value={addVal.key}
+                    onChange={e => setAddValues(v => ({ ...v, [provider.id]: { ...addVal, key: e.target.value } }))}
+                    onKeyDown={e => e.key === "Enter" && handleAdd(provider.id)}
+                    className="font-mono text-sm h-9 pr-10 bg-white"
+                  />
+                  <button
+                    type="button"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    onClick={() => setVisible(v => ({ ...v, [provider.id]: !v[provider.id] }))}
+                  >
+                    {showKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+                <Input
+                  placeholder="Label (optional)"
+                  value={addVal.label}
+                  onChange={e => setAddValues(v => ({ ...v, [provider.id]: { ...addVal, label: e.target.value } }))}
+                  onKeyDown={e => e.key === "Enter" && handleAdd(provider.id)}
+                  className="text-sm h-9 w-36 bg-white"
+                />
+                <Button
+                  size="sm" className="h-9 gap-1.5 font-semibold shrink-0"
+                  onClick={() => handleAdd(provider.id)}
+                  disabled={!addVal.key.trim() || isAdding}
+                >
+                  {isAdding ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                  Add
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                <a href={provider.docsUrl} target="_blank" rel="noreferrer" className="underline underline-offset-2 hover:text-foreground">
+                  Get a free API key →
+                </a>
+              </p>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── API Keys Tab ─────────────────────────────────────────────────────────────
 
 type KeyStatus = { masked: string; set: boolean };
@@ -981,6 +1203,7 @@ function ApiKeysTab({ token }: { token: string }) {
         <div className="space-y-5">
           {KEY_GROUPS.map(group => (
             <div key={group.label} className={`rounded-2xl border bg-gradient-to-br ${group.color} p-5 space-y-4`}>
+
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 rounded-xl bg-white/70 border border-white flex items-center justify-center shadow-sm">
                   {group.icon}
@@ -1053,6 +1276,8 @@ function ApiKeysTab({ token }: { token: string }) {
           ))}
         </div>
       )}
+
+      <HunterPoolSection token={token} />
     </div>
   );
 }
