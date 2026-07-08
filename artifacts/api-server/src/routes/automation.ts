@@ -510,6 +510,7 @@ export async function runAutomationCycle(overrides?: {
     const biz = businesses[i];
     let analysis: any = null;
     let emailContent: { subject: string; body: string } | null = null;
+    let rawEmailVersion: { version?: string; subject: string; body: string } | null = null;
 
     // Scrape the website once per prospect — reused by both the scoring block and
     // the fallback email block below to avoid fetching the same URL twice.
@@ -523,48 +524,81 @@ export async function runAutomationCycle(overrides?: {
     if (settings.autoScore) {
       try {
         const autoPrompt = `You are a senior business analyst at DevStudio, a custom software development agency run by Daniel.
-Analyze this ${biz.category} business and generate analysis + a high-converting cold email.
+Analyze this ${biz.category} business and generate analysis + THREE personalized cold email versions (A, B, C) with different angles.
 Business: ${biz.businessName}, Location: ${biz.city} ${biz.country}, Owner: ${biz.ownerName || "the owner"}, Website: ${biz.website || "No website"}, Pain Point: ${biz.painPoint || "manual processes"}${siteContext}
 
-For the cold email, follow this exact framework — it converts:
-1. ONE specific observation about their actual business (from site content if available — name a real service, product, or gap you noticed)
-2. Name the exact problem that costs them money or time  
-3. One-line solution: what DevStudio would build
-4. Single CTA: A low-pressure question inviting them to reply by email — e.g. "Does any of this apply to you? Just hit reply." Do NOT mention a call at all.
-RULES: Max 100 words body. No "I hope this finds you well". No buzzwords. Sound like a real person, not a template. Subject line must be curiosity-driven, 6 words max, no ALL CAPS. Sign off as "Daniel, DevStudio".
+EMAIL RULES — apply to all three versions:
+• Subject: generate 5 candidates, pick the best. Max 6 words, curiosity-driven, no clickbait, no ALL CAPS, no "FREE"/"URGENT"/"!!". Each version uses a different angle.
+  Good subject examples: "A few ideas for your website" / "Quick thought on your bookings" / "We looked at [BusinessName]'s site"
+• Opening: "Hi ${biz.businessName || "there"}," — nothing before the body.
+• Body: Reference ONLY 2–3 specific findings that actually exist in the analysis below. Never invent problems.
+  Include this line naturally in every version's body: "We put together a free website analysis for you: {{REPORT_URL}}"
+• Soft CTA: Never pushy. e.g. "If any of this is useful, just reply to this email."
+• Sign-off: "Best regards,\\nDaniel\\nDevStudio"
+• Max 180 words total per version. Sound like a real person wrote it at 9am, not a marketing template.
+• FORBIDDEN words/phrases: "guaranteed results", "limited time", "buy now", "act fast", "amazing opportunity", "earn more instantly", "I hope this finds you well", "I wanted to reach out", "game-changer", "leverage", "synergy", "boost your sales", "skyrocket", "Don't miss out"
 
-Return ONLY JSON: { "analysis": { "websiteScore":<0-100>,"leadScore":<0-100>,"conversionScore":<0-100>,"mobileScore":<0-100>,"seoScore":<0-100>,"growthPotential":<0-100>,"summary":"string","projectType":"string","estimatedValue":{"min":<n>,"max":<n>},"deliveryWeeks":{"min":<n>,"max":<n>},"recommendedFeatures":["string"],"issues":[{"title":"string","description":"string","priority":"high|medium|low"}],"opportunities":[{"title":"string","impact":"string","effort":"low|medium|high"}],"checks":{"responsiveDesign":false,"sslCertificate":false,"modernUI":false,"whatsappButton":false,"contactForm":false,"bookingSystem":false,"onlineOrdering":false,"paymentIntegration":false,"customerPortal":false,"membershipArea":false,"blog":false,"seoBasics":false,"analytics":false,"socialMedia":false,"emailCapture":false,"liveChat":false,"aiChatbot":false,"callToAction":false,"trustElements":false}}, "email":{"subject":"string","body":"string"} }`;
+Return ONLY JSON: { "analysis": { "websiteScore":<0-100>,"leadScore":<0-100>,"conversionScore":<0-100>,"mobileScore":<0-100>,"seoScore":<0-100>,"growthPotential":<0-100>,"summary":"string","projectType":"string","estimatedValue":{"min":<n>,"max":<n>},"deliveryWeeks":{"min":<n>,"max":<n>},"recommendedFeatures":["string"],"issues":[{"title":"string","description":"string","priority":"high|medium|low"}],"opportunities":[{"title":"string","impact":"string","effort":"low|medium|high"}],"checks":{"responsiveDesign":false,"sslCertificate":false,"modernUI":false,"whatsappButton":false,"contactForm":false,"bookingSystem":false,"onlineOrdering":false,"paymentIntegration":false,"customerPortal":false,"membershipArea":false,"blog":false,"seoBasics":false,"analytics":false,"socialMedia":false,"emailCapture":false,"liveChat":false,"aiChatbot":false,"callToAction":false,"trustElements":false}}, "emailVersions":[{"version":"A","subject":"string","body":"string"},{"version":"B","subject":"string","body":"string"},{"version":"C","subject":"string","body":"string"}] }`;
         const genText = await generateText(autoPrompt);
         const genData = parseJSON(genText);
         analysis = genData.analysis;
-        emailContent = genData.email
-          ? {
-              subject: fillPlaceholders(genData.email.subject || ""),
-              body: fillPlaceholders(genData.email.body || ""),
-            }
-          : null;
+        // Rotate A/B/C by prospect index so every batch sends different versions
+        const versions: { version?: string; subject: string; body: string }[] = genData.emailVersions || [];
+        rawEmailVersion = versions[i % 3] ?? versions[0] ?? (genData.email ? genData.email : null);
         runStats.scored++;
       } catch { runStats.errors++; }
     }
 
-    // If autoScore is off (or the scoring prompt failed to return email content),
-    // generate a lightweight email so autoEmail can still function.
-    // Without this, emailContent stays null and no emails are ever sent when
-    // autoScore is disabled. Reuses the siteContent already fetched above.
+    // Create report first so the URL can be embedded in the email body text.
+    // This is additive — a failure here never blocks the email send.
+    let reportUrl = "";
+    let reportSectionHtml = "";
+    if (analysis) {
+      try {
+        const result = await createReport({
+          businessName: biz.businessName,
+          website: biz.website || "",
+          analysisData: analysis,
+          baseUrl: getAgencyBaseUrl(),
+        });
+        reportUrl = result.reportUrl;
+        reportSectionHtml = buildReportEmailSection(reportUrl, biz.businessName);
+      } catch { /* report creation never blocks the email send */ }
+    }
+
+    // Resolve the {{REPORT_URL}} placeholder the AI wrote in the body
+    if (rawEmailVersion) {
+      const body = (rawEmailVersion.body || "").replace(/\{\{REPORT_URL\}\}/g, reportUrl);
+      emailContent = {
+        subject: fillPlaceholders(rawEmailVersion.subject || ""),
+        body: fillPlaceholders(body),
+      };
+    }
+
+    // If autoScore is off (or the scoring prompt failed), generate a lightweight
+    // email so autoEmail can still function. No report URL since there's no analysis.
     if (!emailContent && settings.autoEmail && biz.email) {
       try {
-        const emailOnlyPrompt = `Write a short, high-converting cold email from Daniel at DevStudio (a custom software agency) to ${biz.businessName}, a ${biz.category || "business"} in ${biz.city}.${biz.painPoint ? `\nKnown pain point: ${biz.painPoint}` : ""}${siteContext}
+        const emailOnlyPrompt = `Write THREE personalized cold email versions (A, B, C) from Daniel at DevStudio (a custom software agency) to ${biz.businessName}, a ${biz.category || "business"} in ${biz.city}.${biz.painPoint ? `\nKnown pain point: ${biz.painPoint}` : ""}${siteContext}
 
-Framework:
-1. ONE specific observation about their business or category
-2. The exact problem it causes (lost time / revenue)
-3. One-line fix: what DevStudio would build
-4. CTA: "Does any of this apply? Just hit reply." No call mention.
-RULES: Max 100 words body. No filler phrases. Curiosity-driven subject (6 words max). Sign off "Daniel, DevStudio".
-Return ONLY JSON: { "subject":"string","body":"string" }`;
+Each version takes a different angle and must:
+• Subject: max 6 words, curiosity-driven, different per version. No clickbait, no ALL CAPS.
+• Opening: "Hi ${biz.businessName || "there"}," — natural only.
+• Body: 1 specific observation about their business/category, the exact problem it causes, a one-line fix, and a soft reply CTA. Under 180 words.
+• Sign-off: "Best regards,\\nDaniel\\nDevStudio"
+• FORBIDDEN: "guaranteed results", "limited time", "buy now", "act fast", "amazing opportunity", "I hope this finds you well", "I wanted to reach out", "game-changer"
+Return ONLY JSON: { "emailVersions":[{"version":"A","subject":"string","body":"string"},{"version":"B","subject":"string","body":"string"},{"version":"C","subject":"string","body":"string"}] }`;
         const emailText = await generateText(emailOnlyPrompt);
         const emailData = parseJSON(emailText);
-        if (emailData?.subject && emailData?.body) {
+        const fallbackVersions: { version?: string; subject: string; body: string }[] = emailData?.emailVersions || [];
+        const fallback = fallbackVersions[i % 3] ?? fallbackVersions[0];
+        if (fallback?.subject && fallback?.body) {
+          emailContent = {
+            subject: fillPlaceholders(fallback.subject),
+            body: fillPlaceholders(fallback.body),
+          };
+        } else if (emailData?.subject && emailData?.body) {
+          // backward compat if AI returns old single-version format
           emailContent = {
             subject: fillPlaceholders(emailData.subject),
             body: fillPlaceholders(emailData.body),
@@ -577,22 +611,6 @@ Return ONLY JSON: { "subject":"string","body":"string" }`;
       businessName: biz.businessName, email: biz.email, city: biz.city,
       score: biz.softwareNeedScore, scored: !!analysis, emailed: false,
     });
-
-    // Create a public analysis report if we scored this business, then inject the
-    // URL into the outreach email so the recipient can click through to their report.
-    // This is additive — a failure here never blocks the email send.
-    let reportSectionHtml = "";
-    if (analysis) {
-      try {
-        const { reportUrl } = await createReport({
-          businessName: biz.businessName,
-          website: biz.website || "",
-          analysisData: analysis,
-          baseUrl: getAgencyBaseUrl(),
-        });
-        reportSectionHtml = buildReportEmailSection(reportUrl, biz.businessName);
-      } catch { /* report creation never blocks the email send */ }
-    }
 
     // 3. Send email — use DB accounts if available, otherwise fall back to Brevo
     const canSend = settings.autoEmail && biz.email && emailContent;

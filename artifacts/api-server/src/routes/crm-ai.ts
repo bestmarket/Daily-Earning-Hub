@@ -941,24 +941,30 @@ STEP 2 — Pick the AI agent type that fits best:
 - "support": handles complaints, order status — best for e-commerce, pharmacies
 - "social": auto-replies to DMs and comments — best for brand-heavy businesses with active social
 
-STEP 3 — Write the cold outreach following this high-converting framework:
-If pitchType includes "ai_agent": Lead with their PAIN (missed calls, slow replies, lost bookings, zero follow-up) → name the COST (lost customers, revenue walking out the door) → one sentence: what the AI agent does to fix it → CTA: low-pressure reply invite. MAX 100 words. No fluff.
-If pitchType is "website": Lead with one specific observation from their real site/category → name the pain → one sentence fix → CTA.
-RULES: Max 100 words body. NEVER say "I hope this finds you well" or "I wanted to reach out". No buzzwords. Subject line: max 6 words, curiosity-driven. Sign off as "Daniel, DevStudio". Sound like a real human at 9am, not a template.
+STEP 3 — Generate THREE personalized cold email versions (A, B, C), each with a different angle:
+If pitchType includes "ai_agent": Focus on their pain (missed calls/bookings/DMs), cost, and one sentence on the AI agent solution.
+If pitchType is "website": Focus on a specific real observation from the analysis, the pain, and the fix.
+Each version must follow these rules:
+• Subject: max 6 words, curiosity-driven, different angle per version. No clickbait, no ALL CAPS.
+• Opening: "Hi ${businessName}," or "Hi ${ownerName || "there"}," — natural greeting only.
+• Body: Mention ONLY 2–3 real findings from the analysis. Never invent problems.
+  Include this line naturally in the body: "We put together a free website analysis for you: {{REPORT_URL}}"
+• Soft CTA: e.g. "If this sounds relevant, just reply to this email." NEVER pushy. No call mentions.
+• Sign-off: "Best regards,\\nDaniel\\n${agencyName || "DevStudio"}"
+• Under 180 words total. Sound like a real person at 9am, not a marketing campaign.
+• FORBIDDEN: "guaranteed results", "limited time", "buy now", "act fast", "amazing opportunity", "earn more instantly", "I hope this finds you well", "I wanted to reach out", "game-changer", "leverage", "synergy", "boost your sales", "skyrocket", "Don't miss out"
 
 Return ONLY a JSON object with this exact structure:
-{ "analysis":{"websiteScore":<0-100>,"leadScore":<0-100>,"conversionScore":<0-100>,"mobileScore":<0-100>,"seoScore":<0-100>,"growthPotential":<0-100>,"checks":{"responsiveDesign":<bool>,"sslCertificate":<bool>,"modernUI":<bool>,"whatsappButton":<bool>,"contactForm":<bool>,"bookingSystem":<bool>,"onlineOrdering":<bool>,"paymentIntegration":<bool>,"customerPortal":<bool>,"membershipArea":<bool>,"blog":<bool>,"seoBasics":<bool>,"analytics":<bool>,"socialMedia":<bool>,"emailCapture":<bool>,"liveChat":<bool>,"aiChatbot":<bool>,"callToAction":<bool>,"trustElements":<bool>},"issues":[{"title":"string","description":"string","priority":"high|medium|low"}],"opportunities":[{"title":"string","impact":"string","effort":"low|medium|high"}],"recommendedFeatures":["string"],"projectType":"Small Website|Medium Web App|Large SaaS","estimatedValue":{"min":<number>,"max":<number>},"deliveryWeeks":{"min":<number>,"max":<number>},"summary":"2-3 sentence plain English summary"}, "aiAgent":{"type":"receptionist|booking|sales|support|social","score":<0-100>,"fitReason":"1 sentence why this agent type fits their business","topPain":"the #1 pain this agent solves for them right now"}, "pitchType":"ai_agent|website|both", "email":{"subject":"string","body":"string"},"whatsapp":"string","linkedin":"string" }
+{ "analysis":{"websiteScore":<0-100>,"leadScore":<0-100>,"conversionScore":<0-100>,"mobileScore":<0-100>,"seoScore":<0-100>,"growthPotential":<0-100>,"checks":{"responsiveDesign":<bool>,"sslCertificate":<bool>,"modernUI":<bool>,"whatsappButton":<bool>,"contactForm":<bool>,"bookingSystem":<bool>,"onlineOrdering":<bool>,"paymentIntegration":<bool>,"customerPortal":<bool>,"membershipArea":<bool>,"blog":<bool>,"seoBasics":<bool>,"analytics":<bool>,"socialMedia":<bool>,"emailCapture":<bool>,"liveChat":<bool>,"aiChatbot":<bool>,"callToAction":<bool>,"trustElements":<bool>},"issues":[{"title":"string","description":"string","priority":"high|medium|low"}],"opportunities":[{"title":"string","impact":"string","effort":"low|medium|high"}],"recommendedFeatures":["string"],"projectType":"Small Website|Medium Web App|Large SaaS","estimatedValue":{"min":<number>,"max":<number>},"deliveryWeeks":{"min":<number>,"max":<number>},"summary":"2-3 sentence plain English summary"}, "aiAgent":{"type":"receptionist|booking|sales|support|social","score":<0-100>,"fitReason":"1 sentence why this agent type fits their business","topPain":"the #1 pain this agent solves for them right now"}, "pitchType":"ai_agent|website|both", "emailVersions":[{"version":"A","subject":"string","body":"string"},{"version":"B","subject":"string","body":"string"},{"version":"C","subject":"string","body":"string"}],"whatsapp":"string","linkedin":"string" }
 Be specific to a ${category} business in ${city}. If no website, give website scores of 5-25.`;
   try {
     const text = await generateText(prompt);
     const data = parseJSON(text);
-    // Fill any bracket placeholders the AI left in generated email/messages
-    if (data?.email?.body) data.email.body = fillPlaceholders(data.email.body);
-    if (data?.email?.subject) data.email.subject = fillPlaceholders(data.email.subject);
+    // Fill bracket placeholders in non-email fields
     if (data?.whatsapp) data.whatsapp = fillPlaceholders(data.whatsapp);
     if (data?.linkedin) data.linkedin = fillPlaceholders(data.linkedin);
 
-    // Create a public analysis report for this prospect (additive — never blocks)
+    // Create a public analysis report first so the URL can replace {{REPORT_URL}} in the email body
     if (data?.analysis) {
       try {
         const { reportId, reportUrl } = await createReport({
