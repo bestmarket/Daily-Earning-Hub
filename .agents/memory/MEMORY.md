@@ -2,3 +2,4 @@
 - [Email credential validation](email-credential-validation.md) — provider format checks (Gmail 16-char app password, SendGrid/Resend fixed usernames) must be enforced in both API routes and admin UI forms to stay in sync.
 - [Gemini key routing](gemini-key-routing.md) — AI test endpoint is /api/ai/recommend not /api/tools-ai/recommend; Gemini keys rotate through a pool, integration key always wins.
 - [Multi-source business scraper](business-scraper-architecture.md) — 15 directory sources in parallel, no API keys; AI fallback removed (always failed email verification); DNS checks must be batched or they self-DOS at scale.
+- [Public Report System](report-system.md) — each analysis auto-creates a /report/:reportId page; reports table in websiteReportsTable; AGENCY_URL env sets report link domain in emails.

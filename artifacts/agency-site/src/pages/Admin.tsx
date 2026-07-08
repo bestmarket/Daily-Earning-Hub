@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -28,6 +28,7 @@ import {
   CheckCircle2, Clock, Wrench, ExternalLink, Calculator, Brain, TrendingUp, Users,
   Key, Eye, EyeOff, ShieldCheck, Zap, Package, LayoutDashboard,
   Bot, Settings, Globe, Radar, PlayCircle, StopCircle, MailCheck, X,
+  Bell, FileText, BarChart2,
 } from "lucide-react";
 import { toast as sonnerToast } from "sonner";
 import API_BASE from "@/lib/api";
@@ -81,6 +82,46 @@ export default function Admin() {
   const [password, setPassword] = useState("");
   const [apiToken, setApiToken] = useState<string>(() => localStorage.getItem("ds_api_token") ?? "");
   const loginMutation = useAdminLogin();
+
+  // ── Report-view notifications ──────────────────────────────────────────────
+  const [reportNotifs, setReportNotifs] = useState<{ reportId: string; businessName: string; lastViewed: string; totalViews: number }[]>([]);
+  // Track which reportIds we've already toasted so we don't spam duplicates.
+  // Using a ref (not state) because mutations should not trigger re-renders.
+  // When the admin opens the Reports tab and marks-notified, we delete those
+  // IDs from the ref so that a genuinely new future view will re-fire a toast.
+  const seenNotifIds = useRef<Set<string>>(new Set());
+
+  const clearSeenNotifIds = (ids: string[]) => {
+    ids.forEach(id => seenNotifIds.current.delete(id));
+  };
+
+  useEffect(() => {
+    if (!authed || !apiToken) return;
+    const fetchNotifs = async () => {
+      try {
+        const r = await fetch(`${API_BASE}/api/reports/admin/notifications`, {
+          headers: { Authorization: `Bearer ${apiToken}` },
+        });
+        if (!r.ok) return;
+        const data: { reportId: string; businessName: string; lastViewed: string; totalViews: number }[] = await r.json();
+        if (!Array.isArray(data)) return;
+        // Fire a sonner toast for any truly new notification we haven't toasted yet
+        for (const n of data) {
+          if (!seenNotifIds.current.has(n.reportId)) {
+            seenNotifIds.current.add(n.reportId);
+            sonnerToast(`${n.businessName} viewed their report`, {
+              description: `Total views: ${n.totalViews}`,
+              duration: 7000,
+            });
+          }
+        }
+        setReportNotifs(data);
+      } catch { /* silent */ }
+    };
+    fetchNotifs();
+    const interval = setInterval(fetchNotifs, 30_000);
+    return () => clearInterval(interval);
+  }, [authed, apiToken]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const login = () => {
     if (!password) return;
@@ -190,6 +231,14 @@ export default function Admin() {
             <TabsTrigger value="settings" className="gap-1.5 text-xs sm:text-sm">
               <Settings className="w-3.5 h-3.5" /> Settings
             </TabsTrigger>
+            <TabsTrigger value="reports" className="relative gap-1.5 text-xs sm:text-sm">
+              <BarChart2 className="w-3.5 h-3.5" /> Reports
+              {reportNotifs.length > 0 && (
+                <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center leading-none">
+                  {reportNotifs.length > 9 ? "9+" : reportNotifs.length}
+                </span>
+              )}
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="overview"><OverviewTab apiToken={apiToken} /></TabsContent>
@@ -200,8 +249,170 @@ export default function Admin() {
           <TabsContent value="ai"><AISetupTab apiToken={apiToken} /></TabsContent>
           <TabsContent value="automation"><AutomationTab apiToken={apiToken} /></TabsContent>
           <TabsContent value="settings"><SiteSettingsTab apiToken={apiToken} /></TabsContent>
+          <TabsContent value="reports">
+            <ReportAnalyticsTab
+              apiToken={apiToken}
+              onViewed={() => {
+                // Mark all current notifications as read when the tab is opened
+                if (reportNotifs.length === 0) return;
+                const ids = reportNotifs.map(n => n.reportId);
+                fetch(`${API_BASE}/api/reports/admin/mark-notified`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiToken}` },
+                  body: JSON.stringify({ reportIds: ids }),
+                }).catch(() => {});
+                // Clear these IDs from our seen-set so a genuinely new view on
+                // the same report will fire a fresh toast notification next time.
+                clearSeenNotifIds(ids);
+                setReportNotifs([]);
+              }}
+            />
+          </TabsContent>
         </Tabs>
       </div>
+    </div>
+  );
+}
+
+// ─── Report Analytics Tab ─────────────────────────────────────────────────────
+
+function ReportAnalyticsTab({ apiToken, onViewed }: { apiToken: string; onViewed: () => void }) {
+  const [reports, setReports] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const hasCalled = useState(false);
+
+  useEffect(() => {
+    onViewed(); // mark notifications as seen when tab is opened
+    fetch(`${API_BASE}/api/reports/admin/all`, {
+      headers: { Authorization: `Bearer ${apiToken}` },
+    })
+      .then(r => r.json())
+      .then(data => { if (Array.isArray(data)) setReports(data); })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [apiToken]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const updateStatus = async (reportId: string, updates: { status?: string; proposalRequested?: boolean }) => {
+    try {
+      await fetch(`${API_BASE}/api/reports/admin/${reportId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiToken}` },
+        body: JSON.stringify(updates),
+      });
+      setReports(prev => prev.map(r => r.reportId === reportId ? { ...r, ...updates } : r));
+    } catch { /* silent */ }
+  };
+
+  const fmtDate = (iso: string | null) => {
+    if (!iso) return "—";
+    return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  };
+
+  return (
+    <div className="space-y-5">
+      {/* Header */}
+      <div className="rounded-2xl bg-gradient-to-r from-violet-600 to-indigo-600 p-5 text-white">
+        <div className="flex items-center gap-3 mb-2">
+          <div className="w-9 h-9 bg-white/20 rounded-xl flex items-center justify-center">
+            <BarChart2 className="w-5 h-5" />
+          </div>
+          <div>
+            <h2 className="font-extrabold text-base">Report Analytics</h2>
+            <p className="text-white/75 text-xs">Track every public analysis report sent to prospects</p>
+          </div>
+        </div>
+        <div className="grid grid-cols-3 gap-3 mt-3 text-center">
+          {[
+            { v: reports.length, l: "Total Reports" },
+            { v: reports.filter(r => r.firstViewed).length, l: "Reports Viewed" },
+            { v: reports.reduce((sum, r) => sum + (r.totalViews || 0), 0), l: "Total Views" },
+          ].map(s => (
+            <div key={s.l} className="bg-white/10 rounded-xl p-2">
+              <div className="font-extrabold text-lg">{s.v}</div>
+              <div className="text-white/70 text-xs">{s.l}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-12 text-muted-foreground">
+          <RefreshCw className="w-5 h-5 animate-spin mr-2" /> Loading reports…
+        </div>
+      ) : reports.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-border/60 p-12 text-center text-muted-foreground">
+          <FileText className="w-10 h-10 mx-auto mb-3 opacity-40" />
+          <p className="font-semibold mb-1">No reports yet</p>
+          <p className="text-sm">Reports are created automatically when you analyse a prospect in AI Hunter. They'll appear here once generated.</p>
+        </div>
+      ) : (
+        <div className="rounded-2xl border border-border/60 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border/60 bg-muted/30">
+                  <th className="text-left p-3 font-semibold text-xs text-muted-foreground">Business</th>
+                  <th className="text-left p-3 font-semibold text-xs text-muted-foreground">Generated</th>
+                  <th className="text-center p-3 font-semibold text-xs text-muted-foreground">Viewed</th>
+                  <th className="text-center p-3 font-semibold text-xs text-muted-foreground">Views</th>
+                  <th className="text-left p-3 font-semibold text-xs text-muted-foreground">Last Viewed</th>
+                  <th className="text-center p-3 font-semibold text-xs text-muted-foreground">Proposal</th>
+                  <th className="text-center p-3 font-semibold text-xs text-muted-foreground">Status</th>
+                  <th className="text-center p-3 font-semibold text-xs text-muted-foreground">Link</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/40">
+                {reports.map(r => (
+                  <tr key={r.reportId} className="hover:bg-muted/20 transition-colors">
+                    <td className="p-3">
+                      <div className="font-semibold text-sm">{r.businessName || "—"}</div>
+                      {r.website && <div className="text-xs text-muted-foreground truncate max-w-[140px]">{r.website}</div>}
+                    </td>
+                    <td className="p-3 text-xs text-muted-foreground whitespace-nowrap">{fmtDate(r.createdAt)}</td>
+                    <td className="p-3 text-center">
+                      {r.firstViewed
+                        ? <CheckCircle2 className="w-4 h-4 text-green-600 mx-auto" />
+                        : <Clock className="w-4 h-4 text-muted-foreground/40 mx-auto" />}
+                    </td>
+                    <td className="p-3 text-center">
+                      <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${r.totalViews > 0 ? "bg-violet-100 text-violet-700" : "bg-muted text-muted-foreground"}`}>
+                        {r.totalViews}
+                      </span>
+                    </td>
+                    <td className="p-3 text-xs text-muted-foreground whitespace-nowrap">{fmtDate(r.lastViewed)}</td>
+                    <td className="p-3 text-center">
+                      <button
+                        onClick={() => updateStatus(r.reportId, { proposalRequested: !r.proposalRequested })}
+                        className={`text-xs px-2 py-1 rounded-full border transition-colors ${r.proposalRequested ? "bg-green-100 text-green-700 border-green-300" : "bg-muted text-muted-foreground border-border/40 hover:bg-muted/80"}`}
+                      >
+                        {r.proposalRequested ? "✓ Sent" : "Pending"}
+                      </button>
+                    </td>
+                    <td className="p-3 text-center">
+                      <select
+                        value={r.status || "active"}
+                        onChange={e => updateStatus(r.reportId, { status: e.target.value })}
+                        className="text-xs border border-border/60 rounded-lg px-2 py-1 bg-background"
+                      >
+                        <option value="active">Active</option>
+                        <option value="proposal_sent">Proposal Sent</option>
+                        <option value="client_replied">Client Replied</option>
+                        <option value="won">Won 🏆</option>
+                      </select>
+                    </td>
+                    <td className="p-3 text-center">
+                      <a href={r.reportUrl} target="_blank" rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
+                        <ExternalLink className="w-3 h-3" /> View
+                      </a>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

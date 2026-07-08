@@ -825,6 +825,9 @@ function AIHunterPanel({ onImport }: { onImport: (prospects: Omit<Prospect, "id"
           if (generated.email) prospect.generatedEmail = generated.email;
           if (generated.whatsapp) prospect.generatedWhatsApp = generated.whatsapp;
           if (generated.linkedin) prospect.generatedLinkedIn = generated.linkedin;
+          // Store report link so it can be injected when the email is sent
+          if (generated.reportId) prospect.reportId = generated.reportId;
+          if (generated.reportUrl) prospect.reportUrl = generated.reportUrl;
           if (generated.analysis?.estimatedValue) {
             prospect.expectedValue = Math.round((generated.analysis.estimatedValue.min + generated.analysis.estimatedValue.max) / 2);
           }
@@ -1474,6 +1477,8 @@ function OutreachPanel({ prospect, onUpdate }: { prospect: Prospect; onUpdate: (
           subject: prospect.generatedEmail.subject,
           body: prospect.generatedEmail.body,
           prospectName: prospect.businessName,
+          // Pass the report URL so the backend appends the report section to the email
+          reportUrl: (prospect as any).reportUrl ?? undefined,
         }),
       });
       const d = await r.json().catch(() => ({}));

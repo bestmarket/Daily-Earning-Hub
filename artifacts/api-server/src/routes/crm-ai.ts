@@ -6,6 +6,7 @@ import { getGeminiAI } from "./api-keys";
 import { db, emailAccountsTable, emailTrackingTable } from "@workspace/db";
 import { eq, inArray, sql } from "drizzle-orm";
 import { scrapeBusinessDirectories } from "../lib/business-scrapers";
+import { createReport, buildReportEmailSection, getAgencyBaseUrl } from "./reports";
 
 const router = Router();
 
@@ -476,8 +477,9 @@ router.post("/crm/test-email", async (req, res) => {
 // ─── Send email to prospect ───────────────────────────────────────────────────
 
 router.post("/crm/send-email", async (req, res) => {
-  const { to, subject, body, prospectName, accountId } = req.body as {
-    to: string; subject: string; body: string; prospectName?: string; accountId?: number;
+  // reportUrl is optional — injected by CRM when a report was generated for this prospect
+  const { to, subject, body, prospectName, accountId, reportUrl } = req.body as {
+    to: string; subject: string; body: string; prospectName?: string; accountId?: number; reportUrl?: string;
   };
 
   if (!to || !subject || !body) {
@@ -485,12 +487,15 @@ router.post("/crm/send-email", async (req, res) => {
     return;
   }
 
+  // Build optional report section that gets appended to the email HTML
+  const reportSection = reportUrl ? buildReportEmailSection(reportUrl, prospectName || to) : "";
+
   try {
     const baseUrl = getBaseUrl(req);
     const trackingId = await createTracking(to, subject, "outreach");
     const htmlBody = body.split("\n").map((line) => (line.trim() ? `<p style="margin:0 0 12px;line-height:1.6;">${line}</p>` : "<br/>")).join("");
     const { acct } = await sendWithFailover((a) => {
-      const rawHtml = `<div style="font-family:Georgia,serif;max-width:600px;margin:0 auto;padding:24px;color:#1a1a2e;">${htmlBody}<hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0;"/><p style="color:#6b7280;font-size:13px;">${a.fromName}</p></div>`;
+      const rawHtml = `<div style="font-family:Georgia,serif;max-width:600px;margin:0 auto;padding:24px;color:#1a1a2e;">${htmlBody}<hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0;"/><p style="color:#6b7280;font-size:13px;">${a.fromName}</p></div>${reportSection}`;
       return {
         from: `"${a.fromName}" <${a.fromEmail || a.user}>`,
         to, subject, text: body,
@@ -952,6 +957,21 @@ Be specific to a ${category} business in ${city}. If no website, give website sc
     if (data?.email?.subject) data.email.subject = fillPlaceholders(data.email.subject);
     if (data?.whatsapp) data.whatsapp = fillPlaceholders(data.whatsapp);
     if (data?.linkedin) data.linkedin = fillPlaceholders(data.linkedin);
+
+    // Create a public analysis report for this prospect (additive — never blocks)
+    if (data?.analysis) {
+      try {
+        const { reportId, reportUrl } = await createReport({
+          businessName: businessName || "",
+          website: website || "",
+          analysisData: data.analysis,
+          baseUrl: getAgencyBaseUrl(req),
+        });
+        data.reportId = reportId;
+        data.reportUrl = reportUrl;
+      } catch { /* report creation failure must never break email generation */ }
+    }
+
     res.json(data);
   } catch (err: any) {
     res.status(500).json({ error: err.message });

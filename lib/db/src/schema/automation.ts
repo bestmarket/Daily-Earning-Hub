@@ -113,3 +113,24 @@ export type EmailTracking = typeof emailTrackingTable.$inferSelect;
 export type FollowUpQueue = typeof followUpQueueTable.$inferSelect;
 export type InboxReply = typeof inboxRepliesTable.$inferSelect;
 export type ExternalApiKey = typeof externalApiKeysTable.$inferSelect;
+
+// ─── Website Report (public client-facing audit reports) ──────────────────────
+
+export const websiteReportsTable = pgTable("website_reports", {
+  reportId: text("report_id").primaryKey(),
+  businessName: text("business_name").notNull().default(""),
+  website: text("website").notNull().default(""),
+  analysisData: jsonb("analysis_data").default("{}"),
+  reportUrl: text("report_url").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  firstViewed: timestamp("first_viewed"),
+  lastViewed: timestamp("last_viewed"),
+  totalViews: integer("total_views").notNull().default(0),
+  proposalRequested: boolean("proposal_requested").notNull().default(false),
+  // status: active | proposal_sent | client_replied | won
+  status: text("status").notNull().default("active"),
+  // dedup admin notifications — only fire when lastViewed > lastNotifiedAt
+  lastNotifiedAt: timestamp("last_notified_at"),
+});
+
+export type WebsiteReport = typeof websiteReportsTable.$inferSelect;

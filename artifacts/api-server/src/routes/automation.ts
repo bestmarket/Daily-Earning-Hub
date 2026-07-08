@@ -8,6 +8,7 @@ import { getGeminiAI } from "./api-keys";
 import { sendMail as brevoSendMail, brevoTransporter } from "../lib/brevo-mailer";
 import { requireAdmin } from "../lib/admin-auth";
 import { scrapeBusinessDirectories } from "../lib/business-scrapers";
+import { createReport, buildReportEmailSection, getAgencyBaseUrl } from "./reports";
 
 const router = Router();
 
@@ -577,6 +578,22 @@ Return ONLY JSON: { "subject":"string","body":"string" }`;
       score: biz.softwareNeedScore, scored: !!analysis, emailed: false,
     });
 
+    // Create a public analysis report if we scored this business, then inject the
+    // URL into the outreach email so the recipient can click through to their report.
+    // This is additive — a failure here never blocks the email send.
+    let reportSectionHtml = "";
+    if (analysis) {
+      try {
+        const { reportUrl } = await createReport({
+          businessName: biz.businessName,
+          website: biz.website || "",
+          analysisData: analysis,
+          baseUrl: getAgencyBaseUrl(),
+        });
+        reportSectionHtml = buildReportEmailSection(reportUrl, biz.businessName);
+      } catch { /* report creation never blocks the email send */ }
+    }
+
     // 3. Send email — use DB accounts if available, otherwise fall back to Brevo
     const canSend = settings.autoEmail && biz.email && emailContent;
     if (canSend) {
@@ -591,7 +608,7 @@ Return ONLY JSON: { "subject":"string","body":"string" }`;
             to: biz.email,
             subject: emailContent!.subject,
             text: emailContent!.body,
-            html: `<div style="font-family:Georgia,serif;max-width:600px;margin:0 auto;padding:24px;color:#1a1a2e;">${html}<hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0;"/><p style="color:#6b7280;font-size:13px;">${acct.fromName}</p></div>`,
+            html: `<div style="font-family:Georgia,serif;max-width:600px;margin:0 auto;padding:24px;color:#1a1a2e;">${html}<hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0;"/><p style="color:#6b7280;font-size:13px;">${acct.fromName}</p></div>${reportSectionHtml}`,
           });
         } else {
           // Brevo fallback — uses server-level credentials from env or DB
@@ -599,7 +616,7 @@ Return ONLY JSON: { "subject":"string","body":"string" }`;
             to: biz.email,
             subject: emailContent!.subject,
             text: emailContent!.body,
-            html: `<div style="font-family:Georgia,serif;max-width:600px;margin:0 auto;padding:24px;color:#1a1a2e;">${html}<hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0;"/><p style="color:#6b7280;font-size:13px;">DevStudio</p></div>`,
+            html: `<div style="font-family:Georgia,serif;max-width:600px;margin:0 auto;padding:24px;color:#1a1a2e;">${html}<hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0;"/><p style="color:#6b7280;font-size:13px;">DevStudio</p></div>${reportSectionHtml}`,
           });
         }
         runStats.emailed++;
