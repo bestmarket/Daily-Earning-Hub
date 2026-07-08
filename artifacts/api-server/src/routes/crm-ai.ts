@@ -495,7 +495,7 @@ router.post("/crm/send-email", async (req, res) => {
     const trackingId = await createTracking(to, subject, "outreach");
     const htmlBody = body.split("\n").map((line) => (line.trim() ? `<p style="margin:0 0 12px;line-height:1.6;">${line}</p>` : "<br/>")).join("");
     const { acct } = await sendWithFailover((a) => {
-      const rawHtml = `<div style="font-family:Georgia,serif;max-width:600px;margin:0 auto;padding:24px;color:#1a1a2e;">${htmlBody}<hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0;"/><p style="color:#6b7280;font-size:13px;">${a.fromName}</p></div>${reportSection}`;
+      const rawHtml = `<div style="font-family:Georgia,serif;max-width:600px;margin:0 auto;padding:24px;color:#1a1a2e;">${htmlBody}<hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0;"/><p style="color:#6b7280;font-size:13px;">${a.fromName}</p>${reportSection}</div>`;
       return {
         from: `"${a.fromName}" <${a.fromEmail || a.user}>`,
         to, subject, text: body,

@@ -608,7 +608,7 @@ Return ONLY JSON: { "subject":"string","body":"string" }`;
             to: biz.email,
             subject: emailContent!.subject,
             text: emailContent!.body,
-            html: `<div style="font-family:Georgia,serif;max-width:600px;margin:0 auto;padding:24px;color:#1a1a2e;">${html}<hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0;"/><p style="color:#6b7280;font-size:13px;">${acct.fromName}</p></div>${reportSectionHtml}`,
+            html: `<div style="font-family:Georgia,serif;max-width:600px;margin:0 auto;padding:24px;color:#1a1a2e;">${html}<hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0;"/><p style="color:#6b7280;font-size:13px;">${acct.fromName}</p>${reportSectionHtml}</div>`,
           });
         } else {
           // Brevo fallback — uses server-level credentials from env or DB
@@ -616,7 +616,7 @@ Return ONLY JSON: { "subject":"string","body":"string" }`;
             to: biz.email,
             subject: emailContent!.subject,
             text: emailContent!.body,
-            html: `<div style="font-family:Georgia,serif;max-width:600px;margin:0 auto;padding:24px;color:#1a1a2e;">${html}<hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0;"/><p style="color:#6b7280;font-size:13px;">DevStudio</p></div>${reportSectionHtml}`,
+            html: `<div style="font-family:Georgia,serif;max-width:600px;margin:0 auto;padding:24px;color:#1a1a2e;">${html}<hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0;"/><p style="color:#6b7280;font-size:13px;">DevStudio</p>${reportSectionHtml}</div>`,
           });
         }
         runStats.emailed++;
