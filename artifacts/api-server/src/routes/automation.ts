@@ -134,9 +134,17 @@ async function filterLiveProspects(prospects: any[]): Promise<any[]> {
 function fillPlaceholders(
   text: string,
   senderName = "Daniel",
-  agencyName = "DevStudio"
+  agencyName = "DevStudio",
+  agencyWebsite = "",
+  agencyEmail = ""
 ): string {
   return text
+    // Curly-brace style used in AI-generated templates
+    .replace(/\{\{AgencyName\}\}/gi, agencyName)
+    .replace(/\{\{SenderName\}\}/gi, senderName)
+    .replace(/\{\{Website\}\}/gi, agencyWebsite)
+    .replace(/\{\{AgencyEmail\}\}/gi, agencyEmail)
+    // Square-bracket style (legacy)
     .replace(/\[(?:your\s+)?name\]/gi, senderName)
     .replace(/\[sender(?:\s+name)?\]/gi, senderName)
     .replace(/\[(?:agency|company|your\s+(?:agency|company))(?:\s+name)?\]/gi, agencyName)
@@ -147,6 +155,15 @@ function fillPlaceholders(
       if (inner.includes("agency") || inner.includes("company") || inner.includes("studio")) return agencyName;
       return match;
     });
+}
+
+/** Build a personalised sender signature from account data. */
+function buildSignature(fromName: string, agencyName: string, agencyWebsite: string, fromEmail: string): string {
+  const lines = [`Best regards,`, fromName || agencyName];
+  if (agencyName && agencyName !== fromName) lines.push(agencyName);
+  if (agencyWebsite) lines.push(agencyWebsite);
+  if (fromEmail) lines.push(fromEmail);
+  return lines.join("\n");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -422,11 +439,16 @@ export async function runAutomationCycle(overrides?: {
           continue;
         }
 
-        const followUpBody = fillPlaceholders(
-          `Hi again,\n\nI sent a note last week about helping ${item.businessName} with a custom software solution — wanted to make sure it didn't get buried.\n\nDoes any of it sound relevant to where you're at right now? Just hit reply — happy to answer questions over email.\n\nDaniel\nDevStudio`
-        );
+        const fuAcct = followUpAccounts.length > 0 ? followUpAccounts[fuAcctIdx % followUpAccounts.length] : null;
+        const fuSenderName = fuAcct?.fromName || process.env.AGENCY_NAME || "Daniel";
+        const fuAgencyName = process.env.AGENCY_NAME || "DevStudio";
+        const fuAgencyWebsite = getAgencyBaseUrl();
+        const fuAgencyEmail = fuAcct?.fromEmail || fuAcct?.user || "";
+        const fuSignature = buildSignature(fuSenderName, fuAgencyName, fuAgencyWebsite, fuAgencyEmail);
+
+        const followUpBody = `Hi ${item.businessName} Team,\n\nI sent you a note a few days ago — just wanted to make sure it didn't get buried.\n\nWe put together a free website report for ${item.businessName} with some specific observations. It's still available if you'd like to take a look.\n\nNo pressure at all — if the timing isn't right, just ignore this. But if any of it sounds relevant, feel free to reply and I'll answer any questions over email.\n\n${fuSignature}`;
         const followUpSubject = `Re: ${item.originalSubject}`;
-        const html = followUpBody.split("\n").map(l => l.trim() ? `<p style="margin:0 0 12px;line-height:1.6;">${l}</p>` : "<br/>").join("");
+        const html = followUpBody.split("\n").map(l => l.trim() ? `<p style="margin:0 0 12px;line-height:1.7;font-size:15px;">${l}</p>` : "<br/>").join("");
 
         try {
           if (followUpAccounts.length > 0) {
@@ -438,7 +460,7 @@ export async function runAutomationCycle(overrides?: {
               to: item.prospectEmail,
               subject: followUpSubject,
               text: followUpBody,
-              html: `<div style="font-family:Georgia,serif;max-width:600px;margin:0 auto;padding:24px;color:#1a1a2e;">${html}</div>`,
+              html: `<div style="font-family:Georgia,serif;max-width:600px;margin:0 auto;padding:24px 32px;color:#1a1a2e;background:#ffffff;">${html}</div>`,
             });
           } else {
             await brevoSendMail({ to: item.prospectEmail, subject: followUpSubject, text: followUpBody, html });
@@ -521,24 +543,72 @@ export async function runAutomationCycle(overrides?: {
       ? `\nReal website content scraped from ${biz.website}:\n"""\n${siteContent}\n"""`
       : (biz.website ? `\nWebsite ${biz.website} could not be scraped.` : "\nNo website.");
 
+    // Resolve sender details early — used in both the prompt and at send time.
+    // senderName  = the person's name (from the email account "From Name" field).
+    // agencyName  = the business/brand name (AGENCY_NAME env var → fallback "DevStudio").
+    // These are intentionally separate: senderName is "Daniel", agencyName is "DevStudio".
+    const senderAcct = accounts.length > 0 ? accounts[accountIndex % accounts.length] : null;
+    const senderName = senderAcct?.fromName || process.env.AGENCY_NAME || "Daniel";
+    const agencyName = process.env.AGENCY_NAME || "DevStudio";
+    const agencyEmail = senderAcct?.fromEmail || senderAcct?.user || "";
+    const agencyWebsite = getAgencyBaseUrl();
+    const ownerGreeting = biz.ownerName ? `Hi ${biz.ownerName},` : `Hi ${biz.businessName || "there"} Team,`;
+
     if (settings.autoScore) {
       try {
-        const autoPrompt = `You are a senior business analyst at DevStudio, a custom software development agency run by Daniel.
-Analyze this ${biz.category} business and generate analysis + THREE personalized cold email versions (A, B, C) with different angles.
-Business: ${biz.businessName}, Location: ${biz.city} ${biz.country}, Owner: ${biz.ownerName || "the owner"}, Website: ${biz.website || "No website"}, Pain Point: ${biz.painPoint || "manual processes"}${siteContext}
+        const autoPrompt = `You are a senior business analyst at a custom software development agency.
+Analyze this ${biz.category || "local"} business and return a JSON object with a full analysis and THREE personalised cold email versions (A, B, C).
 
-EMAIL RULES — apply to all three versions:
-• Subject: generate 5 candidates, pick the best. Max 6 words, curiosity-driven, no clickbait, no ALL CAPS, no "FREE"/"URGENT"/"!!". Each version uses a different angle.
-  Good subject examples: "A few ideas for your website" / "Quick thought on your bookings" / "We looked at [BusinessName]'s site"
-• Opening: "Hi ${biz.businessName || "there"}," — nothing before the body.
-• Body: Reference ONLY 2–3 specific findings that actually exist in the analysis below. Never invent problems.
-  Include this line naturally in every version's body: "We put together a free website analysis for you: {{REPORT_URL}}"
-• Soft CTA: Never pushy. e.g. "If any of this is useful, just reply to this email."
-• Sign-off: "Best regards,\\nDaniel\\nDevStudio"
-• Max 180 words total per version. Sound like a real person wrote it at 9am, not a marketing template.
-• FORBIDDEN words/phrases: "guaranteed results", "limited time", "buy now", "act fast", "amazing opportunity", "earn more instantly", "I hope this finds you well", "I wanted to reach out", "game-changer", "leverage", "synergy", "boost your sales", "skyrocket", "Don't miss out"
+BUSINESS DETAILS:
+- Name: ${biz.businessName}
+- Owner: ${biz.ownerName || "unknown"}
+- Location: ${biz.city}${biz.country ? ", " + biz.country : ""}
+- Website: ${biz.website || "No website"}
+- Known pain point: ${biz.painPoint || "not specified"}
+${siteContext}
 
-Return ONLY JSON: { "analysis": { "websiteScore":<0-100>,"leadScore":<0-100>,"conversionScore":<0-100>,"mobileScore":<0-100>,"seoScore":<0-100>,"growthPotential":<0-100>,"summary":"string","projectType":"string","estimatedValue":{"min":<n>,"max":<n>},"deliveryWeeks":{"min":<n>,"max":<n>},"recommendedFeatures":["string"],"issues":[{"title":"string","description":"string","priority":"high|medium|low"}],"opportunities":[{"title":"string","impact":"string","effort":"low|medium|high"}],"checks":{"responsiveDesign":false,"sslCertificate":false,"modernUI":false,"whatsappButton":false,"contactForm":false,"bookingSystem":false,"onlineOrdering":false,"paymentIntegration":false,"customerPortal":false,"membershipArea":false,"blog":false,"seoBasics":false,"analytics":false,"socialMedia":false,"emailCapture":false,"liveChat":false,"aiChatbot":false,"callToAction":false,"trustElements":false}}, "emailVersions":[{"version":"A","subject":"string","body":"string"},{"version":"B","subject":"string","body":"string"},{"version":"C","subject":"string","body":"string"}] }`;
+EMAIL STRUCTURE — all three versions must follow this exact structure:
+
+1. SUBJECT LINE
+   Generate 5 candidate subject lines first (internally), then select the single best one.
+   Rules: max 7 words, curiosity-driven, no clickbait, no ALL CAPS, no "FREE"/"URGENT"/"!!" or "!!".
+   Each version (A/B/C) must use a DIFFERENT angle.
+   Good examples: "A few ideas for ${biz.businessName}'s website" / "Quick website review for ${biz.businessName}" / "We noticed a few things on your site"
+
+2. OPENING
+   Use exactly: "${ownerGreeting}"
+   Then one natural sentence about having reviewed their website or business — no filler.
+
+3. PERSONALISED OBSERVATIONS (body paragraph 1)
+   Mention ONLY 2–3 specific issues that actually exist in the analysis (e.g. missing booking system, no email capture, weak SEO, slow mobile, no chatbot).
+   NEVER mention a problem that wasn't detected. Be specific — name the actual issue.
+
+4. BUSINESS IMPACT (body paragraph 2)
+   One or two sentences on what those gaps cost them in real terms (missed enquiries, lost trust, etc.).
+   No exaggerated claims. No promises of "guaranteed results".
+
+5. REPORT LINK (required in every version)
+   Include naturally in the body: "We put together a free personalised website report for you — you can view it here: {{REPORT_URL}}"
+   This line must appear verbatim in every version (A, B, and C).
+
+6. SOFT CTA
+   One sentence only. Never pushy. Examples: "If any of this resonates, just reply to this email." / "Happy to answer any questions over email."
+
+7. SIGNATURE
+   End every version with exactly:
+   Best regards,
+   ${senderName}
+   ${agencyName}${agencyWebsite ? "\n   " + agencyWebsite : ""}${agencyEmail ? "\n   " + agencyEmail : ""}
+
+EMAIL RULES (apply to all three versions):
+• Under 180 words total per version (count every word including the signature).
+• Read like a real person wrote it at 9am, not a marketing template.
+• No sales clichés or generic AI phrases.
+• FORBIDDEN phrases: "guaranteed results", "limited time offer", "buy now", "act fast", "amazing opportunity", "earn more instantly", "I hope this finds you well", "I wanted to reach out", "game-changer", "leverage", "synergy", "boost your sales", "skyrocket", "Don't miss out", "transform your business", "revolutionary", "cutting-edge"
+• A/B/C must have meaningfully different tones: A = professional/direct, B = friendly/conversational, C = insight-led/analytical.
+
+Return ONLY valid JSON (no markdown, no prose):
+{ "analysis": { "websiteScore":<0-100>,"leadScore":<0-100>,"conversionScore":<0-100>,"mobileScore":<0-100>,"seoScore":<0-100>,"growthPotential":<0-100>,"summary":"string","projectType":"string","estimatedValue":{"min":<n>,"max":<n>},"deliveryWeeks":{"min":<n>,"max":<n>},"recommendedFeatures":["string"],"issues":[{"title":"string","description":"string","priority":"high|medium|low"}],"opportunities":[{"title":"string","impact":"string","effort":"low|medium|high"}],"checks":{"responsiveDesign":false,"sslCertificate":false,"modernUI":false,"whatsappButton":false,"contactForm":false,"bookingSystem":false,"onlineOrdering":false,"paymentIntegration":false,"customerPortal":false,"membershipArea":false,"blog":false,"seoBasics":false,"analytics":false,"socialMedia":false,"emailCapture":false,"liveChat":false,"aiChatbot":false,"callToAction":false,"trustElements":false}}, "emailVersions":[{"version":"A","subject":"string","body":"string"},{"version":"B","subject":"string","body":"string"},{"version":"C","subject":"string","body":"string"}] }`;
         const genText = await generateText(autoPrompt);
         const genData = parseJSON(genText);
         analysis = genData.analysis;
@@ -566,42 +636,67 @@ Return ONLY JSON: { "analysis": { "websiteScore":<0-100>,"leadScore":<0-100>,"co
       } catch { /* report creation never blocks the email send */ }
     }
 
-    // Resolve the {{REPORT_URL}} placeholder the AI wrote in the body
+    // Resolve the {{REPORT_URL}} placeholder the AI wrote in the body.
+    // If report creation failed (reportUrl is blank), strip the entire report line so the
+    // email doesn't contain a broken/empty link — the HTML report section will also be absent.
     if (rawEmailVersion) {
-      const body = (rawEmailVersion.body || "").replace(/\{\{REPORT_URL\}\}/g, reportUrl);
+      let body = rawEmailVersion.body || "";
+      if (reportUrl) {
+        body = body.replace(/\{\{REPORT_URL\}\}/g, reportUrl);
+      } else {
+        // Remove any sentence containing the placeholder so the email reads naturally
+        body = body
+          .replace(/[^\n.!?]*\{\{REPORT_URL\}\}[^\n]*/g, "")
+          .replace(/\n{3,}/g, "\n\n")
+          .trim();
+      }
       emailContent = {
-        subject: fillPlaceholders(rawEmailVersion.subject || ""),
-        body: fillPlaceholders(body),
+        subject: fillPlaceholders(rawEmailVersion.subject || "", senderName, agencyName, agencyWebsite, agencyEmail),
+        body: fillPlaceholders(body, senderName, agencyName, agencyWebsite, agencyEmail),
       };
     }
 
     // If autoScore is off (or the scoring prompt failed), generate a lightweight
-    // email so autoEmail can still function. No report URL since there's no analysis.
+    // email so autoEmail can still function.
     if (!emailContent && settings.autoEmail && biz.email) {
       try {
-        const emailOnlyPrompt = `Write THREE personalized cold email versions (A, B, C) from Daniel at DevStudio (a custom software agency) to ${biz.businessName}, a ${biz.category || "business"} in ${biz.city}.${biz.painPoint ? `\nKnown pain point: ${biz.painPoint}` : ""}${siteContext}
+        const signatureBlock = buildSignature(senderName, agencyName, agencyWebsite, agencyEmail);
+        const reportLine = reportUrl
+          ? `We put together a free personalised website report for you — you can view it here: ${reportUrl}`
+          : "";
+        const emailOnlyPrompt = `Write THREE personalised cold email versions (A, B, C) from ${senderName} at ${agencyName} (a custom software agency) to ${biz.businessName}, a ${biz.category || "business"} in ${biz.city}.${biz.painPoint ? `\nKnown pain point: ${biz.painPoint}` : ""}${siteContext}
 
-Each version takes a different angle and must:
-• Subject: max 6 words, curiosity-driven, different per version. No clickbait, no ALL CAPS.
-• Opening: "Hi ${biz.businessName || "there"}," — natural only.
-• Body: 1 specific observation about their business/category, the exact problem it causes, a one-line fix, and a soft reply CTA. Under 180 words.
-• Sign-off: "Best regards,\\nDaniel\\nDevStudio"
-• FORBIDDEN: "guaranteed results", "limited time", "buy now", "act fast", "amazing opportunity", "I hope this finds you well", "I wanted to reach out", "game-changer"
-Return ONLY JSON: { "emailVersions":[{"version":"A","subject":"string","body":"string"},{"version":"B","subject":"string","body":"string"},{"version":"C","subject":"string","body":"string"}] }`;
+EMAIL STRUCTURE — follow this for all three versions:
+
+1. SUBJECT LINE: Generate 5 candidates internally, select the best one. Max 7 words, curiosity-driven, no clickbait, no ALL CAPS. Each version (A/B/C) uses a DIFFERENT angle.
+2. OPENING: "${ownerGreeting}" then one natural sentence — no filler.
+3. OBSERVATIONS: 2–3 specific findings from the website/category (missing booking, no contact form, weak SEO, etc.). Never invent problems.
+4. IMPACT: 1–2 sentences on what those gaps cost them in real terms.
+${reportLine ? `5. REPORT LINK: Include this line exactly: "${reportLine}"` : ""}
+${reportLine ? "6." : "5."} SOFT CTA: One sentence only, never pushy. E.g. "If any of this resonates, just reply to this email."
+${reportLine ? "7." : "6."} SIGNATURE: End with exactly:\n${signatureBlock}
+
+RULES:
+• Under 180 words total per version.
+• Sound like a real person, not a marketing template.
+• A = professional/direct, B = friendly/conversational, C = insight-led/analytical.
+• FORBIDDEN: "guaranteed results", "limited time offer", "buy now", "act fast", "amazing opportunity", "earn more instantly", "I hope this finds you well", "I wanted to reach out", "game-changer", "leverage", "synergy", "boost your sales", "skyrocket", "Don't miss out", "transform your business", "revolutionary"
+
+Return ONLY valid JSON: { "emailVersions":[{"version":"A","subject":"string","body":"string"},{"version":"B","subject":"string","body":"string"},{"version":"C","subject":"string","body":"string"}] }`;
         const emailText = await generateText(emailOnlyPrompt);
         const emailData = parseJSON(emailText);
         const fallbackVersions: { version?: string; subject: string; body: string }[] = emailData?.emailVersions || [];
         const fallback = fallbackVersions[i % 3] ?? fallbackVersions[0];
         if (fallback?.subject && fallback?.body) {
           emailContent = {
-            subject: fillPlaceholders(fallback.subject),
-            body: fillPlaceholders(fallback.body),
+            subject: fillPlaceholders(fallback.subject, senderName, agencyName, agencyWebsite, agencyEmail),
+            body: fillPlaceholders(fallback.body, senderName, agencyName, agencyWebsite, agencyEmail),
           };
         } else if (emailData?.subject && emailData?.body) {
           // backward compat if AI returns old single-version format
           emailContent = {
-            subject: fillPlaceholders(emailData.subject),
-            body: fillPlaceholders(emailData.body),
+            subject: fillPlaceholders(emailData.subject, senderName, agencyName, agencyWebsite, agencyEmail),
+            body: fillPlaceholders(emailData.body, senderName, agencyName, agencyWebsite, agencyEmail),
           };
         }
       } catch { runStats.errors++; }
@@ -615,26 +710,43 @@ Return ONLY JSON: { "emailVersions":[{"version":"A","subject":"string","body":"s
     // 3. Send email — use DB accounts if available, otherwise fall back to Brevo
     const canSend = settings.autoEmail && biz.email && emailContent;
     if (canSend) {
-      const html = emailContent!.body.split("\n").map(l => l.trim() ? `<p style="margin:0 0 12px;line-height:1.6;">${l}</p>` : "<br/>").join("");
+      /** Convert plain-text body to minimal HTML paragraphs. */
+      const bodyHtml = emailContent!.body
+        .split("\n")
+        .map(l => l.trim() ? `<p style="margin:0 0 12px;line-height:1.7;font-size:15px;">${l}</p>` : "<br/>")
+        .join("");
+
+      /** Signature block shown in HTML at the bottom of the body. */
+      const buildSigHtml = (name: string, website: string, email: string) => {
+        const lines = [name];
+        if (website) lines.push(`<a href="${website}" style="color:#6d28d9;text-decoration:none;">${website}</a>`);
+        if (email) lines.push(`<a href="mailto:${email}" style="color:#6d28d9;text-decoration:none;">${email}</a>`);
+        return `<p style="margin:24px 0 0;font-size:13px;color:#6b7280;line-height:1.6;">${lines.join("<br/>")}</p>`;
+      };
+
       try {
         if (accounts.length > 0) {
           const acct = accounts[accountIndex % accounts.length];
           accountIndex++;
+          const acctWebsite = agencyWebsite;
+          const acctEmail = acct.fromEmail || acct.user || "";
+          const sigHtml = buildSigHtml(acct.fromName || agencyName, acctWebsite, acctEmail);
           const transporter = makeTransporter(acct);
           await transporter.sendMail({
             from: `"${acct.fromName}" <${acct.fromEmail || acct.user}>`,
             to: biz.email,
             subject: emailContent!.subject,
             text: emailContent!.body,
-            html: `<div style="font-family:Georgia,serif;max-width:600px;margin:0 auto;padding:24px;color:#1a1a2e;">${html}<hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0;"/><p style="color:#6b7280;font-size:13px;">${acct.fromName}</p>${reportSectionHtml}</div>`,
+            html: `<div style="font-family:Georgia,serif;max-width:600px;margin:0 auto;padding:24px 32px;color:#1a1a2e;background:#ffffff;">${bodyHtml}<hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0;"/>${sigHtml}${reportSectionHtml}</div>`,
           });
         } else {
           // Brevo fallback — uses server-level credentials from env or DB
+          const sigHtml = buildSigHtml(agencyName, agencyWebsite, agencyEmail);
           await brevoSendMail({
             to: biz.email,
             subject: emailContent!.subject,
             text: emailContent!.body,
-            html: `<div style="font-family:Georgia,serif;max-width:600px;margin:0 auto;padding:24px;color:#1a1a2e;">${html}<hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0;"/><p style="color:#6b7280;font-size:13px;">DevStudio</p>${reportSectionHtml}</div>`,
+            html: `<div style="font-family:Georgia,serif;max-width:600px;margin:0 auto;padding:24px 32px;color:#1a1a2e;background:#ffffff;">${bodyHtml}<hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0;"/>${sigHtml}${reportSectionHtml}</div>`,
           });
         }
         runStats.emailed++;
@@ -757,7 +869,7 @@ Write a short reply email (max 80 words, no filler, no "I hope this finds you we
 - not_interested → wish them well briefly, no pressure
 - objection → address their concern directly, invite them to share more
 
-Sign off: "Daniel, DevStudio". Sound human.
+Sign off: "${process.env.AGENCY_NAME || "DevStudio"}". Sound human.
 Return ONLY JSON: { "classification": "...", "response": "..." }`;
 
   try {
