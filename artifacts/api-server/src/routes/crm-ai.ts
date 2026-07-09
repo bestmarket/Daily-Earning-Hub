@@ -335,15 +335,15 @@ function getEnvEmailAccount(): typeof emailAccountsTable.$inferSelect | null {
     fromName: process.env.SMTP_FROM_NAME || process.env.AGENCY_NAME || "DevStudio",
     fromEmail: process.env.SMTP_FROM_EMAIL || user,
     imapEnabled: false,
-    imapHost: null,
-    imapPort: null,
+    imapHost: "",
+    imapPort: 993,
     active: true,
     sentCount: 0,
     dailyLimit: 80,
     sentToday: 0,
-    lastSentDay: null,
+    lastSentDay: "",
     consecutiveFailures: 0,
-    lastError: null,
+    lastError: "",
     lastErrorAt: null,
     autoPaused: false,
     createdAt: now,
@@ -489,9 +489,9 @@ router.post("/crm/email-accounts", async (req, res) => {
     const newId = await kvNextId();
     const acct: KvAccount = {
       id: newId, ...values,
-      imapEnabled: false, imapHost: null, imapPort: null,
-      sentToday: 0, lastSentDay: null, consecutiveFailures: 0,
-      lastError: null, lastErrorAt: null, autoPaused: false, createdAt: now,
+      imapEnabled: false, imapHost: "", imapPort: 993,
+      sentToday: 0, lastSentDay: "", consecutiveFailures: 0,
+      lastError: "", lastErrorAt: null, autoPaused: false, createdAt: now,
     };
     accounts.push(acct);
     await kvWriteAccounts(accounts);

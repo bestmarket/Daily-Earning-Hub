@@ -553,9 +553,9 @@ export async function runAutomationCycle(overrides?: {
         password: smtpPass,
         fromName: process.env.SMTP_FROM_NAME || process.env.AGENCY_NAME || "DevStudio",
         fromEmail: process.env.SMTP_FROM_EMAIL || smtpUser,
-        imapEnabled: false, imapHost: null, imapPort: null,
+        imapEnabled: false, imapHost: "", imapPort: 993,
         active: true, sentCount: 0, dailyLimit: 80, sentToday: 0,
-        lastSentDay: null, consecutiveFailures: 0, lastError: null,
+        lastSentDay: "", consecutiveFailures: 0, lastError: "",
         lastErrorAt: null, autoPaused: false, createdAt: now,
       }];
     }

@@ -57,6 +57,8 @@ interface Prospect {
   aiAgentFitReason?: string;
   aiAgentTopPain?: string;
   pitchType?: "ai_agent" | "website" | "both";
+  reportId?: string;
+  reportUrl?: string;
 }
 
 interface HuntedBusiness {

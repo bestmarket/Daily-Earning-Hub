@@ -20,12 +20,13 @@ Start order: **API Server first**, then the front-end sites (agency-site proxies
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only; run by `scripts/post-merge.sh` on merge)
 
-## Setup status (last verified 2026-07-07)
+## Setup status (last verified 2026-07-09)
 
 - ✅ `pnpm install` completed — all workspace dependencies installed
 - ✅ DB schema pushed — `lib/db` schema applied to the Replit-managed PostgreSQL instance
-- ✅ Managed artifact workflows configured — agency-site (19242), api-server (8080), tools4biz (3000)
-- ⚠️ `ADMIN_PASSWORD` secret not set — api-server falls back to `SESSION_SECRET` (works, but set a real password for the admin panels)
+- ✅ Workflows configured — `API Server` (8080, console), `Start application` (5000, webview), `Tools4Biz` (3000, console)
+- ✅ `ADMIN_PASSWORD` secret set — admin panels on agency-site `/admin` and tools4biz `/admin` are accessible
+- ✅ TypeScript clean — `pnpm run typecheck` passes across all workspace packages
 - ⚠️ `GOOGLE_GENERATIVE_AI_API_KEY` not yet set — AI analysis and email generation will return 500s without it
 
 ## Stack
