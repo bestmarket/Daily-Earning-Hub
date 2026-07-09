@@ -9,6 +9,27 @@ import { sendMail as brevoSendMail, brevoTransporter } from "../lib/brevo-mailer
 import { requireAdmin } from "../lib/admin-auth";
 import { scrapeBusinessDirectories } from "../lib/business-scrapers";
 import { createReport, buildReportEmailSection, getAgencyBaseUrl } from "./reports";
+import { kvGetJson, kvSetJson } from "../lib/replit-kv";
+
+// ─── KV fallback helpers for email accounts (used when DB is unreachable) ──────
+const KV_ACCOUNTS_KEY = "EMAIL_ACCOUNTS";
+const KV_NEXT_ID_KEY  = "EMAIL_ACCOUNT_COUNTER"; // must match crm-ai.ts to avoid ID collisions
+type KvAccount = typeof emailAccountsTable.$inferSelect;
+
+async function kvReadAccounts(): Promise<KvAccount[]> {
+  return (await kvGetJson<KvAccount[]>(KV_ACCOUNTS_KEY)) ?? [];
+}
+async function kvWriteAccounts(accounts: KvAccount[]): Promise<void> {
+  await kvSetJson(KV_ACCOUNTS_KEY, accounts);
+}
+async function kvNextId(): Promise<number> {
+  const cur = (await kvGetJson<number>(KV_NEXT_ID_KEY)) ?? 1000;
+  await kvSetJson(KV_NEXT_ID_KEY, cur + 1);
+  return cur + 1;
+}
+function kvMaskPassword(a: KvAccount) {
+  return { ...a, password: "••••••••" };
+}
 
 const router = Router();
 
@@ -181,9 +202,17 @@ async function getOrCreateSettings(): Promise<typeof automationSettingsTable.$in
 
 // ─── Email Accounts ───────────────────────────────────────────────────────────
 
-router.get("/automation/email-accounts", async (_req, res) => {
-  const accounts = await db.select().from(emailAccountsTable).orderBy(emailAccountsTable.id);
-  res.json(accounts.map(maskPassword));
+router.get("/automation/email-accounts", requireAdmin, async (_req, res) => {
+  try {
+    const accounts = await db.select().from(emailAccountsTable).orderBy(emailAccountsTable.id);
+    // Keep KV in sync so production reads stay fresh
+    kvWriteAccounts(accounts).catch(() => {});
+    res.json(accounts.map(maskPassword));
+  } catch {
+    // DB unavailable — serve from KV
+    const accounts = await kvReadAccounts();
+    res.json(accounts.map(kvMaskPassword));
+  }
 });
 
 function cleanPassword(password: string): string {
@@ -203,72 +232,134 @@ function validateCredentials(provider: string, cleanedPassword: string, user: st
   return null;
 }
 
-router.post("/automation/email-accounts", async (req, res) => {
+router.post("/automation/email-accounts", requireAdmin, async (req, res) => {
   const { label, provider, host, port, secure, user, password, fromName, fromEmail, imapEnabled, imapHost, imapPort } = req.body;
   if (!user) { res.status(400).json({ error: "user (email address) is required" }); return; }
   if (!password || !password.trim()) { res.status(400).json({ error: "Password / API key is required" }); return; }
   const cleanedPassword = cleanPassword(password);
-  const validationError = validateCredentials(provider || "gmail", cleanedPassword, user);
+  const validationError = validateCredentials(provider || "smtp", cleanedPassword, user);
   if (validationError) { res.status(400).json({ error: validationError }); return; }
-  const inserted = await db.insert(emailAccountsTable).values({
+  const values = {
     label: label || user,
-    provider: provider || "gmail",
+    provider: provider || "smtp",
     host: host || "smtp.gmail.com",
     port: port || 587,
     secure: secure ?? false,
     user: user.trim(),
-    password: cleanPassword(password),
+    password: cleanedPassword,
     fromName: fromName || "DevStudio",
     fromEmail: fromEmail || "",
     imapEnabled: imapEnabled ?? false,
     imapHost: imapHost || "imap.gmail.com",
     imapPort: imapPort || 993,
     active: true,
-  }).returning();
-  res.json(maskPassword(inserted[0]));
+  };
+  try {
+    const inserted = await db.insert(emailAccountsTable).values(values).returning();
+    // Keep KV in sync
+    const all = await db.select().from(emailAccountsTable).orderBy(emailAccountsTable.id).catch(() => []);
+    kvWriteAccounts(all).catch(() => {});
+    res.json(maskPassword(inserted[0]));
+  } catch {
+    // DB unavailable — save to KV
+    const accounts = await kvReadAccounts();
+    const now = new Date();
+    const newId = await kvNextId();
+    const acct: KvAccount = {
+      id: newId, ...values,
+      sentCount: 0, dailyLimit: 80, sentToday: 0,
+      lastSentDay: "", consecutiveFailures: 0, lastError: "",
+      lastErrorAt: null, autoPaused: false, createdAt: now,
+    };
+    accounts.push(acct);
+    await kvWriteAccounts(accounts);
+    res.json(kvMaskPassword(acct));
+  }
 });
 
-router.put("/automation/email-accounts/:id", async (req, res) => {
+router.put("/automation/email-accounts/:id", requireAdmin, async (req, res) => {
   const id = Number(req.params.id);
   const { label, provider, host, port, secure, user, password, fromName, fromEmail, imapEnabled, imapHost, imapPort, active } = req.body;
-  const existing = await db.select().from(emailAccountsTable).where(eq(emailAccountsTable.id, id)).limit(1);
-  if (!existing.length) { res.status(404).json({ error: "Account not found" }); return; }
-  const effectiveProvider = provider !== undefined ? provider : existing[0].provider;
-  const effectiveUser = user !== undefined ? user : existing[0].user;
-  if (password && password !== "••••••••") {
-    const cleanedPassword = cleanPassword(password);
-    const validationError = validateCredentials(effectiveProvider, cleanedPassword, effectiveUser);
-    if (validationError) { res.status(400).json({ error: validationError }); return; }
+  try {
+    const existing = await db.select().from(emailAccountsTable).where(eq(emailAccountsTable.id, id)).limit(1);
+    if (!existing.length) { res.status(404).json({ error: "Account not found" }); return; }
+    const effectiveProvider = provider !== undefined ? provider : existing[0].provider;
+    const effectiveUser = user !== undefined ? user : existing[0].user;
+    if (password && password !== "••••••••") {
+      const cleanedPassword = cleanPassword(password);
+      const validationError = validateCredentials(effectiveProvider, cleanedPassword, effectiveUser);
+      if (validationError) { res.status(400).json({ error: validationError }); return; }
+    }
+    const updated = await db.update(emailAccountsTable).set({
+      ...(label !== undefined && { label }),
+      ...(provider !== undefined && { provider }),
+      ...(host !== undefined && { host }),
+      ...(port !== undefined && { port }),
+      ...(secure !== undefined && { secure }),
+      ...(user !== undefined && { user }),
+      ...(password && password !== "••••••••" ? { password: cleanPassword(password) } : {}),
+      ...(fromName !== undefined && { fromName }),
+      ...(fromEmail !== undefined && { fromEmail }),
+      ...(imapEnabled !== undefined && { imapEnabled }),
+      ...(imapHost !== undefined && { imapHost }),
+      ...(imapPort !== undefined && { imapPort }),
+      ...(active !== undefined && { active }),
+    }).where(eq(emailAccountsTable.id, id)).returning();
+    const all = await db.select().from(emailAccountsTable).orderBy(emailAccountsTable.id).catch(() => []);
+    kvWriteAccounts(all).catch(() => {});
+    res.json(maskPassword(updated[0]));
+  } catch (e: any) {
+    if (e?.message?.includes("not found")) { res.status(404).json({ error: "Account not found" }); return; }
+    // DB unavailable — update in KV
+    const accounts = await kvReadAccounts();
+    const idx = accounts.findIndex(a => a.id === id);
+    if (idx === -1) { res.status(404).json({ error: "Account not found" }); return; }
+    accounts[idx] = {
+      ...accounts[idx],
+      ...(label !== undefined && { label }),
+      ...(provider !== undefined && { provider }),
+      ...(host !== undefined && { host }),
+      ...(port !== undefined && { port }),
+      ...(secure !== undefined && { secure }),
+      ...(user !== undefined && { user }),
+      ...(password && password !== "••••••••" ? { password: cleanPassword(password) } : {}),
+      ...(fromName !== undefined && { fromName }),
+      ...(fromEmail !== undefined && { fromEmail }),
+      ...(imapEnabled !== undefined && { imapEnabled }),
+      ...(imapHost !== undefined && { imapHost: imapHost ?? "" }),
+      ...(imapPort !== undefined && { imapPort: imapPort ?? 993 }),
+      ...(active !== undefined && { active }),
+    };
+    await kvWriteAccounts(accounts);
+    res.json(kvMaskPassword(accounts[idx]));
   }
-  const updated = await db.update(emailAccountsTable).set({
-    ...(label !== undefined && { label }),
-    ...(provider !== undefined && { provider }),
-    ...(host !== undefined && { host }),
-    ...(port !== undefined && { port }),
-    ...(secure !== undefined && { secure }),
-    ...(user !== undefined && { user }),
-    ...(password && password !== "••••••••" ? { password: cleanPassword(password) } : {}),
-    ...(fromName !== undefined && { fromName }),
-    ...(fromEmail !== undefined && { fromEmail }),
-    ...(imapEnabled !== undefined && { imapEnabled }),
-    ...(imapHost !== undefined && { imapHost }),
-    ...(imapPort !== undefined && { imapPort }),
-    ...(active !== undefined && { active }),
-  }).where(eq(emailAccountsTable.id, id)).returning();
-  res.json(maskPassword(updated[0]));
 });
 
-router.delete("/automation/email-accounts/:id", async (req, res) => {
+router.delete("/automation/email-accounts/:id", requireAdmin, async (req, res) => {
   const id = Number(req.params.id);
-  await db.delete(emailAccountsTable).where(eq(emailAccountsTable.id, id));
+  try {
+    await db.delete(emailAccountsTable).where(eq(emailAccountsTable.id, id));
+    const all = await db.select().from(emailAccountsTable).orderBy(emailAccountsTable.id).catch(() => []);
+    kvWriteAccounts(all).catch(() => {});
+  } catch {
+    const accounts = await kvReadAccounts();
+    await kvWriteAccounts(accounts.filter(a => a.id !== id));
+  }
   res.json({ success: true });
 });
 
-router.post("/automation/email-accounts/:id/test", async (req, res) => {
+router.post("/automation/email-accounts/:id/test", requireAdmin, async (req, res) => {
   const id = Number(req.params.id);
-  const rows = await db.select().from(emailAccountsTable).where(eq(emailAccountsTable.id, id)).limit(1);
-  if (!rows.length) { res.status(404).json({ error: "Account not found" }); return; }
-  const acct = rows[0];
+  let acct: KvAccount | undefined;
+  try {
+    const rows = await db.select().from(emailAccountsTable).where(eq(emailAccountsTable.id, id)).limit(1);
+    acct = rows[0];
+  } catch {
+    // DB unavailable — look up from KV
+    const accounts = await kvReadAccounts();
+    acct = accounts.find(a => a.id === id);
+  }
+  if (!acct) { res.status(404).json({ error: "Account not found" }); return; }
   if (!acct.user || !acct.password) { res.status(400).json({ error: "Account has no credentials saved" }); return; }
   try {
     const transporter = makeTransporter(acct);

@@ -8,6 +8,7 @@ import { eq, inArray, sql } from "drizzle-orm";
 import { scrapeBusinessDirectories } from "../lib/business-scrapers";
 import { createReport, buildReportEmailSection, getAgencyBaseUrl } from "./reports";
 import { kvGetJson, kvSetJson } from "../lib/replit-kv";
+import { requireAdmin } from "../lib/admin-auth";
 
 // ─── KV store helpers for email accounts (fallback when DB unavailable) ─────
 
@@ -449,7 +450,7 @@ async function sendWithFailover(
 
 // ─── Email account CRUD ───────────────────────────────────────────────────────
 
-router.get("/crm/email-accounts", async (_req, res) => {
+router.get("/crm/email-accounts", requireAdmin, async (_req, res) => {
   await autoSeedBrevo();
   try {
     const rows = await db.select().from(emailAccountsTable).orderBy(emailAccountsTable.id);
@@ -463,7 +464,7 @@ router.get("/crm/email-accounts", async (_req, res) => {
   }
 });
 
-router.post("/crm/email-accounts", async (req, res) => {
+router.post("/crm/email-accounts", requireAdmin, async (req, res) => {
   const { label, provider, host, port, secure, user, password, fromName, fromEmail, dailyLimit } = req.body;
   if (!user || !password || !host) {
     res.status(400).json({ error: "host, user, and password are required" });
@@ -499,7 +500,7 @@ router.post("/crm/email-accounts", async (req, res) => {
   }
 });
 
-router.put("/crm/email-accounts/:id", async (req, res) => {
+router.put("/crm/email-accounts/:id", requireAdmin, async (req, res) => {
   const id = parseInt(req.params.id);
   const { label, provider, host, port, secure, user, password, fromName, fromEmail, active, dailyLimit, resetFailures } = req.body;
   try {
@@ -551,7 +552,7 @@ router.put("/crm/email-accounts/:id", async (req, res) => {
   }
 });
 
-router.delete("/crm/email-accounts/:id", async (req, res) => {
+router.delete("/crm/email-accounts/:id", requireAdmin, async (req, res) => {
   const id = parseInt(req.params.id);
   try {
     await db.delete(emailAccountsTable).where(eq(emailAccountsTable.id, id));
@@ -565,11 +566,18 @@ router.delete("/crm/email-accounts/:id", async (req, res) => {
 });
 
 // Direct single-account test — does NOT fail over, so the user can verify that specific account.
-router.post("/crm/email-accounts/:id/test", async (req, res) => {
+router.post("/crm/email-accounts/:id/test", requireAdmin, async (req, res) => {
   const id = parseInt(req.params.id);
   const { to } = req.body as { to?: string };
-  const rows = await db.select().from(emailAccountsTable).where(eq(emailAccountsTable.id, id)).limit(1);
-  const acct = rows[0];
+  let acct: KvAccount | undefined;
+  try {
+    const rows = await db.select().from(emailAccountsTable).where(eq(emailAccountsTable.id, id)).limit(1);
+    acct = rows[0];
+  } catch {
+    // DB unavailable (e.g. helium) — fall back to KV store
+    const accounts = await kvReadAccounts();
+    acct = accounts.find(a => a.id === id);
+  }
   if (!acct?.user || !acct?.password) {
     res.status(404).json({ error: "Account not found or missing credentials" });
     return;
@@ -583,10 +591,12 @@ router.post("/crm/email-accounts/:id/test", async (req, res) => {
       text: `Account "${acct.label}" is working correctly.`,
       html: `<div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:24px;"><h2 style="color:#6d28d9;">✓ Account working</h2><p>Account <strong>${acct.label}</strong> (${acct.user}) is configured and sending correctly via ${acct.host}.</p></div>`,
     });
-    await db.update(emailAccountsTable).set({ consecutiveFailures: 0, autoPaused: false, lastError: "" }).where(eq(emailAccountsTable.id, id));
+    // Best-effort DB update — ignore if DB is unavailable
+    db.update(emailAccountsTable).set({ consecutiveFailures: 0, autoPaused: false, lastError: "" }).where(eq(emailAccountsTable.id, id)).catch(() => {});
     res.json({ success: true });
   } catch (err: any) {
-    await recordFailure(id, err.message || String(err));
+    // Best-effort failure recording — ignore if DB is unavailable
+    recordFailure(id, err.message || String(err)).catch(() => {});
     res.status(500).json({ error: err.message });
   }
 });

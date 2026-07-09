@@ -312,6 +312,11 @@ function AccountDialog({ account, onSave, onClose }: {
     setForm(f => ({ ...f, provider, host: cfg.host, port: cfg.port, secure: false }));
   };
 
+  const adminAuthHeader = (): Record<string, string> => {
+    const tok = localStorage.getItem("ds_api_token") ?? "";
+    return tok ? { Authorization: `Bearer ${tok}` } : {};
+  };
+
   const save = async () => {
     if (!form.host || !form.user || (!form.password && !account)) {
       setStatus({ type: "error", msg: "Host, email, and password are required." });
@@ -322,7 +327,7 @@ function AccountDialog({ account, onSave, onClose }: {
       const url = account ? `${apiBase()}/api/crm/email-accounts/${account.id}` : `${apiBase()}/api/crm/email-accounts`;
       const r = await fetch(url, {
         method: account ? "PUT" : "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...adminAuthHeader() },
         body: JSON.stringify(form),
       });
       const d = await r.json().catch(() => ({}));
@@ -338,7 +343,7 @@ function AccountDialog({ account, onSave, onClose }: {
     setTesting(true); setStatus(null);
     try {
       const r = await fetch(`${apiBase()}/api/crm/email-accounts/${account.id}/test`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json", ...adminAuthHeader() },
         body: JSON.stringify({ to: testTo || form.user }),
       });
       const d = await r.json().catch(() => ({}));
@@ -480,9 +485,14 @@ function EmailSettingsPanel() {
   const [testStatus, setTestStatus] = useState<Record<number, { type: "success" | "error"; msg: string }>>({});
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
+  const adminAuth = (): Record<string, string> => {
+    const tok = localStorage.getItem("ds_api_token") ?? "";
+    return tok ? { Authorization: `Bearer ${tok}` } : {};
+  };
+
   const load = useCallback(async () => {
     try {
-      const r = await fetch(`${apiBase()}/api/crm/email-accounts`);
+      const r = await fetch(`${apiBase()}/api/crm/email-accounts`, { headers: adminAuth() });
       const d = await r.json().catch(() => ([]));
       setAccounts(Array.isArray(d) ? d : []);
     } catch { /* ignore */ } finally { setLoading(false); }
@@ -493,7 +503,7 @@ function EmailSettingsPanel() {
   const toggleActive = async (acct: EmailAccount) => {
     setAccounts(prev => prev.map(a => a.id === acct.id ? { ...a, active: !acct.active } : a));
     const r = await fetch(`${apiBase()}/api/crm/email-accounts/${acct.id}`, {
-      method: "PUT", headers: { "Content-Type": "application/json" },
+      method: "PUT", headers: { "Content-Type": "application/json", ...adminAuth() },
       body: JSON.stringify({ active: !acct.active }),
     });
     if (!r.ok) setAccounts(prev => prev.map(a => a.id === acct.id ? { ...a, active: acct.active } : a));
@@ -502,7 +512,7 @@ function EmailSettingsPanel() {
   const reactivateAccount = async (acct: EmailAccount) => {
     try {
       const r = await fetch(`${apiBase()}/api/crm/email-accounts/${acct.id}`, {
-        method: "PUT", headers: { "Content-Type": "application/json" },
+        method: "PUT", headers: { "Content-Type": "application/json", ...adminAuth() },
         body: JSON.stringify({ active: true, resetFailures: true }),
       });
       const d = await r.json().catch(() => ({}));
@@ -515,7 +525,7 @@ function EmailSettingsPanel() {
   const deleteAccount = async (id: number) => {
     setDeletingId(id);
     try {
-      await fetch(`${apiBase()}/api/crm/email-accounts/${id}`, { method: "DELETE" });
+      await fetch(`${apiBase()}/api/crm/email-accounts/${id}`, { method: "DELETE", headers: adminAuth() });
       setAccounts(prev => prev.filter(a => a.id !== id));
     } finally { setDeletingId(null); }
   };
@@ -525,7 +535,7 @@ function EmailSettingsPanel() {
     setTestStatus(prev => { const n = { ...prev }; delete n[acct.id]; return n; });
     try {
       const r = await fetch(`${apiBase()}/api/crm/email-accounts/${acct.id}/test`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json", ...adminAuth() },
         body: JSON.stringify({ to: acct.user }),
       });
       const d = await r.json().catch(() => ({}));
@@ -2287,10 +2297,14 @@ function ApiKeyPoolManager({
   const [error, setError] = useState("");
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
+  // Read the admin token from localStorage (set when logging in via /admin)
+  const adminToken = () => localStorage.getItem("ds_api_token") ?? "";
+  const authHeader = (): Record<string, string> => ({ Authorization: `Bearer ${adminToken()}` });
+
   const loadKeys = useCallback(async () => {
     setLoadingKeys(true);
     try {
-      const r = await fetch(`${apiBase()}/api/api-pools/${provider}`);
+      const r = await fetch(`${apiBase()}/api/api-pools/${provider}`, { headers: authHeader() });
       if (r.ok) { const d = await r.json(); setKeys(d.keys ?? []); }
     } finally { setLoadingKeys(false); }
   }, [provider]);
@@ -2303,7 +2317,7 @@ function ApiKeyPoolManager({
     try {
       const r = await fetch(`${apiBase()}/api/api-pools/${provider}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeader() },
         body: JSON.stringify({ apiKey: newKey.trim(), label: newLabel.trim() || undefined }),
       });
       const d = await r.json();
@@ -2318,7 +2332,7 @@ function ApiKeyPoolManager({
   const deleteKey = async (id: string) => {
     setDeletingId(id);
     try {
-      await fetch(`${apiBase()}/api/api-pools/${provider}/${id}`, { method: "DELETE" });
+      await fetch(`${apiBase()}/api/api-pools/${provider}/${id}`, { method: "DELETE", headers: authHeader() });
       setKeys(k => k.filter(e => e.id !== id));
       onUpdated();
     } finally { setDeletingId(null); }
@@ -2424,12 +2438,15 @@ function AutomationPanel() {
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
   const [dsOpen, setDsOpen] = useState(false);
 
+  const adminToken = () => localStorage.getItem("ds_api_token") ?? "";
+  const authHdr = () => ({ Authorization: `Bearer ${adminToken()}` });
+
   const load = useCallback(async () => {
     try {
       const [sRes, stRes, dsRes] = await Promise.all([
         fetch(`${apiBase()}/api/automation/settings`),
         fetch(`${apiBase()}/api/automation/status`),
-        fetch(`${apiBase()}/api/api-pools/status`),
+        fetch(`${apiBase()}/api/api-pools/status`, { headers: authHdr() }),
       ]);
       if (sRes.ok)  setSettings(await sRes.json());
       if (stRes.ok) setStatus(await stRes.json());
