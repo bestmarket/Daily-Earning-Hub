@@ -294,10 +294,48 @@ async function autoSeedBrevo(): Promise<void> {
   });
 }
 
+/** Build a virtual email account from SMTP_* env vars (id = -1, never touches DB). */
+function getEnvEmailAccount(): typeof emailAccountsTable.$inferSelect | null {
+  const user = process.env.SMTP_USER;
+  const password = process.env.SMTP_PASSWORD;
+  if (!user || !password) return null;
+  const now = new Date();
+  return {
+    id: -1,
+    label: "Env SMTP",
+    provider: process.env.SMTP_HOST?.includes("gmail") ? "gmail" : "custom",
+    host: process.env.SMTP_HOST || "smtp.gmail.com",
+    port: Number(process.env.SMTP_PORT) || 587,
+    secure: false,
+    user,
+    password,
+    fromName: process.env.SMTP_FROM_NAME || process.env.AGENCY_NAME || "DevStudio",
+    fromEmail: process.env.SMTP_FROM_EMAIL || user,
+    imapEnabled: false,
+    imapHost: null,
+    imapPort: null,
+    active: true,
+    sentCount: 0,
+    dailyLimit: 80,
+    sentToday: 0,
+    lastSentDay: null,
+    consecutiveFailures: 0,
+    lastError: null,
+    lastErrorAt: null,
+    autoPaused: false,
+    createdAt: now,
+  };
+}
+
 async function getNextAccount(excludeIds: number[] = []) {
   await autoSeedBrevo();
-  const rows = await db.select().from(emailAccountsTable)
-    .where(eq(emailAccountsTable.active, true));
+  let rows: (typeof emailAccountsTable.$inferSelect)[] = [];
+  try {
+    rows = await db.select().from(emailAccountsTable)
+      .where(eq(emailAccountsTable.active, true));
+  } catch {
+    // DB unavailable — fall through to env-var account below
+  }
   const today = todayStr();
   const eligible = rows
     .filter(a => !excludeIds.includes(a.id))
@@ -313,38 +351,46 @@ async function getNextAccount(excludeIds: number[] = []) {
       if (a.sentCount !== b.sentCount) return a.sentCount - b.sentCount;
       return a.id - b.id;
     });
-  return eligible[0] ?? null;
+  if (eligible[0]) return eligible[0];
+  // Fall back to env-var account when DB has none configured
+  return getEnvEmailAccount();
 }
 
 async function incrementSentCount(id: number) {
+  if (id <= 0) return; // env-var virtual account — no DB row to update
   const today = todayStr();
-  const rows = await db.select().from(emailAccountsTable).where(eq(emailAccountsTable.id, id)).limit(1);
-  const acct = rows[0];
-  const sentToday = acct && acct.lastSentDay === today ? acct.sentToday + 1 : 1;
-  await db.update(emailAccountsTable)
-    .set({
-      sentCount: sql`${emailAccountsTable.sentCount} + 1`,
-      sentToday,
-      lastSentDay: today,
-      consecutiveFailures: 0,
-      lastError: "",
-    })
-    .where(eq(emailAccountsTable.id, id));
+  try {
+    const rows = await db.select().from(emailAccountsTable).where(eq(emailAccountsTable.id, id)).limit(1);
+    const acct = rows[0];
+    const sentToday = acct && acct.lastSentDay === today ? acct.sentToday + 1 : 1;
+    await db.update(emailAccountsTable)
+      .set({
+        sentCount: sql`${emailAccountsTable.sentCount} + 1`,
+        sentToday,
+        lastSentDay: today,
+        consecutiveFailures: 0,
+        lastError: "",
+      })
+      .where(eq(emailAccountsTable.id, id));
+  } catch { /* DB unavailable, ignore */ }
 }
 
 async function recordFailure(id: number, message: string) {
-  const rows = await db.select().from(emailAccountsTable).where(eq(emailAccountsTable.id, id)).limit(1);
-  const acct = rows[0];
-  if (!acct) return;
-  const failures = acct.consecutiveFailures + 1;
-  await db.update(emailAccountsTable)
-    .set({
-      consecutiveFailures: failures,
-      lastError: message.slice(0, 500),
-      lastErrorAt: new Date(),
-      ...(failures >= MAX_CONSECUTIVE_FAILURES && { autoPaused: true }),
-    })
-    .where(eq(emailAccountsTable.id, id));
+  if (id <= 0) return; // env-var virtual account — no DB row to update
+  try {
+    const rows = await db.select().from(emailAccountsTable).where(eq(emailAccountsTable.id, id)).limit(1);
+    const acct = rows[0];
+    if (!acct) return;
+    const failures = acct.consecutiveFailures + 1;
+    await db.update(emailAccountsTable)
+      .set({
+        consecutiveFailures: failures,
+        lastError: message.slice(0, 500),
+        lastErrorAt: new Date(),
+        ...(failures >= MAX_CONSECUTIVE_FAILURES && { autoPaused: true }),
+      })
+      .where(eq(emailAccountsTable.id, id));
+  } catch { /* DB unavailable, ignore */ }
 }
 
 async function sendWithFailover(

@@ -522,7 +522,34 @@ export async function runAutomationCycle(overrides?: {
   } catch { runStats.errors++; }
 
   // 2. Auto-score + generate email content for each, then send
-  const accounts = await db.select().from(emailAccountsTable).where(eq(emailAccountsTable.active, true));
+  let accounts: (typeof emailAccountsTable.$inferSelect)[] = [];
+  try {
+    accounts = await db.select().from(emailAccountsTable).where(eq(emailAccountsTable.active, true));
+  } catch { /* DB unavailable */ }
+  // Fall back to env-var SMTP account when no DB accounts exist
+  if (accounts.length === 0) {
+    const smtpUser = process.env.SMTP_USER;
+    const smtpPass = process.env.SMTP_PASSWORD;
+    if (smtpUser && smtpPass) {
+      const now = new Date();
+      accounts = [{
+        id: -1,
+        label: "Env SMTP",
+        provider: (process.env.SMTP_HOST || "smtp.gmail.com").includes("gmail") ? "gmail" : "custom",
+        host: process.env.SMTP_HOST || "smtp.gmail.com",
+        port: Number(process.env.SMTP_PORT) || 587,
+        secure: false,
+        user: smtpUser,
+        password: smtpPass,
+        fromName: process.env.SMTP_FROM_NAME || process.env.AGENCY_NAME || "DevStudio",
+        fromEmail: process.env.SMTP_FROM_EMAIL || smtpUser,
+        imapEnabled: false, imapHost: null, imapPort: null,
+        active: true, sentCount: 0, dailyLimit: 80, sentToday: 0,
+        lastSentDay: null, consecutiveFailures: 0, lastError: null,
+        lastErrorAt: null, autoPaused: false, createdAt: now,
+      }];
+    }
+  }
   let accountIndex = 0;
 
   // Store prospects as JSON in runStats for display
