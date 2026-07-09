@@ -13,7 +13,7 @@ Managed artifact workflows are configured and start automatically in the Replit 
 | `artifacts/api-server: API Server` | `pnpm --filter @workspace/api-server run dev` | 8080 |
 | `artifacts/mockup-sandbox: Component Preview Server` | `pnpm --filter @workspace/mockup-sandbox run dev` | — |
 
-Start order: **API Server first**, then the front-end sites (agency-site proxies `/api` to port 8080).
+The `Project` run button starts all three workflows in parallel; the Vite dev servers proxy `/api` to port 8080 lazily, so exact start order doesn't matter in dev.
 
 - `pnpm install` — install all workspace dependencies (run after clone; handled by `scripts/post-merge.sh` on merge)
 - `pnpm run typecheck` — full typecheck across all packages
@@ -22,11 +22,10 @@ Start order: **API Server first**, then the front-end sites (agency-site proxies
 
 ## Setup status (last verified 2026-07-09)
 
-- ✅ `pnpm install` completed — all workspace dependencies installed
+- ✅ `pnpm install` completed — all workspace dependencies installed (re-run after re-import; `node_modules` isn't committed)
 - ✅ DB schema pushed — `lib/db` schema applied to the Replit-managed PostgreSQL instance
 - ✅ Workflows configured — `API Server` (8080, console), `Start application` (5000, webview), `Tools4Biz` (3000, console)
 - ✅ `ADMIN_PASSWORD` secret set — admin panels on agency-site `/admin` and tools4biz `/admin` are accessible
-- ✅ TypeScript clean — `pnpm run typecheck` passes across all workspace packages
 - ⚠️ `GOOGLE_GENERATIVE_AI_API_KEY` not yet set — AI analysis and email generation will return 500s without it
 
 ## Stack
