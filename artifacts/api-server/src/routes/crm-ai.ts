@@ -448,6 +448,22 @@ async function sendWithFailover(
   throw new Error(lastErr?.message || "Failed to send after trying all available accounts.");
 }
 
+/** Fire-and-forget internal notification (e.g. new proposal request) sent via the active outreach account. Never throws. */
+export async function notifyAdmin(subject: string, html: string, text?: string) {
+  const to = process.env.NOTIFY_EMAIL || "babsgill1314@gmail.com";
+  try {
+    await sendWithFailover((a) => ({
+      from: `"${a.fromName}" <${a.fromEmail || a.user}>`,
+      to,
+      subject,
+      html,
+      text: text || html.replace(/<[^>]+>/g, " "),
+    }));
+  } catch (err) {
+    console.error("notifyAdmin failed:", (err as any)?.message || err);
+  }
+}
+
 // ─── Email account CRUD ───────────────────────────────────────────────────────
 
 router.get("/crm/email-accounts", requireAdmin, async (_req, res) => {
@@ -620,7 +636,7 @@ router.post("/crm/test-email", async (req, res) => {
 
 // ─── Send email to prospect ───────────────────────────────────────────────────
 
-router.post("/crm/send-email", async (req, res) => {
+router.post("/crm/send-email", requireAdmin, async (req, res) => {
   // reportUrl is optional — injected by CRM when a report was generated for this prospect
   const { to, subject, body, prospectName, accountId, reportUrl } = req.body as {
     to: string; subject: string; body: string; prospectName?: string; accountId?: number; reportUrl?: string;
@@ -654,7 +670,7 @@ router.post("/crm/send-email", async (req, res) => {
 
 // ─── Send proposal email ──────────────────────────────────────────────────────
 
-router.post("/crm/send-proposal-email", async (req, res) => {
+router.post("/crm/send-proposal-email", requireAdmin, async (req, res) => {
   const { to, prospectName, proposal, agencyName } = req.body as {
     to: string; prospectName: string; proposal: any; agencyName?: string;
   };
@@ -1099,7 +1115,7 @@ Each version must follow these rules:
 • FORBIDDEN: "guaranteed results", "limited time", "buy now", "act fast", "amazing opportunity", "earn more instantly", "I hope this finds you well", "I wanted to reach out", "game-changer", "leverage", "synergy", "boost your sales", "skyrocket", "Don't miss out"
 
 Return ONLY a JSON object with this exact structure:
-{ "analysis":{"websiteScore":<0-100>,"leadScore":<0-100>,"conversionScore":<0-100>,"mobileScore":<0-100>,"seoScore":<0-100>,"growthPotential":<0-100>,"checks":{"responsiveDesign":<bool>,"sslCertificate":<bool>,"modernUI":<bool>,"whatsappButton":<bool>,"contactForm":<bool>,"bookingSystem":<bool>,"onlineOrdering":<bool>,"paymentIntegration":<bool>,"customerPortal":<bool>,"membershipArea":<bool>,"blog":<bool>,"seoBasics":<bool>,"analytics":<bool>,"socialMedia":<bool>,"emailCapture":<bool>,"liveChat":<bool>,"aiChatbot":<bool>,"callToAction":<bool>,"trustElements":<bool>},"issues":[{"title":"string","description":"string","priority":"high|medium|low"}],"opportunities":[{"title":"string","impact":"string","effort":"low|medium|high"}],"recommendedFeatures":["string"],"projectType":"Small Website|Medium Web App|Large SaaS","estimatedValue":{"min":<number>,"max":<number>},"deliveryWeeks":{"min":<number>,"max":<number>},"summary":"2-3 sentence plain English summary"}, "aiAgent":{"type":"receptionist|booking|sales|support|social","score":<0-100>,"fitReason":"1 sentence why this agent type fits their business","topPain":"the #1 pain this agent solves for them right now"}, "pitchType":"ai_agent|website|both", "emailVersions":[{"version":"A","subject":"string","body":"string"},{"version":"B","subject":"string","body":"string"},{"version":"C","subject":"string","body":"string"}],"whatsapp":"string","linkedin":"string" }
+{ "analysis":{"websiteScore":<0-100>,"leadScore":<0-100>,"conversionScore":<0-100>,"mobileScore":<0-100>,"seoScore":<0-100>,"growthPotential":<0-100>,"checks":{"responsiveDesign":<bool>,"sslCertificate":<bool>,"modernUI":<bool>,"whatsappButton":<bool>,"contactForm":<bool>,"bookingSystem":<bool>,"onlineOrdering":<bool>,"paymentIntegration":<bool>,"customerPortal":<bool>,"membershipArea":<bool>,"blog":<bool>,"seoBasics":<bool>,"analytics":<bool>,"socialMedia":<bool>,"emailCapture":<bool>,"liveChat":<bool>,"aiChatbot":<bool>,"callToAction":<bool>,"trustElements":<bool>},"issues":[{"title":"string","description":"string","priority":"high|medium|low"}],"opportunities":[{"title":"string","impact":"string","effort":"low|medium|high"}],"recommendedFeatures":["string"],"projectType":"Small Website|Medium Web App|Large SaaS","estimatedValue":{"min":<number>,"max":<number>},"deliveryWeeks":{"min":<1 or 2>,"max":<1 or 2, never above 2 — we deliver in 5 days to 2 weeks>},"summary":"2-3 sentence plain English summary"}, "aiAgent":{"type":"receptionist|booking|sales|support|social","score":<0-100>,"fitReason":"1 sentence why this agent type fits their business","topPain":"the #1 pain this agent solves for them right now"}, "pitchType":"ai_agent|website|both", "emailVersions":[{"version":"A","subject":"string","body":"string"},{"version":"B","subject":"string","body":"string"},{"version":"C","subject":"string","body":"string"}],"whatsapp":"string","linkedin":"string" }
 Be specific to a ${category} business in ${city}. If no website, give website scores of 5-25.`;
   try {
     const text = await generateText(prompt);
@@ -1137,7 +1153,7 @@ router.post("/crm/analyze-website", async (req, res) => {
     const prompt = `You are an expert web analyst and business consultant. Analyze this business and produce a detailed JSON report.
 Business Name: ${businessName}, Business Category: ${category || "Unknown"}, Website: ${website || "No website provided"}
 Produce a JSON object with EXACTLY this structure (no markdown, pure JSON):
-{ "websiteScore":<0-100>,"leadScore":<0-100>,"conversionScore":<0-100>,"mobileScore":<0-100>,"seoScore":<0-100>,"growthPotential":<0-100>,"checks":{"responsiveDesign":<true/false>,"sslCertificate":<true/false>,"modernUI":<true/false>,"whatsappButton":<true/false>,"contactForm":<true/false>,"bookingSystem":<true/false>,"onlineOrdering":<true/false>,"paymentIntegration":<true/false>,"customerPortal":<true/false>,"membershipArea":<true/false>,"blog":<true/false>,"seoBasics":<true/false>,"analytics":<true/false>,"socialMedia":<true/false>,"emailCapture":<true/false>,"liveChat":<true/false>,"aiChatbot":<true/false>,"callToAction":<true/false>,"trustElements":<true/false>},"issues":[{"title":"string","description":"string","priority":"high|medium|low"}],"opportunities":[{"title":"string","impact":"string","effort":"low|medium|high"}],"recommendedFeatures":["string"],"projectType":"Small Website|Medium Web App|Large SaaS","estimatedValue":{"min":<number>,"max":<number>},"deliveryWeeks":{"min":<number>,"max":<number>},"summary":"2-3 sentence plain English summary" }
+{ "websiteScore":<0-100>,"leadScore":<0-100>,"conversionScore":<0-100>,"mobileScore":<0-100>,"seoScore":<0-100>,"growthPotential":<0-100>,"checks":{"responsiveDesign":<true/false>,"sslCertificate":<true/false>,"modernUI":<true/false>,"whatsappButton":<true/false>,"contactForm":<true/false>,"bookingSystem":<true/false>,"onlineOrdering":<true/false>,"paymentIntegration":<true/false>,"customerPortal":<true/false>,"membershipArea":<true/false>,"blog":<true/false>,"seoBasics":<true/false>,"analytics":<true/false>,"socialMedia":<true/false>,"emailCapture":<true/false>,"liveChat":<true/false>,"aiChatbot":<true/false>,"callToAction":<true/false>,"trustElements":<true/false>},"issues":[{"title":"string","description":"string","priority":"high|medium|low"}],"opportunities":[{"title":"string","impact":"string","effort":"low|medium|high"}],"recommendedFeatures":["string"],"projectType":"Small Website|Medium Web App|Large SaaS","estimatedValue":{"min":<number>,"max":<number>},"deliveryWeeks":{"min":<1 or 2>,"max":<1 or 2, never above 2 — we deliver in 5 days to 2 weeks>},"summary":"2-3 sentence plain English summary" }
 Be realistic and specific to a ${category} business. If no website is provided, give scores of 0-20 for all website metrics.`;
     const text = await generateText(prompt);
     const data = parseJSON(text);

@@ -337,7 +337,7 @@ export default function Report() {
               style={{ background: "rgba(255,255,255,0.15)", color: "#fff", padding: "14px 28px", borderRadius: 12, textDecoration: "none", fontWeight: 700, fontSize: 15, fontFamily: "sans-serif", border: "2px solid rgba(255,255,255,0.3)" }}>
               📅 Book Consultation
             </a>
-            <a href="mailto:hello@devstudio.com"
+            <a href="mailto:babsgill1314@gmail.com"
               style={{ background: "rgba(255,255,255,0.1)", color: "#fff", padding: "14px 28px", borderRadius: 12, textDecoration: "none", fontWeight: 700, fontSize: 15, fontFamily: "sans-serif", border: "2px solid rgba(255,255,255,0.25)" }}>
               ✉ Reply by Email
             </a>

@@ -234,9 +234,10 @@ function apiBase() {
 }
 
 async function callCRM(endpoint: string, body: object) {
+  const tok = localStorage.getItem("ds_api_token") ?? "";
   const r = await fetch(`${apiBase()}/api/crm/${endpoint}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${tok}` },
     body: JSON.stringify(body),
   });
   if (!r.ok) {
@@ -2235,6 +2236,19 @@ type InboxReply = {
   read: boolean;
 };
 
+type CustomRequest = {
+  id: number;
+  name: string | null;
+  email: string;
+  businessType: string | null;
+  description: string;
+  budget: string | null;
+  whatsapp: string | null;
+  status: string;
+  notes: string | null;
+  createdAt: string;
+};
+
 const CLASSIFICATION_META: Record<string, { label: string; color: string }> = {
   interested:      { label: "Interested",      color: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30" },
   call_requested:  { label: "Call Requested",  color: "bg-amber-500/15  text-amber-400  border-amber-500/30" },
@@ -2774,6 +2788,8 @@ function InboxPanel() {
   const [checking, setChecking] = useState(false);
   const [msg, setMsg] = useState("");
   const [expanded, setExpanded] = useState<number | null>(null);
+  const [requests, setRequests] = useState<CustomRequest[]>([]);
+  const [requestsLoading, setRequestsLoading] = useState(false);
 
   const loadReplies = useCallback(async () => {
     setLoading(true);
@@ -2783,7 +2799,18 @@ function InboxPanel() {
     } finally { setLoading(false); }
   }, []);
 
-  useEffect(() => { loadReplies(); }, [loadReplies]);
+  const loadRequests = useCallback(async () => {
+    setRequestsLoading(true);
+    try {
+      const token = localStorage.getItem("ds_api_token") || "";
+      const r = await fetch(`${apiBase()}/api/admin/custom-requests`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (r.ok) setRequests(await r.json());
+    } finally { setRequestsLoading(false); }
+  }, []);
+
+  useEffect(() => { loadReplies(); loadRequests(); }, [loadReplies, loadRequests]);
 
   const checkReplies = async () => {
     setChecking(true);
@@ -2834,6 +2861,37 @@ function InboxPanel() {
           {msg}
         </div>
       )}
+
+      {/* ── Proposal / consultation requests from the public report page ── */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold flex items-center gap-2">
+            <Mail className="w-4 h-4 text-primary" />
+            Proposal Requests
+            {requests.filter(r => r.status === "new").length > 0 && (
+              <span className="text-xs bg-primary text-white px-2 py-0.5 rounded-full font-bold">
+                {requests.filter(r => r.status === "new").length} new
+              </span>
+            )}
+          </h3>
+          <Button variant="ghost" size="sm" onClick={loadRequests} disabled={requestsLoading}>
+            <RefreshCw className={`w-3.5 h-3.5 mr-1 ${requestsLoading ? "animate-spin" : ""}`} /> Refresh
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground -mt-1">
+          Submitted from the "Request Proposal" / "Book Consultation" buttons on report pages.
+        </p>
+        {requests.length === 0 && !requestsLoading && (
+          <div className="text-center py-8 text-muted-foreground text-sm border border-dashed border-border rounded-lg">
+            No proposal requests yet.
+          </div>
+        )}
+        <div className="space-y-2">
+          {requests.map(req => <ProposalRequestRow key={req.id} request={req} />)}
+        </div>
+      </div>
+
+      <div className="border-t border-border pt-4" />
 
       {replies.length === 0 && !loading && (
         <div className="text-center py-16 text-muted-foreground">
@@ -2902,6 +2960,64 @@ function InboxPanel() {
             </motion.div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+function ProposalRequestRow({ request }: { request: CustomRequest }) {
+  const [open, setOpen] = useState(false);
+  const [subject, setSubject] = useState(`Re: your project — ${request.businessType || "custom build"}`);
+  const [body, setBody] = useState("");
+  const [sending, setSending] = useState(false);
+  const [status, setStatus] = useState<{ type: "success" | "error"; msg: string } | null>(null);
+
+  const send = async () => {
+    if (!body.trim()) return;
+    setSending(true);
+    setStatus(null);
+    try {
+      await callCRM("send-email", { to: request.email, subject, body, prospectName: request.name || request.email });
+      setStatus({ type: "success", msg: "Sent via AI Hunter." });
+      setOpen(false);
+    } catch (e: any) {
+      setStatus({ type: "error", msg: e.message || "Failed to send" });
+    } finally { setSending(false); }
+  };
+
+  return (
+    <div className="rounded-xl border border-border bg-card/50 overflow-hidden">
+      <div className="px-4 py-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="font-medium text-sm">{request.name || request.email}</span>
+          <span className="text-xs px-2 py-0.5 rounded-full border font-medium bg-sky-500/15 text-sky-500 border-sky-500/30">{request.status}</span>
+          <span className="text-xs text-muted-foreground ml-auto">{new Date(request.createdAt).toLocaleString()}</span>
+        </div>
+        <p className="text-xs text-muted-foreground mt-1">{request.email}{request.whatsapp ? ` · ${request.whatsapp}` : ""}{request.budget ? ` · Budget: ${request.budget}` : ""}</p>
+        <p className="text-sm mt-2 whitespace-pre-wrap bg-muted/50 rounded-lg p-3 border border-border">{request.description}</p>
+        <div className="flex gap-2 mt-3">
+          <a href={`mailto:${request.email}`}>
+            <Button variant="outline" size="sm"><Mail className="w-3.5 h-3.5 mr-1.5" />Reply by Email</Button>
+          </a>
+          <Button size="sm" onClick={() => setOpen(o => !o)}>
+            <BotMessageSquare className="w-3.5 h-3.5 mr-1.5" />Reply via AI Hunter
+          </Button>
+        </div>
+        {status && (
+          <div className={`text-xs mt-2 ${status.type === "success" ? "text-emerald-500" : "text-red-500"}`}>{status.msg}</div>
+        )}
+        {open && (
+          <div className="mt-3 space-y-2 border-t border-border pt-3">
+            <Input value={subject} onChange={e => setSubject(e.target.value)} placeholder="Subject" />
+            <Textarea value={body} onChange={e => setBody(e.target.value)} placeholder="Write your reply…" rows={5} />
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" size="sm" onClick={() => setOpen(false)}>Cancel</Button>
+              <Button size="sm" onClick={send} disabled={sending || !body.trim()}>
+                <Send className="w-3.5 h-3.5 mr-1.5" />{sending ? "Sending…" : "Send"}
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

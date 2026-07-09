@@ -5,7 +5,7 @@ import { X, CheckCircle2 } from "lucide-react";
 const comparisons = [
   { traditional: "Weeks of meetings before any work starts", ours: "Quick discovery call, we start building fast" },
   { traditional: "Expensive monthly retainers ($5,000+/mo)", ours: "Fixed transparent pricing from $99" },
-  { traditional: "Slow delivery — months of waiting", ours: "Fast delivery in 1–4 weeks" },
+  { traditional: "Slow delivery — months of waiting", ours: "Fast delivery in 5 days–2 weeks" },
   { traditional: "Generic templates passed off as custom", ours: "100% custom-built for your business" },
   { traditional: "No AI features or modern integrations", ours: "AI-powered by default" },
   { traditional: "Slow email support, weeks for a reply", ours: "Direct WhatsApp communication daily" },

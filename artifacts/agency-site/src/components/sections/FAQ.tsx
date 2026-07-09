@@ -3,7 +3,7 @@ import { useRef } from "react";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 
 const faqs = [
-  { q: "How long does it take to build my software?", a: "Most projects are delivered in 1–4 weeks depending on complexity. Simple landing pages and booking systems take 1–2 weeks. Full SaaS platforms with AI features take 3–4 weeks. We'll give you an exact timeline during your free discovery call before any work begins." },
+  { q: "How long does it take to build my software?", a: "Most projects are delivered in 5 days to 2 weeks depending on complexity. Simple landing pages and booking systems take as little as 5 days. Full SaaS platforms with AI features take up to 2 weeks. We'll give you an exact timeline during your free discovery call before any work begins." },
   { q: "How much does it cost?", a: "Projects start from $99. The final cost depends on your requirements — we provide a fixed, transparent quote before we start. No hidden fees, no monthly retainers unless you choose ongoing maintenance. Get a free estimate by filling out our project form." },
   { q: "Can you integrate payment processing?", a: "Yes, we integrate with Stripe, PayPal, Paystack, Flutterwave, and Paddle depending on your location and needs. We handle the entire payment flow including subscriptions, invoicing, and payment receipts." },
   { q: "Can I request changes and revisions?", a: "Absolutely. Every project includes revision rounds so you can refine the software until it's exactly right. We don't lock you into 'take it or leave it' deliverables — collaboration is core to how we work." },
