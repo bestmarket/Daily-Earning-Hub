@@ -352,7 +352,10 @@ async function getNextAccount(excludeIds: number[] = []) {
       return a.id - b.id;
     });
   if (eligible[0]) return eligible[0];
-  // Fall back to env-var account when DB has none configured
+  // Fall back to env-var account when DB has none configured.
+  // Respect excludeIds: if the virtual account (-1) was already tried, return null
+  // so sendWithFailover terminates instead of looping forever.
+  if (excludeIds.includes(-1)) return null;
   return getEnvEmailAccount();
 }
 

@@ -371,7 +371,7 @@ router.get("/automation/datasource-status", async (_req, res) => {
       foursquare: active(fsPool),
       tomtom:     active(ttPool),
       here:       active(herePool),
-      gemini:     !!process.env.GOOGLE_GENERATIVE_AI_API_KEY,
+      gemini:     !!(process.env.GOOGLE_GENERATIVE_AI_API_KEY || process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY),
       estimatedYieldPerCity,
     });
   } catch {
@@ -787,7 +787,7 @@ Return ONLY valid JSON: { "emailVersions":[{"version":"A","subject":"string","bo
             originalSubject: emailContent!.subject,
             originalBody: emailContent!.body,
             followUpDays: settings.followUpDays ?? 4,
-            accountId: accounts.length > 0 ? accounts[(accountIndex - 1) % accounts.length].id : null,
+            accountId: (() => { const id = accounts.length > 0 ? accounts[(accountIndex - 1) % accounts.length].id : null; return id && id > 0 ? id : null; })(),
             status: "pending",
           }).onConflictDoNothing();
         }
