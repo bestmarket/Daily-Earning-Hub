@@ -2,6 +2,9 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { siteConfigTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
+import { kvGetJson, kvSetJson } from "../lib/replit-kv";
+
+const KV_GEMINI_KEY = "GEMINI_KEYS";
 
 const router = Router();
 
@@ -37,48 +40,65 @@ type GeminiPoolEntry = { id: string; key: string; label?: string; addedAt: strin
 let geminiRotationIndex = 0;
 
 async function readGeminiPool(): Promise<GeminiPoolEntry[]> {
-  const rows = await db
-    .select()
-    .from(siteConfigTable)
-    .where(eq(siteConfigTable.key, GEMINI_POOL_CONFIG_KEY))
-    .limit(1);
+  // Try DB first
+  try {
+    const rows = await db
+      .select()
+      .from(siteConfigTable)
+      .where(eq(siteConfigTable.key, GEMINI_POOL_CONFIG_KEY))
+      .limit(1);
 
-  if (rows[0]?.value) {
-    try {
+    if (rows[0]?.value) {
       const parsed = JSON.parse(rows[0].value);
-      if (Array.isArray(parsed)) return parsed;
-    } catch {}
-  }
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        // Keep KV in sync
+        kvSetJson(KV_GEMINI_KEY, parsed).catch(() => {});
+        return parsed;
+      }
+    }
 
-  // Migrate legacy single GEMINI_API_KEY into the pool, if present
-  const legacy = await getConfigKey("GEMINI_API_KEY");
-  if (legacy) {
-    const migrated: GeminiPoolEntry[] = [
-      { id: randomId(), key: legacy, label: "Key 1", addedAt: new Date().toISOString() },
-    ];
-    await writeGeminiPool(migrated);
-    return migrated;
-  }
+    // Migrate legacy single GEMINI_API_KEY into the pool, if present
+    const legacy = await getConfigKey("GEMINI_API_KEY");
+    if (legacy) {
+      const migrated: GeminiPoolEntry[] = [
+        { id: randomId(), key: legacy, label: "Key 1", addedAt: new Date().toISOString() },
+      ];
+      await writeGeminiPool(migrated);
+      return migrated;
+    }
+  } catch { /* DB unavailable — fall through to KV */ }
+
+  // KV fallback
+  const kvPool = await kvGetJson<GeminiPoolEntry[]>(KV_GEMINI_KEY);
+  if (kvPool && kvPool.length > 0) return kvPool;
+
+  // Env-var fallback
+  const envKey = process.env.GEMINI_API_KEY;
+  if (envKey) return [{ id: "__env__", key: envKey, label: "From environment", addedAt: "" }];
 
   return [];
 }
 
 async function writeGeminiPool(pool: GeminiPoolEntry[]): Promise<void> {
   const value = JSON.stringify(pool);
-  const existing = await db
-    .select()
-    .from(siteConfigTable)
-    .where(eq(siteConfigTable.key, GEMINI_POOL_CONFIG_KEY))
-    .limit(1);
+  // Always write to KV so production stays in sync
+  kvSetJson(KV_GEMINI_KEY, pool).catch(() => {});
+  try {
+    const existing = await db
+      .select()
+      .from(siteConfigTable)
+      .where(eq(siteConfigTable.key, GEMINI_POOL_CONFIG_KEY))
+      .limit(1);
 
-  if (existing.length > 0) {
-    await db
-      .update(siteConfigTable)
-      .set({ value, updatedAt: new Date() })
-      .where(eq(siteConfigTable.key, GEMINI_POOL_CONFIG_KEY));
-  } else {
-    await db.insert(siteConfigTable).values({ key: GEMINI_POOL_CONFIG_KEY, value });
-  }
+    if (existing.length > 0) {
+      await db
+        .update(siteConfigTable)
+        .set({ value, updatedAt: new Date() })
+        .where(eq(siteConfigTable.key, GEMINI_POOL_CONFIG_KEY));
+    } else {
+      await db.insert(siteConfigTable).values({ key: GEMINI_POOL_CONFIG_KEY, value });
+    }
+  } catch { /* DB unavailable — KV write above is the fallback */ }
 }
 
 function randomId(): string {

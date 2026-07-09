@@ -7,6 +7,29 @@ import { db, emailAccountsTable, emailTrackingTable } from "@workspace/db";
 import { eq, inArray, sql } from "drizzle-orm";
 import { scrapeBusinessDirectories } from "../lib/business-scrapers";
 import { createReport, buildReportEmailSection, getAgencyBaseUrl } from "./reports";
+import { kvGetJson, kvSetJson } from "../lib/replit-kv";
+
+// ─── KV store helpers for email accounts (fallback when DB unavailable) ─────
+
+const KV_ACCOUNTS_KEY = "EMAIL_ACCOUNTS";
+const KV_ACCOUNT_COUNTER = "EMAIL_ACCOUNT_COUNTER";
+
+type KvAccount = typeof emailAccountsTable.$inferSelect;
+
+async function kvReadAccounts(): Promise<KvAccount[]> {
+  return (await kvGetJson<KvAccount[]>(KV_ACCOUNTS_KEY)) ?? [];
+}
+
+async function kvWriteAccounts(accounts: KvAccount[]): Promise<void> {
+  await kvSetJson(KV_ACCOUNTS_KEY, accounts);
+}
+
+async function kvNextId(): Promise<number> {
+  const current = (await kvGetJson<number>(KV_ACCOUNT_COUNTER)) ?? 1000;
+  const next = current + 1;
+  await kvSetJson(KV_ACCOUNT_COUNTER, next);
+  return next;
+}
 
 const router = Router();
 
@@ -334,7 +357,8 @@ async function getNextAccount(excludeIds: number[] = []) {
     rows = await db.select().from(emailAccountsTable)
       .where(eq(emailAccountsTable.active, true));
   } catch {
-    // DB unavailable — fall through to env-var account below
+    // DB unavailable — load from KV store
+    rows = await kvReadAccounts();
   }
   const today = todayStr();
   const eligible = rows
@@ -352,9 +376,7 @@ async function getNextAccount(excludeIds: number[] = []) {
       return a.id - b.id;
     });
   if (eligible[0]) return eligible[0];
-  // Fall back to env-var account when DB has none configured.
-  // Respect excludeIds: if the virtual account (-1) was already tried, return null
-  // so sendWithFailover terminates instead of looping forever.
+  // Final fallback: SMTP_* env vars. Respect excludeIds to avoid infinite retry.
   if (excludeIds.includes(-1)) return null;
   return getEnvEmailAccount();
 }
@@ -429,8 +451,16 @@ async function sendWithFailover(
 
 router.get("/crm/email-accounts", async (_req, res) => {
   await autoSeedBrevo();
-  const rows = await db.select().from(emailAccountsTable).orderBy(emailAccountsTable.id);
-  res.json(rows.map(maskAccount));
+  try {
+    const rows = await db.select().from(emailAccountsTable).orderBy(emailAccountsTable.id);
+    // Sync KV with DB so production reads stay fresh
+    kvWriteAccounts(rows).catch(() => {});
+    res.json(rows.map(maskAccount));
+  } catch {
+    // DB unavailable — serve from KV store
+    const accounts = await kvReadAccounts();
+    res.json(accounts.map(maskAccount));
+  }
 });
 
 router.post("/crm/email-accounts", async (req, res) => {
@@ -439,43 +469,98 @@ router.post("/crm/email-accounts", async (req, res) => {
     res.status(400).json({ error: "host, user, and password are required" });
     return;
   }
-  const inserted = await db.insert(emailAccountsTable).values({
+  const values = {
     label: label || user, provider: provider || "smtp",
     host, port: port || 587, secure: secure ?? false,
     user, password, fromName: fromName || "DevStudio",
     fromEmail: fromEmail || "", active: true, sentCount: 0,
     dailyLimit: Number.isFinite(dailyLimit) ? Math.max(0, dailyLimit) : 0,
-  }).returning();
-  res.json({ success: true, account: maskAccount(inserted[0]) });
+  };
+  try {
+    const inserted = await db.insert(emailAccountsTable).values(values).returning();
+    // Keep KV in sync
+    const all = await db.select().from(emailAccountsTable).orderBy(emailAccountsTable.id).catch(() => []);
+    kvWriteAccounts(all).catch(() => {});
+    res.json({ success: true, account: maskAccount(inserted[0]) });
+  } catch {
+    // DB unavailable — save to KV store instead
+    const accounts = await kvReadAccounts();
+    const now = new Date();
+    const newId = await kvNextId();
+    const acct: KvAccount = {
+      id: newId, ...values,
+      imapEnabled: false, imapHost: null, imapPort: null,
+      sentToday: 0, lastSentDay: null, consecutiveFailures: 0,
+      lastError: null, lastErrorAt: null, autoPaused: false, createdAt: now,
+    };
+    accounts.push(acct);
+    await kvWriteAccounts(accounts);
+    res.json({ success: true, account: maskAccount(acct) });
+  }
 });
 
 router.put("/crm/email-accounts/:id", async (req, res) => {
   const id = parseInt(req.params.id);
   const { label, provider, host, port, secure, user, password, fromName, fromEmail, active, dailyLimit, resetFailures } = req.body;
-  const rows = await db.select().from(emailAccountsTable).where(eq(emailAccountsTable.id, id)).limit(1);
-  const existing = rows[0];
-  if (!existing) { res.status(404).json({ error: "Account not found" }); return; }
-  const reactivating = active === true && existing.active === false;
-  const updated = await db.update(emailAccountsTable).set({
-    ...(label !== undefined && { label }),
-    ...(provider !== undefined && { provider }),
-    ...(host !== undefined && { host }),
-    ...(port !== undefined && { port }),
-    ...(secure !== undefined && { secure }),
-    ...(user !== undefined && { user }),
-    ...(password && password !== "••••••••" && { password }),
-    ...(fromName !== undefined && { fromName }),
-    ...(fromEmail !== undefined && { fromEmail }),
-    ...(active !== undefined && { active }),
-    ...(dailyLimit !== undefined && Number.isFinite(dailyLimit) && { dailyLimit: Math.max(0, dailyLimit) }),
-    ...((resetFailures || reactivating) && { consecutiveFailures: 0, autoPaused: false, lastError: "" }),
-  }).where(eq(emailAccountsTable.id, id)).returning();
-  res.json({ success: true, account: maskAccount(updated[0]) });
+  try {
+    const rows = await db.select().from(emailAccountsTable).where(eq(emailAccountsTable.id, id)).limit(1);
+    const existing = rows[0];
+    if (!existing) { res.status(404).json({ error: "Account not found" }); return; }
+    const reactivating = active === true && existing.active === false;
+    const updated = await db.update(emailAccountsTable).set({
+      ...(label !== undefined && { label }),
+      ...(provider !== undefined && { provider }),
+      ...(host !== undefined && { host }),
+      ...(port !== undefined && { port }),
+      ...(secure !== undefined && { secure }),
+      ...(user !== undefined && { user }),
+      ...(password && password !== "••••••••" && { password }),
+      ...(fromName !== undefined && { fromName }),
+      ...(fromEmail !== undefined && { fromEmail }),
+      ...(active !== undefined && { active }),
+      ...(dailyLimit !== undefined && Number.isFinite(dailyLimit) && { dailyLimit: Math.max(0, dailyLimit) }),
+      ...((resetFailures || reactivating) && { consecutiveFailures: 0, autoPaused: false, lastError: "" }),
+    }).where(eq(emailAccountsTable.id, id)).returning();
+    const all = await db.select().from(emailAccountsTable).orderBy(emailAccountsTable.id).catch(() => []);
+    kvWriteAccounts(all).catch(() => {});
+    res.json({ success: true, account: maskAccount(updated[0]) });
+  } catch {
+    // DB unavailable — update in KV
+    const accounts = await kvReadAccounts();
+    const idx = accounts.findIndex(a => a.id === id);
+    if (idx === -1) { res.status(404).json({ error: "Account not found" }); return; }
+    const existing = accounts[idx];
+    const reactivating = active === true && existing.active === false;
+    accounts[idx] = {
+      ...existing,
+      ...(label !== undefined && { label }),
+      ...(provider !== undefined && { provider }),
+      ...(host !== undefined && { host }),
+      ...(port !== undefined && { port }),
+      ...(secure !== undefined && { secure }),
+      ...(user !== undefined && { user }),
+      ...(password && password !== "••••••••" && { password }),
+      ...(fromName !== undefined && { fromName }),
+      ...(fromEmail !== undefined && { fromEmail }),
+      ...(active !== undefined && { active }),
+      ...(dailyLimit !== undefined && Number.isFinite(dailyLimit) && { dailyLimit: Math.max(0, dailyLimit) }),
+      ...((resetFailures || reactivating) && { consecutiveFailures: 0, autoPaused: false, lastError: null }),
+    };
+    await kvWriteAccounts(accounts);
+    res.json({ success: true, account: maskAccount(accounts[idx]) });
+  }
 });
 
 router.delete("/crm/email-accounts/:id", async (req, res) => {
   const id = parseInt(req.params.id);
-  await db.delete(emailAccountsTable).where(eq(emailAccountsTable.id, id));
+  try {
+    await db.delete(emailAccountsTable).where(eq(emailAccountsTable.id, id));
+    const all = await db.select().from(emailAccountsTable).orderBy(emailAccountsTable.id).catch(() => []);
+    kvWriteAccounts(all).catch(() => {});
+  } catch {
+    const accounts = await kvReadAccounts();
+    await kvWriteAccounts(accounts.filter(a => a.id !== id));
+  }
   res.json({ success: true });
 });
 

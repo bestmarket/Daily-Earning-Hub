@@ -10,6 +10,7 @@
 
 import { db, siteConfigTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
+import { kvGetJson, kvSetJson } from "./replit-kv";
 
 export interface PoolEntry {
   id: string;
@@ -32,23 +33,28 @@ function randomId(): string {
 // ─── Core read / write ────────────────────────────────────────────────────────
 
 export async function readPool(provider: string): Promise<PoolEntry[]> {
+  const kvKey = cfgKey(provider);
   try {
     const rows = await db
       .select()
       .from(siteConfigTable)
-      .where(eq(siteConfigTable.key, cfgKey(provider)))
+      .where(eq(siteConfigTable.key, kvKey))
       .limit(1);
 
     if (rows[0]?.value) {
       const parsed = JSON.parse(rows[0].value);
-      // Only return early when there are real entries — an empty DB row
-      // must still fall through so the env-var fallback is considered.
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed as PoolEntry[];
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        kvSetJson(kvKey, parsed).catch(() => {});
+        return parsed as PoolEntry[];
+      }
     }
-  } catch {}
+  } catch { /* DB unavailable — fall through to KV */ }
 
-  // Env-var fallback — if the operator set e.g. FOURSQUARE_API_KEY in Replit
-  // Secrets, surface it as a virtual pool entry so the scraper still works.
+  // KV fallback
+  const kvPool = await kvGetJson<PoolEntry[]>(kvKey);
+  if (kvPool && kvPool.length > 0) return kvPool;
+
+  // Env-var fallback
   const envVal = process.env[`${provider.toUpperCase()}_API_KEY`];
   if (envVal) {
     return [{ id: "__env__", key: envVal, label: "From environment", addedAt: "" }];
@@ -60,21 +66,24 @@ export async function readPool(provider: string): Promise<PoolEntry[]> {
 async function writePool(provider: string, pool: PoolEntry[]): Promise<void> {
   const key = cfgKey(provider);
   const value = JSON.stringify(pool);
+  // Always write to KV
+  kvSetJson(key, pool).catch(() => {});
+  try {
+    const existing = await db
+      .select()
+      .from(siteConfigTable)
+      .where(eq(siteConfigTable.key, key))
+      .limit(1);
 
-  const existing = await db
-    .select()
-    .from(siteConfigTable)
-    .where(eq(siteConfigTable.key, key))
-    .limit(1);
-
-  if (existing.length > 0) {
-    await db
-      .update(siteConfigTable)
-      .set({ value, updatedAt: new Date() })
-      .where(eq(siteConfigTable.key, key));
-  } else {
-    await db.insert(siteConfigTable).values({ key, value });
-  }
+    if (existing.length > 0) {
+      await db
+        .update(siteConfigTable)
+        .set({ value, updatedAt: new Date() })
+        .where(eq(siteConfigTable.key, key));
+    } else {
+      await db.insert(siteConfigTable).values({ key, value });
+    }
+  } catch { /* DB unavailable — KV write is the fallback */ }
 }
 
 // ─── Public CRUD ──────────────────────────────────────────────────────────────

@@ -526,7 +526,17 @@ export async function runAutomationCycle(overrides?: {
   try {
     accounts = await db.select().from(emailAccountsTable).where(eq(emailAccountsTable.active, true));
   } catch { /* DB unavailable */ }
-  // Fall back to env-var SMTP account when no DB accounts exist
+  // KV store fallback — accounts saved via admin when DB was unreachable
+  if (accounts.length === 0) {
+    try {
+      const { kvGetJson } = await import("../lib/replit-kv");
+      const kvAccounts = await kvGetJson<(typeof emailAccountsTable.$inferSelect)[]>("EMAIL_ACCOUNTS");
+      if (kvAccounts && kvAccounts.length > 0) {
+        accounts = kvAccounts.filter(a => a.active && !a.autoPaused);
+      }
+    } catch { /* ignore */ }
+  }
+  // Final fallback: env-var SMTP account
   if (accounts.length === 0) {
     const smtpUser = process.env.SMTP_USER;
     const smtpPass = process.env.SMTP_PASSWORD;
