@@ -12,6 +12,11 @@ Replit's dev database (Helium) is at hostname `helium` (172.24.0.3) — only res
 
 **How to apply:** If the user reports DB errors in the deployed app, the fix is: open Publishing Settings → Production database → check both "Create production database" AND "Set up with current development data" → Publish. If that still fails, user must save config via the DEV admin panel URL (worf.replit.dev/admin), then publish with both options.
 
+## Recurrence after re-import (2026-07-09)
+After a fresh GitHub import, the dev (Helium) database itself had zero tables — `pnpm --filter @workspace/db run push` had never actually been run against it, despite replit.md claiming "DB schema pushed". This made *every* DB-backed feature (SMTP accounts, Gemini key pool) fail and silently fall back to KV/env, which looked like "nothing saves / test says account not found".
+
+**How to apply:** After any import or environment reset, don't trust replit.md's checklist at face value — verify with `SELECT table_name FROM information_schema.tables WHERE table_schema='public'` before assuming schema-dependent features are broken for a different reason. Re-run the db push script if the table list is empty. Separately, `getDeploymentInfo()` confirmed this repl has never actually been published (`isDeployed: false`) even though the user was hitting a `*.replit.app`-style URL — so the production Neon DB genuinely does not exist yet; publishing is required before production email/Gemini config can persist to a real DB (KV fallback still works without it).
+
 ## Env-Var Fallback (implemented)
 
 For email accounts and Gemini keys, env-var fallbacks were added so the AI Hunter works even without a production DB:
