@@ -1275,9 +1275,15 @@ Return JSON: { "message":"string" }`;
 
 router.post("/crm/generate-proposal", async (req, res) => {
   try {
-    const { businessName, category, issues, features, estimatedValue, agencyName, website } = req.body as Record<string, string>;
+    const { businessName, category, issues, features, estimatedValue, agencyName, website, customPrice, customDuration } = req.body as Record<string, string>;
+    const priceInstruction = customPrice
+      ? `The Investment section MUST state the price as exactly "${customPrice}" — do not invent a different figure or a range.`
+      : `Investment (pricing tiers if applicable), based on Estimated value: ${estimatedValue || "$500 - $1500"}`;
+    const durationInstruction = customDuration
+      ? `The Delivery Timeline MUST fit within "${customDuration}" total — break that exact duration down into stages, do not propose a longer or shorter overall timeframe.`
+      : `Delivery Timeline (week by week breakdown)`;
     const prompt = `Write a professional software proposal from ${agencyName || "DevStudio"} for ${businessName}, a ${category || "business"}.
-Context: Website: ${website || "No website"}, Problems found: ${issues || "manual processes, no online booking, poor digital presence"}, Recommended features: ${features || "booking system, customer portal, admin dashboard, payment integration"}, Estimated value: ${estimatedValue || "$500 - $1500"}
+Context: Website: ${website || "No website"}, Problems found: ${issues || "manual processes, no online booking, poor digital presence"}, Recommended features: ${features || "booking system, customer portal, admin dashboard, payment integration"}
 Write a full proposal with these sections:
 1. Executive Summary (2-3 sentences)
 2. Current Digital Situation (what they have now and what's missing)
@@ -1285,14 +1291,22 @@ Write a full proposal with these sections:
 4. Our Recommended Solution (describe the custom software)
 5. Key Features (bullet list with one-line description each)
 6. Business Benefits (5 measurable/realistic benefits)
-7. Delivery Timeline (week by week breakdown)
-8. Investment (pricing tiers if applicable)
+7. ${durationInstruction}
+8. ${priceInstruction}
 9. Why Choose ${agencyName || "DevStudio"} (3 compelling points)
 10. Next Steps (clear 3-step action plan)
 Be specific, professional, and persuasive. Every point should be specific to a ${category} business.
 Return JSON: { "sections":{"executiveSummary":"string","situation":"string","problems":["string"],"solution":"string","features":[{"name":"string","desc":"string"}],"benefits":["string"],"timeline":[{"week":"string","task":"string"}],"investment":"string","whyUs":["string"],"nextSteps":["string"]} }`;
     const text = await generateText(prompt);
     const data = parseJSON(text);
+    if (!data?.sections) throw new Error("AI returned an invalid proposal — please try again.");
+    if (customPrice) data.sections.investment = customPrice;
+    if (customDuration) {
+      data.sections.timeline = Array.isArray(data.sections.timeline) && data.sections.timeline.length
+        ? data.sections.timeline
+        : [{ week: customDuration, task: "Full project delivery" }];
+      data.sections.timelineSummary = `Total delivery time: ${customDuration}`;
+    }
     res.json(data);
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });

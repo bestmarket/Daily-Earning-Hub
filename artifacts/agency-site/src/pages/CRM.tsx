@@ -1747,6 +1747,8 @@ function ProposalPanel({ prospect, onUpdate }: { prospect: Prospect; onUpdate: (
   const [sending, setSending] = useState(false);
   const [sendStatus, setSendStatus] = useState<{ type: "success" | "error"; msg: string } | null>(null);
   const [error, setError] = useState("");
+  const [customPrice, setCustomPrice] = useState("");
+  const [customDuration, setCustomDuration] = useState("");
 
   const sendProposal = async () => {
     if (!prospect.email || !prospect.proposal) return;
@@ -1774,7 +1776,9 @@ function ProposalPanel({ prospect, onUpdate }: { prospect: Prospect; onUpdate: (
         website: prospect.website, agencyName: AGENCY_NAME,
         issues: a?.issues.map(i => i.title).join(", ") || "",
         features: a?.recommendedFeatures.join(", ") || "",
-        estimatedValue: a ? `$${a.estimatedValue.min.toLocaleString()} – $${a.estimatedValue.max.toLocaleString()}` : "",
+        estimatedValue: a ? `${a.estimatedValue.min.toLocaleString()} – ${a.estimatedValue.max.toLocaleString()}` : "",
+        customPrice: customPrice.trim() || undefined,
+        customDuration: customDuration.trim() || undefined,
       });
       onUpdate({ ...prospect, proposal: data });
     } catch (e: any) { setError(e.message); }
@@ -1792,6 +1796,19 @@ function ProposalPanel({ prospect, onUpdate }: { prospect: Prospect; onUpdate: (
         Generate a full professional proposal for {prospect.businessName}.
       </p>
       {!prospect.analysis && <p className="text-amber-600 text-xs mb-4">Tip: Run Website Analysis first for a more accurate proposal.</p>}
+      <div className="max-w-xs mx-auto grid grid-cols-2 gap-2 mb-4 text-left">
+        <div>
+          <label className="text-xs text-muted-foreground">Price (optional)</label>
+          <Input value={customPrice} onChange={e => setCustomPrice(e.target.value)} placeholder="e.g. $800" />
+        </div>
+        <div>
+          <label className="text-xs text-muted-foreground">Duration (optional)</label>
+          <Input value={customDuration} onChange={e => setCustomDuration(e.target.value)} placeholder="e.g. 1 week" />
+        </div>
+      </div>
+      <p className="text-xs text-muted-foreground mb-4 max-w-sm mx-auto">
+        Leave blank to let the AI estimate price and timeline instead.
+      </p>
       {error && <p className="text-red-500 text-sm mb-4">{error}</p>}
       <Button onClick={generate} className="gap-2 btn-premium text-white font-bold">
         <Sparkles className="w-4 h-4" /> Generate Proposal
@@ -1809,6 +1826,16 @@ function ProposalPanel({ prospect, onUpdate }: { prospect: Prospect; onUpdate: (
       )}
       <div className="flex items-center justify-between flex-wrap gap-2">
         <h3 className="font-bold text-lg">Proposal — {prospect.businessName}</h3>
+        <div className="flex items-end gap-2 flex-wrap">
+          <div>
+            <label className="text-xs text-muted-foreground">Price</label>
+            <Input value={customPrice} onChange={e => setCustomPrice(e.target.value)} placeholder="AI estimate" className="h-8 w-28 text-sm" />
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground">Duration</label>
+            <Input value={customDuration} onChange={e => setCustomDuration(e.target.value)} placeholder="AI estimate" className="h-8 w-28 text-sm" />
+          </div>
+        </div>
         <div className="flex gap-2 flex-wrap">
           <Button size="sm" variant="outline" onClick={generate} className="gap-1.5"><RefreshCw className="w-3.5 h-3.5" /> Regenerate</Button>
           <Button size="sm" variant="outline" onClick={() => window.print()} className="gap-1.5"><Download className="w-3.5 h-3.5" /> Print/PDF</Button>
@@ -1827,7 +1854,10 @@ function ProposalPanel({ prospect, onUpdate }: { prospect: Prospect; onUpdate: (
         { title: "Our Recommended Solution", content: <p className="text-sm leading-relaxed">{p.solution}</p> },
         { title: "Key Features", content: <div className="grid sm:grid-cols-2 gap-2">{p.features.map((f, i) => <div key={i} className="flex items-start gap-2 p-3 bg-primary/5 rounded-lg"><CheckCircle2 className="w-4 h-4 text-primary flex-shrink-0 mt-0.5" /><div><div className="text-sm font-semibold">{f.name}</div><div className="text-xs text-muted-foreground">{f.desc}</div></div></div>)}</div> },
         { title: "Business Benefits", content: <ul className="space-y-2">{p.benefits.map((b, i) => <li key={i} className="flex items-center gap-2 text-sm"><TrendingUp className="w-4 h-4 text-green-600 flex-shrink-0" />{b}</li>)}</ul> },
-        { title: "Delivery Timeline", content: <div className="space-y-2">{p.timeline.map((t, i) => <div key={i} className="flex items-start gap-3 p-3 bg-muted/30 rounded-lg"><div className="text-xs font-bold text-primary bg-primary/10 px-2 py-1 rounded flex-shrink-0">{t.week}</div><div className="text-sm">{t.task}</div></div>)}</div> },
+        { title: "Delivery Timeline", content: <div className="space-y-2">
+          {(p as any).timelineSummary && <p className="text-xs font-semibold text-primary mb-1">{(p as any).timelineSummary}</p>}
+          {p.timeline.map((t, i) => <div key={i} className="flex items-start gap-3 p-3 bg-muted/30 rounded-lg"><div className="text-xs font-bold text-primary bg-primary/10 px-2 py-1 rounded flex-shrink-0">{t.week}</div><div className="text-sm">{t.task}</div></div>)}
+        </div> },
         { title: "Investment", content: <p className="text-sm leading-relaxed">{p.investment}</p> },
         { title: "Why Choose DevStudio", content: <ul className="space-y-2">{p.whyUs.map((w, i) => <li key={i} className="flex items-start gap-2 text-sm"><Star className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />{w}</li>)}</ul> },
         { title: "Next Steps", content: <div className="space-y-2">{p.nextSteps.map((s, i) => <div key={i} className="flex items-center gap-3 p-3 bg-green-50 border border-green-200 rounded-lg"><div className="w-6 h-6 rounded-full bg-green-600 text-white text-xs font-bold flex items-center justify-center flex-shrink-0">{i + 1}</div><div className="text-sm">{s}</div></div>)}</div> },
