@@ -48,7 +48,7 @@ interface Prospect {
   painPoint?: string;
   emailSentAt?: string;
   analysis?: WebsiteAnalysis;
-  generatedEmail?: { subject: string; body: string };
+  generatedEmail?: { subject: string; body: string; emailVersions?: { version: string; subject: string; body: string }[]; selectedVersion?: string };
   generatedWhatsApp?: string;
   generatedLinkedIn?: string;
   proposal?: ProposalData;
@@ -1459,10 +1459,20 @@ function OutreachPanel({ prospect, onUpdate }: { prospect: Prospect; onUpdate: (
         businessName: prospect.businessName, ownerName: prospect.ownerName,
         category: prospect.category, website: prospect.website,
         issues, opportunities, agencyName: AGENCY_NAME,
-        pitchType:   prospect.pitchType   || "both",
-        aiAgentType: prospect.aiAgentType || "",
+        reportUrl: prospect.reportUrl || "",
       });
-      onUpdate({ ...prospect, generatedEmail: data });
+      // If API returned versions (A/B/C), store them; default to version A
+      const versions: { version: string; subject: string; body: string }[] = data.versions || [];
+      const primary = versions[0] ?? { version: "A", subject: data.subject, body: data.body };
+      onUpdate({
+        ...prospect,
+        generatedEmail: {
+          subject: primary.subject,
+          body: primary.body,
+          emailVersions: versions.length > 0 ? versions : undefined,
+          selectedVersion: primary.version || "A",
+        },
+      });
     } catch (e: any) { setError(e.message); }
     finally { setLoadingEmail(false); }
   };
@@ -1584,6 +1594,34 @@ function OutreachPanel({ prospect, onUpdate }: { prospect: Prospect; onUpdate: (
             )}
           </div>
         </div>
+        {/* A/B/C version tabs — shown when multiple versions are available */}
+        {!loadingEmail && prospect.generatedEmail?.emailVersions && prospect.generatedEmail.emailVersions.length > 1 && (
+          <div className="flex items-center gap-1.5 px-4 py-2 border-b border-border/50 bg-muted/10">
+            <span className="text-xs text-muted-foreground mr-1">Variant:</span>
+            {prospect.generatedEmail.emailVersions.map(v => (
+              <button
+                key={v.version}
+                onClick={() => onUpdate({
+                  ...prospect,
+                  generatedEmail: {
+                    ...prospect.generatedEmail!,
+                    subject: v.subject,
+                    body: v.body,
+                    selectedVersion: v.version,
+                  },
+                })}
+                className={`px-2.5 py-0.5 text-xs font-bold rounded-full border transition-colors ${
+                  prospect.generatedEmail?.selectedVersion === v.version
+                    ? "bg-primary text-white border-primary"
+                    : "bg-background text-muted-foreground border-border hover:border-primary/50 hover:text-primary"
+                }`}
+              >
+                {v.version}
+              </button>
+            ))}
+            <span className="ml-auto text-xs text-muted-foreground">Pick the best variant before sending</span>
+          </div>
+        )}
         {loadingEmail ? <LoadingSpinner text="Crafting personalized email…" /> : prospect.generatedEmail ? (
           <div className="p-4 space-y-3">
             {prospect.email && (

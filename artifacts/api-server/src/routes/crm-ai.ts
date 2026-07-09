@@ -1137,7 +1137,7 @@ Be realistic and specific to a ${category} business. If no website is provided, 
 
 router.post("/crm/generate-email", async (req, res) => {
   try {
-    const { businessName, ownerName, category, website, issues, opportunities, agencyName, pitchType, aiAgentType } = req.body as Record<string, string>;
+    const { businessName, ownerName, category, website, issues, opportunities, agencyName: reqAgencyName, reportUrl } = req.body as Record<string, string>;
 
     // Scrape real website for genuine personalisation
     const siteContent = await scrapeWebsite(website);
@@ -1145,42 +1145,78 @@ router.post("/crm/generate-email", async (req, res) => {
       ? `\nReal content from their website:\n"""\n${siteContent}\n"""`
       : "";
 
-    const isAgentPitch = pitchType === "ai_agent" || pitchType === "both";
-    const agentTypeLabels: Record<string, string> = {
-      receptionist: "AI receptionist (answers enquiries 24/7, handles FAQs, books appointments)",
-      booking:      "AI booking bot (takes reservations automatically, sends reminders)",
-      sales:        "AI sales bot (qualifies incoming leads, follows up automatically)",
-      support:      "AI support bot (handles complaints, order status, returns without staff)",
-      social:       "social media AI bot (auto-replies to DMs and comments instantly)",
-    };
-    const agentDesc = agentTypeLabels[aiAgentType || "receptionist"] || agentTypeLabels.receptionist;
+    const agencyName = reqAgencyName || process.env.AGENCY_NAME || "DevStudio";
+    const agencyWebsite = getAgencyBaseUrl(req);
+    const ownerGreeting = ownerName ? `Hi ${ownerName},` : `Hi ${businessName || "there"} Team,`;
 
-    const agentFramework = `
-Framework — AI AGENT PITCH (follow exactly, 100 words max body):
-1. Open with their SPECIFIC pain: missed calls / unanswered bookings / slow DM replies — be concrete, name the gap you see for a ${category || "business"} like theirs
-2. Name the COST: customers going to a competitor, revenue slipping through after hours
-3. ONE sentence: "I built a ${agentDesc} that handles this automatically."
-4. CTA: Low-pressure reply invite — e.g. "Worth seeing how it works for a ${category}? Just hit reply." ZERO mention of a call.`;
+    // Embed the report URL directly if available; otherwise include a polite placeholder
+    const reportLine = reportUrl
+      ? `We put together a free personalised website report for you — you can view it here: ${reportUrl}`
+      : "We put together a free personalised website report for you — we'll include the link when we send this.";
 
-    const websiteFramework = `
-Framework — WEBSITE / SOFTWARE PITCH (follow exactly, 100 words max body):
-1. ONE specific observation from their actual site or business type (name something real)
-2. The exact pain this causes (lost leads, no bookings, no trust)
-3. One sentence: what you'd build to fix it
-4. CTA: "Does any of this apply to you? Just reply." No call mention.`;
+    const prompt = `Write THREE personalised cold email versions (A, B, C) from ${agencyName} to ${businessName}, a ${category || "business"}.
 
-    const framework = isAgentPitch ? agentFramework : websiteFramework;
+BUSINESS CONTEXT:
+- Owner: ${ownerName || "the owner"}
+- Website: ${website || "no website"}
+- Issues found: ${issues || "no strong online presence, missing automation"}
+- Opportunities: ${opportunities || "custom software, booking system, AI tools"}${siteContext}
 
-    const prompt = `Write a high-converting cold outreach email from Daniel at ${agencyName || "DevStudio"} to ${businessName}, a ${category || "business"}.
-Context: Owner: ${ownerName || "the owner"}, Website: ${website || "no website"}, Issues found: ${issues || "outdated systems, no automation"}, Opportunity: ${opportunities || "AI agent or custom software to save time and grow revenue"}${siteContext}
-${framework}
-RULES: Max 100 words body. NEVER say "I hope this finds you well", "I wanted to reach out", or any AI filler. No buzzwords. Subject: max 6 words, curiosity-driven. Sign off: "Daniel, DevStudio". Sound like a real person wrote this at 9am. If no website content — make the opening specific to their ${category} business type.
-Return JSON: { "subject":"string","body":"string" }`;
+EMAIL STRUCTURE — follow exactly for all three versions:
+
+1. SUBJECT LINE
+   Generate 5 candidates internally, then select the single best one.
+   Rules: max 7 words, curiosity-driven, no clickbait, no ALL CAPS, no spam words.
+   Each version (A/B/C) must use a DIFFERENT angle.
+   Good examples: "A few ideas for ${businessName}'s website" / "Quick website review for ${businessName}" / "We noticed a few things on your site"
+
+2. OPENING
+   Use exactly: "${ownerGreeting}"
+   Then one natural sentence about having reviewed their website or business — no filler.
+
+3. PERSONALISED OBSERVATIONS
+   Mention ONLY 2–3 specific issues that actually exist in the analysis (e.g. missing booking system, no email capture, weak SEO, slow mobile, no chatbot).
+   NEVER mention a problem that wasn't detected. Be specific — name the actual gap.
+
+4. BUSINESS IMPACT
+   1–2 sentences on what those gaps cost them in real terms (missed enquiries, lost trust, revenue slipping away).
+   No exaggerated claims. No promises of "guaranteed results".
+
+5. REPORT LINK (required in every version — include this line exactly)
+   "${reportLine}"
+
+6. SOFT CTA
+   One sentence only. Never pushy.
+   Examples: "If any of this resonates, just reply to this email." / "Happy to answer any questions over email."
+
+7. SIGNATURE
+   End every version with exactly:
+   Best regards,
+   ${agencyName}${agencyWebsite ? "\n   " + agencyWebsite : ""}
+
+EMAIL RULES (apply to all three versions):
+• Under 180 words total per version (count every word including the signature).
+• Read like a real person wrote it at 9am, not a marketing template.
+• No sales clichés, no generic AI phrases, no buzzwords.
+• A = professional/direct, B = friendly/conversational, C = insight-led/analytical.
+• FORBIDDEN phrases: "guaranteed results", "limited time offer", "buy now", "act fast", "amazing opportunity", "earn more instantly", "I hope this finds you well", "I wanted to reach out", "game-changer", "leverage", "synergy", "boost your sales", "skyrocket", "Don't miss out", "transform your business", "revolutionary", "cutting-edge"
+
+Return ONLY valid JSON (no markdown, no prose):
+{ "versions":[{"version":"A","subject":"string","body":"string"},{"version":"B","subject":"string","body":"string"},{"version":"C","subject":"string","body":"string"}] }`;
+
     const text = await generateText(prompt);
     const data = parseJSON(text);
-    if (data?.subject) data.subject = fillPlaceholders(data.subject);
-    if (data?.body) data.body = fillPlaceholders(data.body);
-    res.json(data);
+    const versions: { version: string; subject: string; body: string }[] = data?.versions || [];
+
+    const processed = versions.map(v => ({
+      version: v.version,
+      subject: fillPlaceholders(v.subject || ""),
+      body: fillPlaceholders(v.body || ""),
+    }));
+
+    const primary = processed[0] ?? { version: "A", subject: "", body: "" };
+    // Return versions array + convenience subject/body from version A for backward compatibility
+    res.json({ versions: processed, subject: primary.subject, body: primary.body });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
