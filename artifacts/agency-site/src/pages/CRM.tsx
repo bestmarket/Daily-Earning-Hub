@@ -191,6 +191,16 @@ const CATEGORIES = [
   // Home & Trade Services
   "Construction", "Electrician", "Plumber", "Landscaping",
   "Cleaning Service", "Security Company", "Pest Control",
+  // Home Services — Tier 2/3 (roofing, HVAC, remodeling, restoration…)
+  "Roofing Company", "Roofing & Solar Company", "Solar Company",
+  "HVAC Company", "Plumbing Company", "Electrical Contractor",
+  "Remodeling / Home Renovation Company", "Water Damage & Restoration Company",
+  "Tree Service Company",
+  // Dental & Medical Specialties
+  "Dental Clinic", "Cosmetic Dentist", "Orthodontist", "Med Spa",
+  // Legal & Professional — Tier 2/3
+  "Law Firm - Personal Injury", "Law Firm - Family", "Law Firm - Immigration",
+  "Accounting Firm", "Insurance Agency", "Real Estate Team",
   // Logistics & Transport
   "Logistics Company", "Courier Service", "Moving Company",
   // Technology
@@ -753,7 +763,11 @@ function EmailSettingsPanel() {
 // ─── AI Hunter Panel ──────────────────────────────────────────────────────────
 
 function AIHunterPanel({ onImport }: { onImport: (prospects: Omit<Prospect, "id" | "addedAt">[]) => void }) {
-  const [category, setCategory] = useState("Restaurant");
+  // `categories` supports selecting one or many business types at once.
+  // Kept as an array from the start (default: a single category) so every
+  // existing single-category flow below keeps working unchanged.
+  const [categories, setCategories] = useState<string[]>(["Restaurant"]);
+  const [categorySearch, setCategorySearch] = useState("");
   const [city, setCity] = useState("");
   const [country, setCountry] = useState("");
   const [count, setCount] = useState("50");
@@ -768,45 +782,77 @@ function AIHunterPanel({ onImport }: { onImport: (prospects: Omit<Prospect, "id"
   const [bulkCities, setBulkCities] = useState("");
 
   const hunt = async () => {
+    if (categories.length === 0) { setError("Select at least one business category."); return; }
+    const catLabel = categories.length > 1 ? `${categories.length} categories` : categories[0];
+
+    // Dedup helper shared by both modes below — a business can legitimately
+    // show up under more than one category search, so we merge by name+city.
+    const dedupKey = (b: HuntedBusiness) => `${b.businessName}|${b.city}`.toLowerCase().replace(/[^a-z0-9|]/g, "");
+
     if (bulkMode) {
       const cityList = bulkCities.split(/[\n,]+/).map(c => c.trim()).filter(Boolean);
       if (cityList.length === 0) { setError("Enter at least one city in the list."); return; }
       setHunting(true); setError(""); setResults([]);
-      setProgress(`🌍 Bulk hunting across ${cityList.length} cities — this takes a few minutes…`);
+      setProgress(`🌍 Bulk hunting ${catLabel} across ${cityList.length} cities — this takes a few minutes…`);
       try {
-        const resp = await callCRM("bulk-hunt", {
-          category,
-          cities: cityList,
-          country: country.trim(),
-          countPerCity: Number(count),
-          extraContext,
-        });
-        const businesses: HuntedBusiness[] = Array.isArray(resp) ? resp : (resp.prospects ?? []);
-        const filtered: number = resp.filtered ?? 0;
-        const tagged = businesses
-          .map((b: HuntedBusiness) => ({ ...b, selected: true, imported: false, importing: false }))
-          .sort((a, b) => (b.softwareNeedScore ?? 0) - (a.softwareNeedScore ?? 0));
-        setResults(tagged);
-        const cityResultsText = resp.cityResults
-          ? Object.entries(resp.cityResults as Record<string, number>).map(([c, n]) => `${c}: ${n}`).join(", ")
-          : "";
-        setProgress(`✓ Bulk hunt done — ${tagged.length} unique ${category} businesses across ${cityList.length} cities${filtered > 0 ? ` (${filtered} dead domains removed)` : ""}${cityResultsText ? ` · ${cityResultsText}` : ""}`);
+        const seen = new Set<string>();
+        const merged: HuntedBusiness[] = [];
+        let totalFiltered = 0;
+        const cityResultsAgg: Record<string, number> = {};
+        // One bulk-hunt call per selected category — each call already covers
+        // every city in cityList server-side, then we merge + dedupe here.
+        for (const cat of categories) {
+          const resp = await callCRM("bulk-hunt", {
+            category: cat,
+            cities: cityList,
+            country: country.trim(),
+            countPerCity: Number(count),
+            extraContext,
+          });
+          const businesses: HuntedBusiness[] = Array.isArray(resp) ? resp : (resp.prospects ?? []);
+          totalFiltered += resp.filtered ?? 0;
+          for (const b of businesses) {
+            const key = dedupKey(b);
+            if (seen.has(key)) continue;
+            seen.add(key);
+            merged.push({ ...b, selected: true, imported: false, importing: false });
+          }
+          if (resp.cityResults) {
+            for (const [c, n] of Object.entries(resp.cityResults as Record<string, number>)) {
+              cityResultsAgg[c] = (cityResultsAgg[c] ?? 0) + Number(n);
+            }
+          }
+        }
+        merged.sort((a, b) => (b.softwareNeedScore ?? 0) - (a.softwareNeedScore ?? 0));
+        setResults(merged);
+        const cityResultsText = Object.entries(cityResultsAgg).map(([c, n]) => `${c}: ${n}`).join(", ");
+        setProgress(`✓ Bulk hunt done — ${merged.length} unique businesses (${catLabel}) across ${cityList.length} cities${totalFiltered > 0 ? ` (${totalFiltered} dead domains removed)` : ""}${cityResultsText ? ` · ${cityResultsText}` : ""}`);
       } catch (e: any) {
         setError(e.message); setProgress("");
       } finally { setHunting(false); }
     } else {
       if (!city.trim()) { setError("Please enter a city to hunt in."); return; }
-      setHunting(true); setError(""); setResults([]); setProgress("🔍 AI is scanning for businesses…");
+      setHunting(true); setError(""); setResults([]); setProgress(`🔍 AI is scanning for ${catLabel} businesses…`);
       try {
-        const resp = await callCRM("hunt-businesses", {
-          category, city: city.trim(), country: country.trim(), count: Number(count), extraContext,
-        });
-        const businesses: HuntedBusiness[] = Array.isArray(resp) ? resp : (resp.prospects ?? []);
-        const filtered: number = resp.filtered ?? 0;
-        const tagged = businesses.map((b: HuntedBusiness) => ({ ...b, selected: true, imported: false, importing: false }));
-        setResults(tagged);
-        const filterNote = filtered > 0 ? ` (${filtered} with dead domains removed)` : "";
-        setProgress(`✓ Found ${tagged.length} ${category} businesses in ${city}${filterNote}`);
+        const seen = new Set<string>();
+        const merged: HuntedBusiness[] = [];
+        let totalFiltered = 0;
+        for (const cat of categories) {
+          const resp = await callCRM("hunt-businesses", {
+            category: cat, city: city.trim(), country: country.trim(), count: Number(count), extraContext,
+          });
+          const businesses: HuntedBusiness[] = Array.isArray(resp) ? resp : (resp.prospects ?? []);
+          totalFiltered += resp.filtered ?? 0;
+          for (const b of businesses) {
+            const key = dedupKey(b);
+            if (seen.has(key)) continue;
+            seen.add(key);
+            merged.push({ ...b, selected: true, imported: false, importing: false });
+          }
+        }
+        setResults(merged);
+        const filterNote = totalFiltered > 0 ? ` (${totalFiltered} with dead domains removed)` : "";
+        setProgress(`✓ Found ${merged.length} ${catLabel} businesses in ${city}${filterNote}`);
       } catch (e: any) {
         setError(e.message); setProgress("");
       } finally { setHunting(false); }
@@ -924,12 +970,43 @@ function AIHunterPanel({ onImport }: { onImport: (prospects: Omit<Prospect, "id"
           <h3 className="font-bold text-sm flex items-center gap-2"><Filter className="w-4 h-4" /> Hunt Settings</h3>
         </div>
         <div className="p-4 grid grid-cols-2 gap-3">
-          <div>
-            <label className="text-xs font-semibold text-muted-foreground mb-1 block">Business Category</label>
-            <Select value={category} onValueChange={setCategory}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent className="max-h-72 overflow-y-auto">{CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
-            </Select>
+          <div className="col-span-2">
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs font-semibold text-muted-foreground block">
+                Business Categories <span className="text-muted-foreground/70 font-normal">(select one or more)</span>
+              </label>
+              {categories.length > 0 && (
+                <button type="button" onClick={() => setCategories([])} className="text-xs text-muted-foreground hover:text-red-600">
+                  Clear
+                </button>
+              )}
+            </div>
+            <Input
+              value={categorySearch}
+              onChange={e => setCategorySearch(e.target.value)}
+              placeholder="Search categories (e.g. roofing, dental, law firm)…"
+              className="mb-2"
+            />
+            <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto p-2 border border-border rounded-lg bg-muted/10">
+              {CATEGORIES.filter(c => c.toLowerCase().includes(categorySearch.toLowerCase())).map(c => {
+                const active = categories.includes(c);
+                return (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => setCategories(prev => active ? prev.filter(x => x !== c) : [...prev, c])}
+                    className={`text-xs px-2.5 py-1 rounded-full border font-medium transition-colors ${
+                      active ? "bg-purple-600 text-white border-purple-600" : "bg-white text-muted-foreground border-border hover:border-purple-300"
+                    }`}
+                  >
+                    {c}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              {categories.length === 0 ? "No categories selected." : `${categories.length} selected: ${categories.join(", ")}`}
+            </p>
           </div>
           <div>
             <label className="text-xs font-semibold text-muted-foreground mb-1 block">
@@ -1004,12 +1081,12 @@ function AIHunterPanel({ onImport }: { onImport: (prospects: Omit<Prospect, "id"
         </div>
         <div className="px-4 pb-4">
           {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-3">{error}</div>}
-          <Button onClick={hunt} disabled={hunting || (!bulkMode && !city.trim()) || (bulkMode && !bulkCities.trim())} className="w-full gap-2 btn-premium text-white font-bold h-11">
+          <Button onClick={hunt} disabled={hunting || categories.length === 0 || (!bulkMode && !city.trim()) || (bulkMode && !bulkCities.trim())} className="w-full gap-2 btn-premium text-white font-bold h-11">
             {hunting
               ? <><RefreshCw className="w-4 h-4 animate-spin" /> {bulkMode ? "Bulk hunting across cities…" : "Hunting businesses…"}</>
               : bulkMode
-              ? <><Globe className="w-4 h-4" /> Start Bulk Hunt ({bulkCities.split(/[\n,]+/).filter(c => c.trim()).length} cities × {count})</>
-              : <><Radar className="w-4 h-4" /> Start AI Hunt</>}
+              ? <><Globe className="w-4 h-4" /> Start Bulk Hunt ({bulkCities.split(/[\n,]+/).filter(c => c.trim()).length} cities × {categories.length || 1} categor{categories.length === 1 ? "y" : "ies"} × {count})</>
+              : <><Radar className="w-4 h-4" /> Start AI Hunt ({categories.length || 1} categor{categories.length === 1 ? "y" : "ies"})</>}
           </Button>
         </div>
       </div>
