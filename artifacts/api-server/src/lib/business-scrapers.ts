@@ -941,7 +941,7 @@ function analyzeAIOpportunity(html: string): { score: number; note: string } {
   return { score: 7, note: "Has a basic contact form but no chat, booking, or AI assistant — good AI agent opportunity." };
 }
 
-async function scrapeEmailFromSite(rawUrl: string): Promise<{ email: string; aiOpportunityScore: number; aiOpportunityNote: string }> {
+async function scrapeEmailFromSiteInner(rawUrl: string): Promise<{ email: string; aiOpportunityScore: number; aiOpportunityNote: string }> {
   const fallback = { email: "", aiOpportunityScore: 5, aiOpportunityNote: "Website could not be scanned — need unverified." };
   if (!rawUrl || SKIP_WEBSITE.test(rawUrl)) return fallback;
   const fullUrl = rawUrl.startsWith("http") ? rawUrl : `https://${rawUrl}`;
@@ -955,7 +955,7 @@ async function scrapeEmailFromSite(rawUrl: string): Promise<{ email: string; aiO
             "Accept": "text/html",
           },
         }),
-        new Promise<never>((_, rj) => setTimeout(() => rj(new Error("timeout")), 8000)),
+        new Promise<never>((_, rj) => setTimeout(() => rj(new Error("timeout")), 5000)),
       ]) as Response;
       if (!r.ok) return null;
       const html = await r.text();
@@ -980,15 +980,12 @@ async function scrapeEmailFromSite(rawUrl: string): Promise<{ email: string; aiO
     const { score, note } = analyzeAIOpportunity(main.html);
     if (main.email) return { email: main.email, aiOpportunityScore: score, aiOpportunityNote: note };
 
-    // Probe common contact/about pages for an email, but keep the homepage's opportunity read —
-    // the homepage is what a prospective client actually sees first.
+    // Probe only the 3 highest-hit-rate contact/about pages, not all 10 — every
+    // extra page is a full network round trip, and with hundreds of businesses
+    // per hunt those add up to minutes of dead time for a marginal email gain.
     try {
       const origin = new URL(fullUrl).origin;
-      for (const path of [
-        "/contact", "/contact-us", "/contact-us/", "/contacts",
-        "/about", "/about-us", "/about/",
-        "/get-in-touch", "/reach-us", "/our-team", "/team", "/staff",
-      ]) {
+      for (const path of ["/contact", "/contact-us", "/about"]) {
         const found = await tryFetch(`${origin}${path}`);
         if (found?.email) return { email: found.email, aiOpportunityScore: score, aiOpportunityNote: note };
       }
@@ -998,6 +995,24 @@ async function scrapeEmailFromSite(rawUrl: string): Promise<{ email: string; aiO
   }
 
   return fallback;
+}
+
+/**
+ * Wraps scrapeEmailFromSiteInner with a hard overall budget. A single slow/hanging
+ * site could otherwise burn 4 sequential fetches (main + 3 sub-pages) at up to 5s
+ * each — this caps the worst case per business so one bad domain can't stall an
+ * entire hunt batch.
+ */
+async function scrapeEmailFromSite(rawUrl: string): Promise<{ email: string; aiOpportunityScore: number; aiOpportunityNote: string }> {
+  const fallback = { email: "", aiOpportunityScore: 5, aiOpportunityNote: "Website could not be scanned — need unverified." };
+  try {
+    return await Promise.race([
+      scrapeEmailFromSiteInner(rawUrl),
+      new Promise<typeof fallback>(resolve => setTimeout(() => resolve(fallback), 12000)),
+    ]);
+  } catch {
+    return fallback;
+  }
 }
 
 // ─── SCRAPER 15: Google Maps (free — parses embedded place data) ──────────────
@@ -1288,14 +1303,29 @@ export async function scrapeBusinessDirectories(
     return true;
   });
 
-  // Enrich with emails + AI-opportunity scan — 10 concurrent for speed
-  const CONCURRENCY = 10;
-  for (let i = 0; i < deduped.length; i += CONCURRENCY) {
+  // With 18 sources each contributing up to `needed` results, `deduped` can run
+  // to hundreds of entries even for a small request (e.g. count=10 × 18 sources
+  // ≈ up to 180 candidates before dedup shrinks it). Every one of those gets a
+  // real website fetch below, so scraping ALL of them for one city/category is
+  // what actually produces the "endless hunting" — cap the enrichment work to a
+  // generous multiple of what was asked for instead of the full candidate pool.
+  // Entries that already have an email from their source (no fetch needed) are
+  // prioritized first so we never do wasted network work to keep a business
+  // that would have been free.
+  const withEmail = deduped.filter(b => b.email);
+  const withoutEmail = deduped.filter(b => !b.email);
+  const enrichCap = Math.max(needed * 4, 40);
+  const toEnrich = withoutEmail.slice(0, Math.max(enrichCap - withEmail.length, 0));
+  const workingSet = [...withEmail, ...toEnrich];
+
+  // Enrich with emails + AI-opportunity scan — 20 concurrent for speed
+  const CONCURRENCY = 20;
+  for (let i = 0; i < workingSet.length; i += CONCURRENCY) {
     await Promise.all(
-      deduped.slice(i, i + CONCURRENCY).map(async biz => {
-        if (biz.website) {
+      workingSet.slice(i, i + CONCURRENCY).map(async biz => {
+        if (biz.website && !biz.email) {
           const result = await scrapeEmailFromSite(biz.website);
-          if (!biz.email) biz.email = result.email;
+          biz.email = result.email;
           biz.aiOpportunityScore = result.aiOpportunityScore;
           biz.aiOpportunityNote = result.aiOpportunityNote;
         }
