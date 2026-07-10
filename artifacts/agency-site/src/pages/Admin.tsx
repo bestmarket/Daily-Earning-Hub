@@ -147,6 +147,8 @@ export default function Admin() {
     if (stored) { setApiToken(stored); setAuthed(true); }
   }, []);
 
+  const reauthRequested = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("reauth") === "1";
+
   if (!authed) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-6">
@@ -158,6 +160,11 @@ export default function Admin() {
             <h1 className="text-2xl font-bold">Admin Panel</h1>
             <p className="text-sm text-muted-foreground">DevStudio Control Center</p>
           </div>
+          {reauthRequested && (
+            <div className="text-sm text-center px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800">
+              Your session expired. Please log in again to continue.
+            </div>
+          )}
           <div className="space-y-3">
             <Input
               type="password"

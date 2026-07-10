@@ -233,6 +233,30 @@ function apiBase() {
   return API_BASE.replace("/agency-site", "");
 }
 
+// Session expired / never logged in: clear the stale token and send the user
+// back to /admin to log in again, since this page has no login form of its own.
+function handleAuthFailure() {
+  localStorage.removeItem("ds_api_token");
+  if (typeof window !== "undefined") {
+    window.location.href = "/admin?reauth=1";
+  }
+}
+
+// Shared authenticated fetch for admin-protected CRM endpoints. Any 401
+// means the token is missing/stale, so bounce to /admin to log in again
+// instead of leaving the panel in a silent-fail state.
+async function authFetch(path: string, init: RequestInit = {}) {
+  const tok = localStorage.getItem("ds_api_token") ?? "";
+  const r = await fetch(`${apiBase()}${path}`, {
+    ...init,
+    headers: { ...(init.headers || {}), Authorization: `Bearer ${tok}` },
+  });
+  if (r.status === 401) {
+    handleAuthFailure();
+  }
+  return r;
+}
+
 async function callCRM(endpoint: string, body: object) {
   const tok = localStorage.getItem("ds_api_token") ?? "";
   const r = await fetch(`${apiBase()}/api/crm/${endpoint}`, {
@@ -240,6 +264,10 @@ async function callCRM(endpoint: string, body: object) {
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${tok}` },
     body: JSON.stringify(body),
   });
+  if (r.status === 401) {
+    handleAuthFailure();
+    throw new Error("Your admin session expired — redirecting you to log in again.");
+  }
   if (!r.ok) {
     const err = await r.json().catch(() => ({}));
     throw new Error((err as any).error || `API error ${r.status}`);
@@ -1447,13 +1475,8 @@ function OutreachPanel({ prospect, onUpdate }: { prospect: Prospect; onUpdate: (
     if (!prospect.email || !prospect.proposal) return;
     setSendingProposal(true); setSendStatus(null);
     try {
-      const r = await fetch(`${apiBase()}/api/crm/send-proposal-email`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ to: prospect.email, prospectName: prospect.businessName, proposal: prospect.proposal, agencyName: AGENCY_NAME }),
-      });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error((d as any).error || `Request failed (${r.status})`);
+      // Protected route — must go through callCRM() for the bearer token / 401 handling.
+      await callCRM("send-proposal-email", { to: prospect.email, prospectName: prospect.businessName, proposal: prospect.proposal, agencyName: AGENCY_NAME });
       onUpdate({ ...prospect, status: "proposal_sent" });
       setSendStatus({ type: "success", msg: `Proposal emailed to ${prospect.email}` });
     } catch (e: any) { setSendStatus({ type: "error", msg: e.message }); }
@@ -1492,20 +1515,18 @@ function OutreachPanel({ prospect, onUpdate }: { prospect: Prospect; onUpdate: (
     if (!prospect.email || !prospect.generatedEmail) return;
     setSendingEmail(true); setSendStatus(null);
     try {
-      const r = await fetch(`${apiBase()}/api/crm/send-email`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          to: prospect.email,
-          subject: prospect.generatedEmail.subject,
-          body: prospect.generatedEmail.body,
-          prospectName: prospect.businessName,
-          // Pass the report URL so the backend appends the report section to the email
-          reportUrl: (prospect as any).reportUrl ?? undefined,
-        }),
+      // NOTE: this must go through callCRM() so it carries the admin bearer
+      // token — send-email is a protected route. A previous version called
+      // fetch() directly with no Authorization header, which always got a
+      // 401 "Unauthorized" from the backend no matter what was in localStorage.
+      await callCRM("send-email", {
+        to: prospect.email,
+        subject: prospect.generatedEmail.subject,
+        body: prospect.generatedEmail.body,
+        prospectName: prospect.businessName,
+        // Pass the report URL so the backend appends the report section to the email
+        reportUrl: (prospect as any).reportUrl ?? undefined,
       });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error((d as any).error || `Request failed (${r.status})`);
       onUpdate({ ...prospect, status: "contacted", emailSentAt: new Date().toISOString() });
       setSendStatus({ type: "success", msg: `Email sent to ${prospect.email}` });
     } catch (e: any) {
@@ -1754,13 +1775,8 @@ function ProposalPanel({ prospect, onUpdate }: { prospect: Prospect; onUpdate: (
     if (!prospect.email || !prospect.proposal) return;
     setSending(true); setSendStatus(null);
     try {
-      const r = await fetch(`${apiBase()}/api/crm/send-proposal-email`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ to: prospect.email, prospectName: prospect.businessName, proposal: prospect.proposal, agencyName: AGENCY_NAME }),
-      });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error((d as any).error || `Request failed (${r.status})`);
+      // Protected route — must go through callCRM() for the bearer token / 401 handling.
+      await callCRM("send-proposal-email", { to: prospect.email, prospectName: prospect.businessName, proposal: prospect.proposal, agencyName: AGENCY_NAME });
       onUpdate({ ...prospect, status: "proposal_sent" });
       setSendStatus({ type: "success", msg: `HTML proposal sent to ${prospect.email}` });
     } catch (e: any) { setSendStatus({ type: "error", msg: e.message }); }
@@ -2341,14 +2357,10 @@ function ApiKeyPoolManager({
   const [error, setError] = useState("");
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  // Read the admin token from localStorage (set when logging in via /admin)
-  const adminToken = () => localStorage.getItem("ds_api_token") ?? "";
-  const authHeader = (): Record<string, string> => ({ Authorization: `Bearer ${adminToken()}` });
-
   const loadKeys = useCallback(async () => {
     setLoadingKeys(true);
     try {
-      const r = await fetch(`${apiBase()}/api/api-pools/${provider}`, { headers: authHeader() });
+      const r = await authFetch(`/api/api-pools/${provider}`);
       if (r.ok) { const d = await r.json(); setKeys(d.keys ?? []); }
     } finally { setLoadingKeys(false); }
   }, [provider]);
@@ -2359,9 +2371,9 @@ function ApiKeyPoolManager({
     if (!newKey.trim()) return;
     setAdding(true); setError("");
     try {
-      const r = await fetch(`${apiBase()}/api/api-pools/${provider}`, {
+      const r = await authFetch(`/api/api-pools/${provider}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeader() },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ apiKey: newKey.trim(), label: newLabel.trim() || undefined }),
       });
       const d = await r.json();
@@ -2376,7 +2388,7 @@ function ApiKeyPoolManager({
   const deleteKey = async (id: string) => {
     setDeletingId(id);
     try {
-      await fetch(`${apiBase()}/api/api-pools/${provider}/${id}`, { method: "DELETE", headers: authHeader() });
+      await authFetch(`/api/api-pools/${provider}/${id}`, { method: "DELETE" });
       setKeys(k => k.filter(e => e.id !== id));
       onUpdated();
     } finally { setDeletingId(null); }
@@ -2482,15 +2494,12 @@ function AutomationPanel() {
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
   const [dsOpen, setDsOpen] = useState(false);
 
-  const adminToken = () => localStorage.getItem("ds_api_token") ?? "";
-  const authHdr = () => ({ Authorization: `Bearer ${adminToken()}` });
-
   const load = useCallback(async () => {
     try {
       const [sRes, stRes, dsRes] = await Promise.all([
         fetch(`${apiBase()}/api/automation/settings`),
         fetch(`${apiBase()}/api/automation/status`),
-        fetch(`${apiBase()}/api/api-pools/status`, { headers: authHdr() }),
+        authFetch(`/api/api-pools/status`),
       ]);
       if (sRes.ok)  setSettings(await sRes.json());
       if (stRes.ok) setStatus(await stRes.json());
@@ -2832,10 +2841,7 @@ function InboxPanel() {
   const loadRequests = useCallback(async () => {
     setRequestsLoading(true);
     try {
-      const token = localStorage.getItem("ds_api_token") || "";
-      const r = await fetch(`${apiBase()}/api/admin/custom-requests`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const r = await authFetch(`/api/admin/custom-requests`);
       if (r.ok) setRequests(await r.json());
     } finally { setRequestsLoading(false); }
   }, []);
@@ -3059,6 +3065,16 @@ export default function CRM() {
   const [prospects, setProspects] = useState<Prospect[]>(loadProspects);
   const [selected, setSelected] = useState<Prospect | null>(null);
   const [tab, setTab] = useState("hunter");
+
+  // This page has no login form of its own — it reuses the token set by /admin.
+  // If it's missing (never logged in this browser, or cleared after a password
+  // change), every action below would silently fail with "Unauthorized" and
+  // there'd be no way to recover from here, so send the user to /admin to log in.
+  useEffect(() => {
+    if (!localStorage.getItem("ds_api_token")) {
+      window.location.href = "/admin?reauth=1";
+    }
+  }, []);
 
   const save = useCallback((data: Prospect[]) => {
     setProspects(data);
