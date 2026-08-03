@@ -24,6 +24,7 @@ import NichesIndex from "@/pages/tools/niches/NichesIndex";
 import NicheGrader from "@/pages/tools/niches/NicheGrader";
 import Pay from "@/pages/Pay";
 import Report from "@/pages/Report";
+import AffiliateHunter from "@/pages/AffiliateHunter";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } },
@@ -53,6 +54,7 @@ function Router() {
       <Route path="/report/:reportId" component={Report} />
       <Route path="/admin" component={Admin} />
       <Route path="/admin/crm" component={CRM} />
+      <Route path="/admin/affiliate" component={AffiliateHunter} />
       <Route component={NotFound} />
     </Switch>
   );

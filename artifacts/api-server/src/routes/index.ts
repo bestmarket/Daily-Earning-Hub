@@ -12,6 +12,7 @@ import apiKeysRouter from "./api-keys";
 import automationRouter, { startScheduler } from "./automation";
 import brevoRouter from "./brevo";
 import reportsRouter from "./reports";
+import affiliateRouter from "./affiliate";
 
 const router: IRouter = Router();
 
@@ -29,6 +30,7 @@ router.use(automationRouter);
 router.use(brevoRouter);
 // Reports must come before any wildcard routes — public /api/reports/:reportId + admin sub-paths
 router.use(reportsRouter);
+router.use(affiliateRouter);
 
 // Start the automation scheduler (no-op if auto mode is off)
 startScheduler();

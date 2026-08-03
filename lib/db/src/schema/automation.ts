@@ -134,3 +134,44 @@ export const websiteReportsTable = pgTable("website_reports", {
 });
 
 export type WebsiteReport = typeof websiteReportsTable.$inferSelect;
+
+// ─── Affiliate Hunter ──────────────────────────────────────────────────────────
+
+export const affiliateCampaignsTable = pgTable("affiliate_campaigns", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  emailSubject: text("email_subject").notNull().default(""),
+  emailTemplate: text("email_template").notNull().default(""),
+  sendIntervalMinutes: integer("send_interval_minutes").notNull().default(5),
+  // status: draft | running | paused | completed
+  status: text("status").notNull().default("draft"),
+  sentCount: integer("sent_count").notNull().default(0),
+  failedCount: integer("failed_count").notNull().default(0),
+  totalContacts: integer("total_contacts").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const affiliateContactsTable = pgTable("affiliate_contacts", {
+  id: serial("id").primaryKey(),
+  campaignId: integer("campaign_id").notNull(),
+  businessName: text("business_name").notNull().default(""),
+  ownerName: text("owner_name").notNull().default(""),
+  email: text("email").notNull().default(""),
+  phone: text("phone").notNull().default(""),
+  website: text("website").notNull().default(""),
+  city: text("city").notNull().default(""),
+  country: text("country").notNull().default(""),
+  category: text("category").notNull().default(""),
+  // status: pending | sent | failed | skipped
+  status: text("status").notNull().default("pending"),
+  generatedMessage: text("generated_message").notNull().default(""),
+  generatedSubject: text("generated_subject").notNull().default(""),
+  sentAt: timestamp("sent_at"),
+  errorMsg: text("error_msg").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("idx_affiliate_contacts_campaign").on(t.campaignId)]);
+
+export type AffiliateCampaign = typeof affiliateCampaignsTable.$inferSelect;
+export type AffiliateContact = typeof affiliateContactsTable.$inferSelect;

@@ -207,6 +207,12 @@ const CATEGORIES = [
   "IT Services", "Printing & Design Studio", "Web Agency",
   // Religion & Community
   "Church", "Mosque", "Community Center", "NGO / Non-Profit",
+  // Agriculture & Farming
+  "Hobby Farm", "Livestock Feed & Agricultural Suppliers", "Farm Supply Store",
+  "Organic Farm", "Ranch & Livestock Farm",
+  // Automotive — Independent
+  "Auto Repair Shop & Independent Mechanic", "Auto Body Shop", "Tire Shop",
+  "Oil Change & Lube Shop", "Mobile Mechanic",
   "Other",
 ];
 
