@@ -34,6 +34,9 @@ app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// ─── Deployment healthcheck — must respond 200 before the router is entered ───
+app.get("/api", (_req, res) => res.json({ status: "ok" }));
+
 // ─── API routes ───────────────────────────────────────────────────────────────
 app.use("/api", router);
 
