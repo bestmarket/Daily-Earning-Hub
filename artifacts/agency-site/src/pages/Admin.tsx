@@ -197,15 +197,15 @@ export default function Admin() {
               <p className="text-xs text-muted-foreground mt-0.5">Control Center</p>
             </div>
           </div>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => window.open("/", "_blank")}>
-              <Globe className="w-3.5 h-3.5 mr-1.5" /> View Site
+          <div className="flex gap-1.5 sm:gap-2">
+            <Button variant="outline" size="sm" onClick={() => window.open("/", "_blank")} className="px-2 sm:px-3">
+              <Globe className="w-3.5 h-3.5 sm:mr-1.5" /><span className="hidden sm:inline">View Site</span>
             </Button>
-            <Button variant="outline" size="sm" onClick={() => window.open("/admin/crm", "_blank")}>
-              <Bot className="w-3.5 h-3.5 mr-1.5" /> AI Hunter
+            <Button variant="outline" size="sm" onClick={() => window.open("/admin/crm", "_blank")} className="px-2 sm:px-3">
+              <Bot className="w-3.5 h-3.5 sm:mr-1.5" /><span className="hidden sm:inline">AI Hunter</span>
             </Button>
-            <Button variant="ghost" size="sm" onClick={() => { localStorage.removeItem("ds_api_token"); setAuthed(false); setApiToken(""); }}>
-              Logout
+            <Button variant="ghost" size="sm" onClick={() => { localStorage.removeItem("ds_api_token"); setAuthed(false); setApiToken(""); }} className="px-2 sm:px-3">
+              <span className="hidden sm:inline">Logout</span><span className="sm:hidden text-xs">Out</span>
             </Button>
           </div>
         </div>
@@ -2167,7 +2167,7 @@ function AutomationTab({ apiToken }: { apiToken: string }) {
 
       {/* Auto / Manual toggle */}
       <div className="rounded-xl border border-border/50 overflow-hidden">
-        <div className="p-4 bg-muted/20 border-b border-border/50 flex items-center justify-between">
+        <div className="p-4 bg-muted/20 border-b border-border/50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
             <h3 className="font-bold">Automation Mode</h3>
             <p className="text-xs text-muted-foreground mt-0.5">Switch between fully automatic hunting or manual control in the CRM</p>
@@ -2178,8 +2178,8 @@ function AutomationTab({ apiToken }: { apiToken: string }) {
             <span className="text-sm font-medium text-green-700">Auto</span>
           </div>
         </div>
-        <div className="p-4 flex gap-3">
-          <Button onClick={runNow} disabled={runningNow} variant="outline" className="gap-2 font-semibold">
+        <div className="p-4 flex flex-col sm:flex-row gap-3">
+          <Button onClick={runNow} disabled={runningNow} variant="outline" className="gap-2 font-semibold w-full sm:w-auto">
             {runningNow ? <RefreshCw className="w-4 h-4 animate-spin" /> : <PlayCircle className="w-4 h-4 text-green-600" />}
             {runningNow ? "Running…" : "Run Once Now"}
           </Button>
@@ -2193,7 +2193,7 @@ function AutomationTab({ apiToken }: { apiToken: string }) {
           <div className="p-4 bg-muted/20 border-b border-border/50">
             <h3 className="font-bold flex items-center gap-2"><Radar className="w-4 h-4 text-purple-600" /> Hunt Settings</h3>
           </div>
-          <div className="p-4 grid grid-cols-2 gap-4">
+          <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="text-xs font-semibold text-muted-foreground mb-1 block">Business Category</label>
               <Select value={s.huntCategory} onValueChange={v => setSettings(p => p ? { ...p, huntCategory: v } : p)}>
@@ -2337,7 +2337,7 @@ function AutomationTab({ apiToken }: { apiToken: string }) {
             {/* Free providers row */}
             <div>
               <p className="text-xs font-semibold text-green-700 mb-2">✦ Free providers (recommended — no App Password needed)</p>
-              <div className="grid grid-cols-4 gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 {(["brevo","resend","sendgrid","mailjet"] as const).map(id => {
                   const info = PROVIDER_INFO[id];
                   return (
@@ -2354,7 +2354,7 @@ function AutomationTab({ apiToken }: { apiToken: string }) {
             {/* Other providers row */}
             <div>
               <p className="text-xs font-semibold text-muted-foreground mb-2">Other options</p>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-3 gap-2 sm:grid-cols-3">
                 {(["gmail","outlook","smtp"] as const).map(id => {
                   const info = PROVIDER_INFO[id];
                   return (

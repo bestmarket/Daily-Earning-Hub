@@ -405,14 +405,14 @@ function ContactsTab({ campaign, onRefresh }: { campaign: Campaign; onRefresh: (
       </div>
 
       {/* Actions */}
-      <div className="flex flex-wrap items-center gap-3">
-        <Input placeholder="Search contacts…" value={search} onChange={e => setSearch(e.target.value)} className="h-9 max-w-xs" />
-        <div className="ml-auto flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={loadContacts} className="h-8 gap-1">
+      <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+        <Input placeholder="Search contacts…" value={search} onChange={e => setSearch(e.target.value)} className="h-9 w-full sm:max-w-xs" />
+        <div className="flex items-center gap-2 sm:ml-auto">
+          <Button variant="outline" size="sm" onClick={loadContacts} className="h-8 gap-1 flex-shrink-0">
             <RefreshCw className="w-3 h-3" />Refresh
           </Button>
           <Button size="sm" onClick={generateAll} disabled={generating || contacts.length === 0}
-            className="h-8 gap-1 bg-violet-600 hover:bg-violet-700 text-white">
+            className="h-8 gap-1 bg-violet-600 hover:bg-violet-700 text-white flex-1 sm:flex-none">
             {generating ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
             Generate All Messages
           </Button>
@@ -911,33 +911,33 @@ export default function AffiliateHunter() {
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Page header */}
-      <div className="bg-gradient-to-br from-violet-700 via-indigo-700 to-purple-800 text-white px-6 py-6">
+      <div className="bg-gradient-to-br from-violet-700 via-indigo-700 to-purple-800 text-white px-4 sm:px-6 py-5">
         <div className="max-w-7xl mx-auto">
-          <div className="flex items-center gap-4 mb-2">
+          <div className="flex items-center gap-4 mb-3">
             <a href="/admin" className="text-white/60 hover:text-white text-sm transition-colors">← Admin</a>
           </div>
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 bg-white/20 rounded-2xl flex items-center justify-center flex-shrink-0">
-              <Megaphone className="w-6 h-6" />
+          <div className="flex items-start sm:items-center gap-3 sm:gap-4">
+            <div className="w-10 h-10 sm:w-12 sm:h-12 bg-white/20 rounded-2xl flex items-center justify-center flex-shrink-0">
+              <Megaphone className="w-5 h-5 sm:w-6 sm:h-6" />
             </div>
-            <div>
-              <h1 className="text-2xl font-extrabold tracking-tight">Affiliate Hunter</h1>
-              <p className="text-white/75 text-sm mt-0.5">Hunt businesses → import contacts → generate personalised messages → send on autopilot</p>
+            <div className="flex-1 min-w-0">
+              <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight">Affiliate Hunter</h1>
+              <p className="text-white/75 text-xs sm:text-sm mt-0.5 leading-snug">Hunt businesses → import contacts → generate personalised messages → send on autopilot</p>
             </div>
-            <div className="ml-auto">
+            <div className="flex-shrink-0">
               <Button onClick={() => setShowNew(true)}
-                className="bg-white text-violet-700 hover:bg-violet-50 font-bold gap-2">
-                <Plus className="w-4 h-4" />New Campaign
+                className="bg-white text-violet-700 hover:bg-violet-50 font-bold gap-1.5 text-sm px-3 sm:px-4">
+                <Plus className="w-4 h-4" /><span className="hidden xs:inline">New </span>Campaign
               </Button>
             </div>
           </div>
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 py-6">
-        <div className="flex gap-5">
-          {/* Campaign sidebar */}
-          <div className="w-64 flex-shrink-0">
+      <div className="max-w-7xl mx-auto px-3 sm:px-4 py-4 sm:py-6">
+        <div className="flex flex-col md:flex-row gap-4 sm:gap-5">
+          {/* Campaign sidebar — shown on mobile only when no campaign is selected */}
+          <div className={`md:w-64 md:flex-shrink-0 ${selected ? "hidden md:block" : "block w-full"}`}>
             <div className="bg-white border rounded-2xl overflow-hidden shadow-sm">
               <div className="px-4 py-3 border-b bg-gray-50">
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Campaigns</p>
@@ -984,10 +984,10 @@ export default function AffiliateHunter() {
             </div>
           </div>
 
-          {/* Main panel */}
-          <div className="flex-1 min-w-0">
+          {/* Main panel — hidden on mobile when no campaign selected (sidebar shows instead) */}
+          <div className={`flex-1 min-w-0 ${!selected ? "hidden md:block" : "block"}`}>
             {!selected ? (
-              <div className="bg-white border rounded-2xl p-12 text-center shadow-sm">
+              <div className="bg-white border rounded-2xl p-8 sm:p-12 text-center shadow-sm">
                 <Megaphone className="w-14 h-14 mx-auto mb-4 text-gray-200" />
                 <h3 className="text-xl font-extrabold text-gray-700 mb-2">Select a campaign to get started</h3>
                 <p className="text-gray-500 mb-6">Create an affiliate campaign, hunt businesses, add contacts, and send personalised emails automatically.</p>
@@ -998,35 +998,42 @@ export default function AffiliateHunter() {
             ) : (
               <div className="bg-white border rounded-2xl shadow-sm overflow-hidden">
                 {/* Campaign header */}
-                <div className="px-6 py-4 border-b bg-gray-50 flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3 min-w-0">
-                    {editingName ? (
-                      <div className="flex items-center gap-2">
-                        <Input value={nameInput} onChange={e => setNameInput(e.target.value)}
-                          onKeyDown={e => { if (e.key === "Enter") saveName(); if (e.key === "Escape") setEditingName(false); }}
-                          className="h-8 text-sm font-semibold w-56" autoFocus />
-                        <Button size="sm" onClick={saveName} className="h-8 text-xs">Save</Button>
-                        <Button size="sm" variant="ghost" onClick={() => setEditingName(false)} className="h-8 text-xs">Cancel</Button>
-                      </div>
-                    ) : (
-                      <button onClick={() => { setEditingName(true); setNameInput(selected.name); }}
-                        className="text-lg font-extrabold text-gray-800 hover:text-violet-700 transition-colors truncate text-left">
-                        {selected.name}
-                      </button>
-                    )}
-                    <CampaignBadge status={selected.status} />
-                  </div>
-                  <div className="flex items-center gap-4 flex-shrink-0 text-xs text-gray-500">
-                    <span className="flex items-center gap-1"><Users className="w-3.5 h-3.5" />{selected.totalContacts} contacts</span>
-                    <span className="flex items-center gap-1"><Send className="w-3.5 h-3.5" />{selected.sentCount} sent</span>
-                    {selected.failedCount > 0 && <span className="flex items-center gap-1 text-red-500"><AlertTriangle className="w-3.5 h-3.5" />{selected.failedCount} failed</span>}
+                <div className="px-4 sm:px-6 py-3 sm:py-4 border-b bg-gray-50">
+                  {/* Mobile back button */}
+                  <button onClick={() => setSelected(null)}
+                    className="md:hidden flex items-center gap-1 text-xs text-violet-600 font-medium mb-2 hover:text-violet-800 transition-colors">
+                    ← All Campaigns
+                  </button>
+                  <div className="flex flex-wrap items-start sm:items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      {editingName ? (
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Input value={nameInput} onChange={e => setNameInput(e.target.value)}
+                            onKeyDown={e => { if (e.key === "Enter") saveName(); if (e.key === "Escape") setEditingName(false); }}
+                            className="h-8 text-sm font-semibold w-48 sm:w-56" autoFocus />
+                          <Button size="sm" onClick={saveName} className="h-8 text-xs">Save</Button>
+                          <Button size="sm" variant="ghost" onClick={() => setEditingName(false)} className="h-8 text-xs">Cancel</Button>
+                        </div>
+                      ) : (
+                        <button onClick={() => { setEditingName(true); setNameInput(selected.name); }}
+                          className="text-base sm:text-lg font-extrabold text-gray-800 hover:text-violet-700 transition-colors truncate text-left">
+                          {selected.name}
+                        </button>
+                      )}
+                      <CampaignBadge status={selected.status} />
+                    </div>
+                    <div className="flex items-center gap-3 flex-shrink-0 text-xs text-gray-500 flex-wrap">
+                      <span className="flex items-center gap-1"><Users className="w-3.5 h-3.5" />{selected.totalContacts}</span>
+                      <span className="flex items-center gap-1"><Send className="w-3.5 h-3.5" />{selected.sentCount} sent</span>
+                      {selected.failedCount > 0 && <span className="flex items-center gap-1 text-red-500"><AlertTriangle className="w-3.5 h-3.5" />{selected.failedCount} failed</span>}
+                    </div>
                   </div>
                 </div>
 
                 {/* Tabs */}
                 <Tabs value={activeTab} onValueChange={setActiveTab}>
-                  <div className="px-6 pt-4">
-                    <TabsList className="bg-gray-100 rounded-xl p-1">
+                  <div className="px-3 sm:px-6 pt-4">
+                    <TabsList className="bg-gray-100 rounded-xl p-1 w-full sm:w-auto">
                       <TabsTrigger value="hunt" className="rounded-lg text-sm gap-1.5 data-[state=active]:bg-white data-[state=active]:shadow-sm">
                         <Radar className="w-3.5 h-3.5" />Hunt
                       </TabsTrigger>
@@ -1044,7 +1051,7 @@ export default function AffiliateHunter() {
                     </TabsList>
                   </div>
 
-                  <div className="px-6 py-5">
+                  <div className="px-3 sm:px-6 py-4 sm:py-5">
                     <TabsContent value="hunt" className="mt-0">
                       <HuntTab campaignId={selected.id} onImported={loadCampaigns} />
                     </TabsContent>
