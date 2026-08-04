@@ -28,7 +28,7 @@ import {
   CheckCircle2, Clock, Wrench, ExternalLink, Calculator, Brain, TrendingUp, Users,
   Key, Eye, EyeOff, ShieldCheck, Zap, Package, LayoutDashboard,
   Bot, Settings, Globe, Radar, PlayCircle, StopCircle, MailCheck, X,
-  Bell, FileText, BarChart2,
+  Bell, FileText, BarChart2, Megaphone,
 } from "lucide-react";
 import { toast as sonnerToast } from "sonner";
 import API_BASE from "@/lib/api";
@@ -476,6 +476,34 @@ function OverviewTab({ apiToken }: { apiToken: string }) {
             <a href="/admin/crm">
               <Button className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-bold gap-2 hover:from-purple-700 hover:to-indigo-700">
                 <Sparkles className="w-4 h-4" /> Open AI Client Hunter
+              </Button>
+            </a>
+          </div>
+        </div>
+      </div>
+
+      {/* Affiliate Hunter card */}
+      <div className="rounded-2xl border-2 border-emerald-200 bg-gradient-to-r from-emerald-50 to-teal-50 p-6">
+        <div className="flex items-start gap-4">
+          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-emerald-200">
+            <Megaphone className="w-6 h-6 text-white" />
+          </div>
+          <div className="flex-1">
+            <div className="flex items-center gap-2 mb-1">
+              <h3 className="font-extrabold text-lg">Affiliate Hunter</h3>
+              <span className="text-xs font-bold bg-emerald-600 text-white px-2 py-0.5 rounded-full">OUTREACH</span>
+            </div>
+            <p className="text-sm text-muted-foreground mb-3">
+              Hunt local businesses, import contacts, generate AI-personalised emails, and run automated send campaigns — all from one place.
+            </p>
+            <div className="flex flex-wrap gap-2 mb-4">
+              {["Business Hunt","Contact Import","AI Email Templates","Scheduled Sending","Campaign Manager","Live Progress"].map(f => (
+                <span key={f} className="text-xs bg-white border border-emerald-200 text-emerald-700 font-semibold px-2 py-0.5 rounded-full">{f}</span>
+              ))}
+            </div>
+            <a href="/admin/affiliate">
+              <Button className="bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-bold gap-2 hover:from-emerald-700 hover:to-teal-700">
+                <Megaphone className="w-4 h-4" /> Open Affiliate Hunter
               </Button>
             </a>
           </div>
