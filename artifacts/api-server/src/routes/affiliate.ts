@@ -1,7 +1,8 @@
 import { Router } from "express";
 import nodemailer from "nodemailer";
-import { db, emailAccountsTable, affiliateCampaignsTable, affiliateContactsTable } from "@workspace/db";
-import { eq, and, asc, sql } from "drizzle-orm";
+import { randomUUID } from "crypto";
+import { db, emailAccountsTable, affiliateCampaignsTable, affiliateContactsTable, emailTrackingTable } from "@workspace/db";
+import { eq, and, asc, sql, inArray } from "drizzle-orm";
 import { getGeminiAI } from "./api-keys";
 import { requireAdmin } from "../lib/admin-auth";
 
@@ -90,6 +91,35 @@ async function sendEmailWithFailover(opts: { to: string; subject: string; html: 
   throw new Error(lastErr?.message || "Failed after trying all accounts.");
 }
 
+// ─── Tracking helpers (mirrors crm-ai.ts) ────────────────────────────────────
+
+const PIXEL_GIF = Buffer.from(
+  "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7",
+  "base64"
+);
+
+async function createAffiliateTracking(email: string, subject: string): Promise<string> {
+  const trackingId = randomUUID();
+  await db.insert(emailTrackingTable).values({
+    trackingId, prospectEmail: email, subject, emailType: "affiliate",
+  });
+  return trackingId;
+}
+
+function injectAffiliateTracking(html: string, baseUrl: string, trackingId: string): string {
+  const pixelUrl = `${baseUrl}/api/crm/track/open/${trackingId}`;
+  const pixel = `<img src="${pixelUrl}" width="1" height="1" style="display:none;border:0;" alt="" />`;
+  const tracked = html.replace(
+    /<a\s([^>]*?)href="(https?:\/\/[^"]+)"([^>]*?)>/gi,
+    (_match, before, url, after) => {
+      const clickUrl = `${baseUrl}/api/crm/track/click/${trackingId}?url=${encodeURIComponent(url)}`;
+      return `<a ${before}href="${clickUrl}"${after}>`;
+    }
+  );
+  if (tracked.includes("</body>")) return tracked.replace("</body>", `${pixel}</body>`);
+  return tracked + pixel;
+}
+
 // ─── AI / template message generation ─────────────────────────────────────────
 
 function substituteVars(template: string, vars: Record<string, string>) {
@@ -99,7 +129,8 @@ function substituteVars(template: string, vars: Record<string, string>) {
 async function generateMessageForContact(
   template: string,
   subject: string,
-  contact: { businessName: string; ownerName: string; city: string; category: string; website: string }
+  contact: { businessName: string; ownerName: string; city: string; category: string; website: string },
+  affiliateLink?: string,
 ): Promise<{ subject: string; body: string }> {
   // When owner name is unknown, leave the variable blank so the AI fills the
   // greeting naturally rather than copying "Business Owner" verbatim.
@@ -110,6 +141,7 @@ async function generateMessageForContact(
     city: contact.city,
     category: contact.category,
     website: contact.website || "your website",
+    affiliateLink: affiliateLink || "",
   };
 
   // Try AI personalisation first
@@ -118,6 +150,9 @@ async function generateMessageForContact(
     const ownerLine = contact.ownerName
       ? `Owner name: ${contact.ownerName}`
       : `Owner name: unknown — open with "Hi there," or "Hi ${contact.businessName} team," — never write "Hi Business Owner"`;
+    const affiliateLinkLine = affiliateLink
+      ? `Affiliate link to include naturally in the email: ${affiliateLink}`
+      : "";
     const prompt = `You are writing a personalised affiliate outreach email.
 
 Business: ${contact.businessName}
@@ -125,8 +160,9 @@ ${ownerLine}
 Category: ${contact.category}
 City: ${contact.city}
 Website: ${contact.website || "N/A"}
+${affiliateLinkLine}
 
-Use the following template as your guide for tone, length, and style. Personalise it for this specific business — mention their category and city naturally. Keep the email concise (under 200 words). Do not add any meta-commentary.
+Use the following template as your guide for tone, length, and style. Personalise it for this specific business — mention their category and city naturally. Keep the email concise (under 200 words). Do not add any meta-commentary.${affiliateLink ? " Include the affiliate link as a natural call-to-action hyperlink in the email body." : ""}
 
 TEMPLATE:
 ${template}
@@ -203,7 +239,13 @@ async function runSendLoop(campaignId: number, intervalMs: number) {
       }
 
       try {
-        const htmlBody = body.replace(/\n/g, "<br>");
+        // Create tracking entry + inject pixel/link wrapping
+        const proto = process.env.NODE_ENV === "production" ? "https" : "http";
+        const host = process.env.API_BASE_URL || `${proto}://localhost:8080`;
+        const trackingId = await createAffiliateTracking(contact.email, subject);
+        const rawHtml = body.replace(/\n/g, "<br>");
+        const htmlBody = injectAffiliateTracking(rawHtml, host, trackingId);
+
         await sendEmailWithFailover({
           to: contact.email,
           subject,
@@ -211,7 +253,7 @@ async function runSendLoop(campaignId: number, intervalMs: number) {
           text: body,
         });
         await db.update(affiliateContactsTable)
-          .set({ status: "sent", sentAt: new Date(), errorMsg: "" })
+          .set({ status: "sent", sentAt: new Date(), errorMsg: "", trackingId })
           .where(eq(affiliateContactsTable.id, contact.id));
         await db.update(affiliateCampaignsTable)
           .set({ sentCount: sql`${affiliateCampaignsTable.sentCount} + 1`, updatedAt: new Date() })
@@ -254,13 +296,14 @@ router.get("/affiliate/campaigns", requireAdmin, async (_req, res) => {
 });
 
 router.post("/affiliate/campaigns", requireAdmin, async (req, res) => {
-  const { name, description, emailSubject, emailTemplate, sendIntervalMinutes } = req.body as any;
+  const { name, description, emailSubject, emailTemplate, affiliateLink, sendIntervalMinutes } = req.body as any;
   if (!name?.trim()) { res.status(400).json({ error: "name is required" }); return; }
   const [row] = await db.insert(affiliateCampaignsTable).values({
     name: name.trim(),
     description: description?.trim() || "",
     emailSubject: emailSubject?.trim() || "",
     emailTemplate: emailTemplate?.trim() || "",
+    affiliateLink: affiliateLink?.trim() || "",
     sendIntervalMinutes: Number(sendIntervalMinutes) || 5,
   }).returning();
   res.json(row);
@@ -268,12 +311,13 @@ router.post("/affiliate/campaigns", requireAdmin, async (req, res) => {
 
 router.put("/affiliate/campaigns/:id", requireAdmin, async (req, res) => {
   const id = Number(req.params.id);
-  const { name, description, emailSubject, emailTemplate, sendIntervalMinutes } = req.body as any;
+  const { name, description, emailSubject, emailTemplate, affiliateLink, sendIntervalMinutes } = req.body as any;
   const updates: Record<string, any> = { updatedAt: new Date() };
   if (name !== undefined) updates.name = name.trim();
   if (description !== undefined) updates.description = description;
   if (emailSubject !== undefined) updates.emailSubject = emailSubject;
   if (emailTemplate !== undefined) updates.emailTemplate = emailTemplate;
+  if (affiliateLink !== undefined) updates.affiliateLink = affiliateLink;
   if (sendIntervalMinutes !== undefined) updates.sendIntervalMinutes = Number(sendIntervalMinutes) || 5;
   await db.update(affiliateCampaignsTable).set(updates).where(eq(affiliateCampaignsTable.id, id));
   const [row] = await db.select().from(affiliateCampaignsTable).where(eq(affiliateCampaignsTable.id, id)).limit(1);
@@ -377,7 +421,8 @@ router.post("/affiliate/campaigns/:id/generate-messages", requireAdmin, async (r
       const { subject, body } = await generateMessageForContact(
         campaign.emailTemplate,
         campaign.emailSubject,
-        { businessName: contact.businessName, ownerName: contact.ownerName, city: contact.city, category: contact.category, website: contact.website }
+        { businessName: contact.businessName, ownerName: contact.ownerName, city: contact.city, category: contact.category, website: contact.website },
+        campaign.affiliateLink || undefined,
       );
       await db.update(affiliateContactsTable)
         .set({ generatedMessage: body, generatedSubject: subject })
@@ -430,6 +475,31 @@ router.post("/affiliate/campaigns/:id/pause", requireAdmin, async (req, res) => 
   }
   await db.update(affiliateCampaignsTable).set({ status: "paused", updatedAt: new Date() }).where(eq(affiliateCampaignsTable.id, campaignId));
   res.json({ ok: true });
+});
+
+// ─── Analytics — opens + clicks per campaign ──────────────────────────────────
+
+router.get("/affiliate/campaigns/:id/analytics", requireAdmin, async (req, res) => {
+  const campaignId = Number(req.params.id);
+  try {
+    // Get all sent contacts for this campaign that have a trackingId
+    const contacts = await db.select().from(affiliateContactsTable)
+      .where(and(eq(affiliateContactsTable.campaignId, campaignId), eq(affiliateContactsTable.status, "sent")));
+    const trackingIds = contacts.map(c => c.trackingId).filter(Boolean);
+    if (trackingIds.length === 0) { res.json({ opens: 0, clicks: 0, sent: contacts.length, openRate: 0, clickRate: 0 }); return; }
+    const rows = await db.select().from(emailTrackingTable)
+      .where(inArray(emailTrackingTable.trackingId, trackingIds));
+    const opens = rows.reduce((s, r) => s + (r.opens ?? 0), 0);
+    const clicks = rows.reduce((s, r) => s + (r.clicks ?? 0), 0);
+    const uniqueOpens = rows.filter(r => (r.opens ?? 0) > 0).length;
+    const uniqueClicks = rows.filter(r => (r.clicks ?? 0) > 0).length;
+    const sent = contacts.length;
+    res.json({
+      sent, opens, clicks, uniqueOpens, uniqueClicks,
+      openRate: sent > 0 ? Math.round((uniqueOpens / sent) * 100) : 0,
+      clickRate: sent > 0 ? Math.round((uniqueClicks / sent) * 100) : 0,
+    });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
 router.get("/affiliate/campaigns/:id/progress", requireAdmin, async (req, res) => {

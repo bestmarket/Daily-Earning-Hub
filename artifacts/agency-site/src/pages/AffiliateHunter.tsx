@@ -23,11 +23,14 @@ interface Campaign {
   description: string;
   emailSubject: string;
   emailTemplate: string;
+  affiliateLink: string;
   sendIntervalMinutes: number;
   status: "draft" | "running" | "paused" | "completed";
   sentCount: number;
   failedCount: number;
   totalContacts: number;
+  opensCount: number;
+  clicksCount: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -111,6 +114,7 @@ const TEMPLATE_VARS = [
   { key: "{{city}}", label: "City" },
   { key: "{{category}}", label: "Category" },
   { key: "{{website}}", label: "Website" },
+  { key: "{{affiliateLink}}", label: "Affiliate Link" },
 ];
 
 const INTERVAL_OPTIONS = [
@@ -516,18 +520,23 @@ function ContactsTab({ campaign, onRefresh }: { campaign: Campaign; onRefresh: (
 function TemplateTab({ campaign, onSaved }: { campaign: Campaign; onSaved: (updated: Campaign) => void }) {
   const [subject, setSubject] = useState(campaign.emailSubject);
   const [template, setTemplate] = useState(campaign.emailTemplate);
+  const [affiliateLink, setAffiliateLink] = useState(campaign.affiliateLink || "");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
 
-  useEffect(() => { setSubject(campaign.emailSubject); setTemplate(campaign.emailTemplate); }, [campaign]);
+  useEffect(() => {
+    setSubject(campaign.emailSubject);
+    setTemplate(campaign.emailTemplate);
+    setAffiliateLink(campaign.affiliateLink || "");
+  }, [campaign]);
 
   const save = async () => {
     setSaving(true);
     try {
       const updated = await afetch(`/api/affiliate/campaigns/${campaign.id}`, {
         method: "PUT",
-        body: JSON.stringify({ emailSubject: subject, emailTemplate: template }),
+        body: JSON.stringify({ emailSubject: subject, emailTemplate: template, affiliateLink }),
       });
       onSaved(updated);
       setSaved(true);
@@ -579,6 +588,18 @@ Best,
         </div>
       </div>
 
+      {/* Affiliate Link */}
+      <div>
+        <label className="text-sm font-semibold text-gray-700">Affiliate Link <span className="text-gray-400 font-normal">(optional)</span></label>
+        <Input
+          placeholder="https://your-affiliate-link.com/ref=abc123"
+          value={affiliateLink}
+          onChange={e => setAffiliateLink(e.target.value)}
+          className="mt-1 font-mono text-sm"
+        />
+        <p className="text-xs text-gray-400 mt-1">Paste your affiliate URL. The AI will embed it naturally as a call-to-action, and clicks will be tracked. Use <span className="font-mono bg-gray-100 px-1 rounded">{"{{affiliateLink}}"}</span> in the template to place it manually.</p>
+      </div>
+
       {/* Subject */}
       <div>
         <label className="text-sm font-semibold text-gray-700">Email Subject *</label>
@@ -621,8 +642,11 @@ Best,
 
 // ─── Send Tab ─────────────────────────────────────────────────────────────────
 
+interface Analytics { sent: number; opens: number; clicks: number; uniqueOpens: number; uniqueClicks: number; openRate: number; clickRate: number; }
+
 function SendTab({ campaign, onRefresh }: { campaign: Campaign; onRefresh: () => void }) {
   const [progress, setProgress] = useState<Progress | null>(null);
+  const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [loadingProgress, setLoadingProgress] = useState(false);
   const [actioning, setActioning] = useState(false);
   const [interval, setInterval] = useState(String(campaign.sendIntervalMinutes || 5));
@@ -632,8 +656,12 @@ function SendTab({ campaign, onRefresh }: { campaign: Campaign; onRefresh: () =>
   const loadProgress = useCallback(async () => {
     setLoadingProgress(true);
     try {
-      const data = await afetch(`/api/affiliate/campaigns/${campaign.id}/progress`);
+      const [data, analyticsData] = await Promise.all([
+        afetch(`/api/affiliate/campaigns/${campaign.id}/progress`),
+        afetch(`/api/affiliate/campaigns/${campaign.id}/analytics`).catch(() => null),
+      ]);
       setProgress(data);
+      if (analyticsData) setAnalytics(analyticsData);
     } catch { /* silent */ }
     finally { setLoadingProgress(false); }
   }, [campaign.id]);
@@ -729,6 +757,28 @@ function SendTab({ campaign, onRefresh }: { campaign: Campaign; onRefresh: () =>
           </div>
         )}
       </div>
+
+      {/* Opens & Clicks Analytics */}
+      {analytics && analytics.sent > 0 && (
+        <div className="rounded-2xl border border-blue-100 bg-blue-50 p-5 space-y-3">
+          <h4 className="font-bold text-blue-800 flex items-center gap-2">
+            <BarChart3 className="w-4 h-4" /> Email Analytics
+          </h4>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-white rounded-xl p-3 text-center border border-blue-100">
+              <div className="text-2xl font-extrabold text-blue-700">{analytics.openRate}%</div>
+              <div className="text-xs text-gray-500 mt-0.5">Open Rate</div>
+              <div className="text-xs text-gray-400">{analytics.uniqueOpens} of {analytics.sent} opened</div>
+            </div>
+            <div className="bg-white rounded-xl p-3 text-center border border-blue-100">
+              <div className="text-2xl font-extrabold text-violet-700">{analytics.clickRate}%</div>
+              <div className="text-xs text-gray-500 mt-0.5">Click Rate</div>
+              <div className="text-xs text-gray-400">{analytics.uniqueClicks} of {analytics.sent} clicked</div>
+            </div>
+          </div>
+          <p className="text-xs text-blue-600/70">Opens and clicks are tracked in real time. Refresh to update.</p>
+        </div>
+      )}
 
       {/* Controls */}
       <div className="space-y-4">

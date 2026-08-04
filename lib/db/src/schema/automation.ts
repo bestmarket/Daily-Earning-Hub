@@ -143,12 +143,15 @@ export const affiliateCampaignsTable = pgTable("affiliate_campaigns", {
   description: text("description").notNull().default(""),
   emailSubject: text("email_subject").notNull().default(""),
   emailTemplate: text("email_template").notNull().default(""),
+  affiliateLink: text("affiliate_link").notNull().default(""),
   sendIntervalMinutes: integer("send_interval_minutes").notNull().default(5),
   // status: draft | running | paused | completed
   status: text("status").notNull().default("draft"),
   sentCount: integer("sent_count").notNull().default(0),
   failedCount: integer("failed_count").notNull().default(0),
   totalContacts: integer("total_contacts").notNull().default(0),
+  opensCount: integer("opens_count").notNull().default(0),
+  clicksCount: integer("clicks_count").notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -168,6 +171,7 @@ export const affiliateContactsTable = pgTable("affiliate_contacts", {
   status: text("status").notNull().default("pending"),
   generatedMessage: text("generated_message").notNull().default(""),
   generatedSubject: text("generated_subject").notNull().default(""),
+  trackingId: text("tracking_id").notNull().default(""),
   sentAt: timestamp("sent_at"),
   errorMsg: text("error_msg").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
