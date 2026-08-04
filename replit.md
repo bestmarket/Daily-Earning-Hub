@@ -26,7 +26,7 @@ The `Project` run button starts all three workflows in parallel; the Vite dev se
 - ✅ DB schema pushed — `lib/db` schema applied to the Replit-managed PostgreSQL instance
 - ✅ Workflows configured — `API Server` (8080, console), `Start application` (5000, webview), `Tools4Biz` (3000, console)
 - ✅ `SESSION_SECRET` set — used as fallback for `ADMIN_PASSWORD`; admin panels on `/admin` are accessible
-- ⚠️ `ADMIN_PASSWORD` not explicitly set — falls back to `SESSION_SECRET` (works, but set it explicitly for a known password)
+- ✅ `ADMIN_PASSWORD` set — use it to log in to `/admin` on both sites
 - ⚠️ `GOOGLE_GENERATIVE_AI_API_KEY` not yet set — AI analysis and email generation will return 500s without it
 
 ## Stack
