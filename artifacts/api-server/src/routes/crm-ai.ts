@@ -1316,7 +1316,7 @@ router.post("/crm/generate-followup", async (req, res) => {
     const { businessName, ownerName, day, previousContext, agencyName } = req.body as Record<string, string>;
     const prompt = `Write a follow-up message for day ${day || "3"} after initial outreach to ${businessName}.
 Previous context: ${previousContext || "Sent initial cold email about custom software development"}
-Contact: ${ownerName || "Business Owner"}, Agency: ${agencyName || "DevStudio"}
+Contact: ${ownerName ? ownerName : `the owner of ${businessName}`}, Agency: ${agencyName || "DevStudio"}
 Rules: Day 3: gentle, add value or insight. Day 7: different angle, ask a question. Day 14: share a relevant result/case study angle. Day 30: final check-in, door still open. Max 100 words. No "just following up" phrases. Human, genuine, zero pressure.
 Return JSON: { "subject":"string","body":"string","channel":"email" }`;
     const text = await generateText(prompt);

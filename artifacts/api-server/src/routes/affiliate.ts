@@ -101,9 +101,12 @@ async function generateMessageForContact(
   subject: string,
   contact: { businessName: string; ownerName: string; city: string; category: string; website: string }
 ): Promise<{ subject: string; body: string }> {
+  // When owner name is unknown, leave the variable blank so the AI fills the
+  // greeting naturally rather than copying "Business Owner" verbatim.
+  const ownerNameForVars = contact.ownerName || "";
   const vars: Record<string, string> = {
     businessName: contact.businessName,
-    ownerName: contact.ownerName || "Business Owner",
+    ownerName: ownerNameForVars,
     city: contact.city,
     category: contact.category,
     website: contact.website || "your website",
@@ -112,10 +115,13 @@ async function generateMessageForContact(
   // Try AI personalisation first
   try {
     const ai = await getGeminiAI();
+    const ownerLine = contact.ownerName
+      ? `Owner name: ${contact.ownerName}`
+      : `Owner name: unknown — open with "Hi there," or "Hi ${contact.businessName} team," — never write "Hi Business Owner"`;
     const prompt = `You are writing a personalised affiliate outreach email.
 
 Business: ${contact.businessName}
-Owner: ${contact.ownerName || "Business Owner"}  
+${ownerLine}
 Category: ${contact.category}
 City: ${contact.city}
 Website: ${contact.website || "N/A"}
